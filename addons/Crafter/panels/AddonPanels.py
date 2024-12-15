@@ -5,29 +5,37 @@ from ..operators.AddonOperators import ExampleOperator
 from ....common.i18n.i18n import i18n
 
 
-class ExampleAddonPanel(bpy.types.Panel):
-    bl_label = "Example Addon Side Bar Panel"
-    bl_idname = "SCENE_PT_sample"
+class VIEW3D_PT_ImportWorld(bpy.types.Panel):
+    bl_label = "Import World"
     bl_space_type = "VIEW_3D"
     bl_region_type = 'UI'
-    # name of the side panel
-    bl_category = "ExampleAddon"
-
+    bl_category = "Crafter"
     def draw(self, context: bpy.types.Context):
-        addon_prefs = context.preferences.addons[__addon_name__].preferences
 
         layout = self.layout
-
-        layout.label(text=i18n("Example Functions") + ": " + str(addon_prefs.number))
-        layout.prop(addon_prefs, "filepath")
-        layout.separator()
-
         row = layout.row()
-        row.prop(addon_prefs, "number")
-        row.prop(addon_prefs, "boolean")
+        col = row.column()
 
+
+    @classmethod
+    def poll(cls, context: bpy.types.Context):
+        return context.preferences.addons[__addon_name__].preferences.Import_World
+
+class VIEW3D_PT_Materials(bpy.types.Panel):
+    bl_label = "Materials Loader"
+    bl_space_type = "VIEW_3D"
+    bl_region_type = 'UI'
+    bl_category = "Crafter"
+
+    def draw(self, context: bpy.types.Context):
+
+        layout = self.layout
+        row = layout.row()
+        col = row.column()
+
+        layout.label(text=i18n("Plan"))
         layout.operator(ExampleOperator.bl_idname)
 
     @classmethod
     def poll(cls, context: bpy.types.Context):
-        return True
+        return context.preferences.addons[__addon_name__].preferences.Materials_Loader
