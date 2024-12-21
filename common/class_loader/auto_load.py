@@ -10,7 +10,6 @@ __all__ = (
     "init",
     "register",
     "unregister",
-    "preprocess_dictionary",
     "add_properties",
     "remove_properties",
 )
@@ -46,7 +45,6 @@ def register():
 
     for cls in frame_work_classes:
         register_framework_class(cls)
-
 
 def unregister():
     for cls in reversed(ordered_classes):
@@ -198,12 +196,21 @@ def toposort(deps_dict):
     sorted_values = set()
     while len(deps_dict) > 0:
         unsorted = []
+        # class with no dependencies
+        independent = []
         for value, deps in deps_dict.items():
             if len(deps) == 0:
-                sorted_list.append(value)
-                sorted_values.add(value)
+                independent.append(value)
             else:
                 unsorted.append(value)
+
+        # sort no dependencies by _reg_order
+        independent.sort(key=lambda x: getattr(x, "_reg_order", float('inf')))
+        # add to sorted list
+        for value in independent:
+            sorted_list.append(value)
+            sorted_values.add(value)
+
         deps_dict = {value: deps_dict[value] - sorted_values for value in unsorted}
     return sorted_list
 
@@ -240,18 +247,3 @@ def remove_properties(property_dict: dict[typing.Any, dict[str, typing.Any]]):
         for name in properties.keys():
             if hasattr(cls, name):
                 delattr(cls, name)
-
-
-# preprocess dictionary
-def preprocess_dictionary(dictionary):
-    for key in dictionary:
-        invalid_items = {}
-        for translate_key in dictionary[key]:
-            if isinstance(translate_key, str):
-                invalid_items[translate_key] = dictionary[key][translate_key]
-        for invalid_item in invalid_items:
-            translation = invalid_items[invalid_item]
-            dictionary[key][("*", invalid_item)] = translation
-            dictionary[key][("Operator", invalid_item)] = translation
-            del dictionary[key][invalid_item]
-    return dictionary

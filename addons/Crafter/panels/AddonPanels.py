@@ -3,8 +3,8 @@ import bpy
 from ..config import __addon_name__
 from ..operators.AddonOperators import ExampleOperator
 from ....common.i18n.i18n import i18n
-
-
+from ....common.types.framework import reg_order
+@reg_order(0)
 class VIEW3D_PT_ImportWorld(bpy.types.Panel):
     bl_label = "Import World"
     bl_space_type = "VIEW_3D"
@@ -20,7 +20,7 @@ class VIEW3D_PT_ImportWorld(bpy.types.Panel):
     @classmethod
     def poll(cls, context: bpy.types.Context):
         return context.preferences.addons[__addon_name__].preferences.Import_World
-
+@reg_order(1)
 class VIEW3D_PT_Materials(bpy.types.Panel):
     bl_label = "Materials Loader"
     bl_space_type = "VIEW_3D"

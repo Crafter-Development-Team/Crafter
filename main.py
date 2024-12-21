@@ -4,7 +4,7 @@
 import os
 from configparser import ConfigParser
 
-from common.class_loader.module_installer import default_blender_addon_path
+from common.class_loader.module_installer import default_blender_addon_path, normalize_blender_path_by_system
 
 # The name of current active addon to be created, tested or released
 # 要创建、测试或发布的当前活动插件的名称
@@ -13,6 +13,13 @@ ACTIVE_ADDON = "Crafter"
 # The path of the blender executable. Blender2.93 is the minimum version required
 # Blender可执行文件的路径，Blender2.93是所需的最低版本
 BLENDER_EXE_PATH = "C:/Program Files/Blender Foundation/Blender 4.2/blender.exe"
+
+# Linux example Linux示例
+# BLENDER_EXE_PATH = "/usr/local/blender/blender-3.6.0-linux-x64/blender"
+
+# MacOS examplenotice "/Contents/MacOS/Blender" will be appended automatically if you didn't write it explicitly
+# MacOS示例 框架会自动附加"/Contents/MacOS/Blender" 所以您不必写出
+# BLENDER_EXE_PATH = "/Applications/Blender/blender-3.6.0-macOS/Blender.app"
 
 # Are you developing an extension(for Blender4.2) instead of legacy addon?
 # https://docs.blender.org/manual/en/latest/advanced/extensions/addons.html
@@ -68,8 +75,13 @@ if os.path.isfile(CONFIG_FILEPATH):
     if configParser.has_option('default', 'test_release_dir') and configParser.get('default', 'test_release_dir'):
         TEST_RELEASE_DIR = configParser.get('default', 'test_release_dir')
 
+BLENDER_EXE_PATH = normalize_blender_path_by_system(BLENDER_EXE_PATH)
+
+# If you want to override theBLENDER_ADDON_PATH(the path to install addon during testing), uncomment the following line and set the path manually.
+# 如果要覆盖BLENDER_ADDON_PATH(测试插件安装路径)，请取消下一行的注释并手动设置路径
+# BLENDER_ADDON_PATH = ""
+
 # Could not find the blender addon path, raise error. Please set BLENDER_ADDON_PATH manually.
 # 未找到Blender插件路径，引发错误 请手动设置BLENDER_ADDON_PATH
 if os.path.exists(BLENDER_EXE_PATH) and (not BLENDER_ADDON_PATH or not os.path.exists(BLENDER_ADDON_PATH)):
     raise ValueError("Blender addon path not found: " + BLENDER_ADDON_PATH, "Please set the correct path in config.ini")
-
