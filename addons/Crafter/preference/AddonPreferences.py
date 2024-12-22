@@ -24,9 +24,9 @@ class ExampleAddonPreferences(AddonPreferences):
                                default="World path",
                                subtype='DIR_PATH',) # type: ignore
     XYZ_1: IntVectorProperty(name="XYZ-1",
-                             default=(0,0,0),)# type: ignore
+                             default=(-203,-64,-64),)# type: ignore
     XYZ_2: IntVectorProperty(name="XYZ-2",
-                             default=(0,0,0),)# type: ignore
+                             default=(-24,103,227),)# type: ignore
 
 #==========加载材质属性==========
 #==========偏好设置面板==========
