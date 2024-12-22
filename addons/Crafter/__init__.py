@@ -1,5 +1,5 @@
 import bpy
-
+import os
 from .config import __addon_name__
 from .i18n.dictionary import dictionary
 from ...common.class_loader import auto_load
@@ -21,7 +21,8 @@ bl_info = {
     "category": "3D View"
 }
 
-_addon_properties = {}
+_addon_properties = {
+}
 
 
 # You may declare properties like following, framework will automatically add and remove them.
@@ -42,6 +43,7 @@ def register():
     # Internationalization
     load_dictionary(dictionary)
     bpy.app.translations.register(__addon_name__, common_dictionary)
+    # extension_directory = bpy.utils.extension_path_user(__package__, path="", create=True)
 
     print("{} addon is installed.".format(__addon_name__))
 

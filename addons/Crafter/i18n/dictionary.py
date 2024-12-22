@@ -3,15 +3,17 @@ from common.i18n.dictionary import preprocess_dictionary
 dictionary = {
     "zh_CN": {
         "Crafter": "Crafter",
-        "Plan": "方案",
+        #==========面板==========
+            #==========导入世界==========
         "Import World": "导入世界",
-        "Materials Loader": "材质加载器",
-        "ExampleAddon": "示例插件",
-        "Resource Folder": "资源文件夹",
-        "Int Config": "整数参数",
-        "Boolean Config": "布尔参数",
-        "Functions Preferences": "功能偏好",
-        "ExampleOperator": "示例操作",
+        "World path": "存档地址",
+        "XYZ-1":"坐标1",
+        "XYZ-2":"坐标2",
+            #==========加载材质==========
+        "Load Materials": "加载材质",
+        "Plans": "方案",
+        #==========操作解释==========
+        "Import world": "导入世界",
     }
 }
 
