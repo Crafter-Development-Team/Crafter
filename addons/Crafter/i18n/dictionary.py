@@ -9,6 +9,8 @@ dictionary = {
         "World path": "存档地址",
         "XYZ-1":"坐标1",
         "XYZ-2":"坐标2",
+            #==========导入纹理==========
+        "Import Resource": "导入纹理"
             #==========加载材质==========
         "Load Materials": "加载材质",
         "Plans": "方案",
