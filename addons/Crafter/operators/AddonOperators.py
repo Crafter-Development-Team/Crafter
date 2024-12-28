@@ -8,7 +8,7 @@ from ..config import __addon_name__
 class Crafter_Import_World(bpy.types.Operator):
     '''Import world'''
     bl_label = "Import World"
-    bl_idname = "scene.crafter_import_world"
+    bl_idname = "crafter.import_world"
     bl_options = {'REGISTER', 'UNDO'}
 
     @classmethod

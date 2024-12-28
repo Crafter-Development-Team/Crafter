@@ -14,9 +14,13 @@ class ExampleAddonPreferences(AddonPreferences):
     # https://docs.blender.org/api/current/bpy.props.html
     # The name can't be dynamically translated during blender programming running as they are defined
     # when the class is registered, i.e. we need to restart blender for the property name to be correctly translated.
-
+#==========功能显示属性==========
+    Plans: BoolProperty(name="Plans",
+                        default=True,)# type: ignore
     Import_World: BoolProperty(name="Import World",
                                default=True,)# type: ignore
+    Import_Resources: BoolProperty(name="Import Resources",
+                                   default=True,)# type: ignore
     Load_Materials: BoolProperty(name="Load Materials",
                                  default=True,)# type: ignore
 #==========导入世界属性==========
@@ -32,5 +36,7 @@ class ExampleAddonPreferences(AddonPreferences):
 #==========偏好设置面板==========
     def draw(self, context: bpy.types.Context):
         layout = self.layout
+        layout.prop(self, "Plans")
         layout.prop(self, "Import_World")
+        layout.prop(self, "Import_Resources")
         layout.prop(self, "Load_Materials")
