@@ -1,11 +1,15 @@
 import bpy
 import os
+
 from .config import __addon_name__
 from .i18n.dictionary import dictionary
 from ...common.class_loader import auto_load
 from ...common.class_loader.auto_load import add_properties, remove_properties
 from ...common.i18n.dictionary import common_dictionary
 from ...common.i18n.i18n import load_dictionary
+from bpy.props import StringProperty, IntProperty, BoolProperty, IntVectorProperty, EnumProperty, CollectionProperty
+from addons.Crafter.properties import ResourcePlans, ResourcePlansInfo
+
 
 # Add-on info
 bl_info = {
@@ -22,6 +26,13 @@ bl_info = {
 }
 
 _addon_properties = {
+    bpy.types.Scene: {
+#==========导入纹理属性==========
+        "Resources_Plans_List": CollectionProperty(name="Resources Plans",type=ResourcePlans),
+        "Resources_Plans_List_index": IntProperty(name="Resources Plans index",default=0),
+        "Resources_Plans_Info_List": CollectionProperty(name="Resources Plans Info",type=ResourcePlansInfo),
+        "Resources_Plans_Info_List_index": IntProperty(name="Resources Plans Info index",default=0),
+    }
 }
 
 
@@ -45,8 +56,13 @@ def register():
     bpy.app.translations.register(__addon_name__, common_dictionary)
     # extension_directory = bpy.utils.extension_path_user(__package__, path="", create=True)
 
-    print("{} addon is installed.".format(__addon_name__))
+    extension_dir = os.path.dirname(os.path.abspath(__file__))
+    mods_dir = os.path.join(extension_dir, "resourcepacks")
+    os.makedirs(mods_dir, exist_ok=True)
+    materials_dir = os.path.join(extension_dir, "materials")
+    os.makedirs(materials_dir, exist_ok=True)
 
+    print("{} addon is installed.".format(__addon_name__))
 
 def unregister():
     # Internationalization

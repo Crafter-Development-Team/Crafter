@@ -5,10 +5,10 @@ import subprocess
 import threading
 from ..config import __addon_name__
 
-class Crafter_Import_World(bpy.types.Operator):
-    '''Import world'''
+class VIEW3D_OT_CrafterImportWorld(bpy.types.Operator):
     bl_label = "Import World"
     bl_idname = "crafter.import_world"
+    bl_description = "Import world"
     bl_options = {'REGISTER', 'UNDO'}
 
     @classmethod
@@ -92,3 +92,23 @@ class Crafter_Import_World(bpy.types.Operator):
         else:
             self.report({'WARNING'}, f"output.obj not found at {output_obj}")
 
+class VIEW3D_OT_CrafterSetTextureInterpolation(bpy.types.Operator):
+    bl_label = "Set Texture Interpolation"    
+    bl_idname = "crafter.set_texture_interpolation"
+    bl_description = "Set Texture Interpolation"
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        if context.selected_objects and bpy.context.active_object.type == "MESH":
+            return True
+
+    def execute(self, context):
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
+        if context.active_object.type == "MESH":
+            for mat in bpy.context.active_object.data.materials:
+                if mat.node_tree:
+                    for node in mat.node_tree.nodes:
+                        if node.bl_idname == "ShaderNodeTexImage":
+                            node.interpolation = addon_prefs.Texture_Interpolation
+        return {'FINISHED'}
