@@ -29,9 +29,7 @@ _addon_properties = {
     bpy.types.Scene: {
 #==========导入纹理属性==========
         "Resources_Plans_List": CollectionProperty(name="Resources Plans",type=ResourcePlans),
-        "Resources_Plans_List_index": IntProperty(name="Resources Plans index",default=0),
         "Resources_Plans_Info_List": CollectionProperty(name="Resources Plans Info",type=ResourcePlansInfo),
-        "Resources_Plans_Info_List_index": IntProperty(name="Resources Plans Info index",default=0),
     }
 }
 

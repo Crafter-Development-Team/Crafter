@@ -41,8 +41,7 @@ class ExampleAddonPreferences(AddonPreferences):
                                                ("Smart","Smart","Bicubic when magnifying, else bilinear (OSL only)")],
                                         default="Closest",
                                         description="Texture interpolation method.",
-                                        update=lambda self, context: self.update_texture_interpolation(context)
-                                        )# type: ignore
+                                        update=lambda self, context: self.update_texture_interpolation(context))# type: ignore
     Resources_Plans_List_index: IntProperty(name="Resources Plans index",default=0)# type: ignore
     Resources_Plans_Info_List_index: IntProperty(name="Resources Plans Info index",default=0)# type: ignore
 #==========加载材质属性==========
