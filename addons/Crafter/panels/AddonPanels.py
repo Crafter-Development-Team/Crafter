@@ -66,8 +66,8 @@ class VIEW3D_PT_CrafterImportResources(bpy.types.Panel):
         layout = self.layout
         addon_prefs = context.preferences.addons[__addon_name__].preferences
 
-        layout.template_list("VIEW3D_UL_CrafterResources", "", context.scene, "Resources_Plans_List", context.scene, "Resources_Plans_List_index", rows=1)
-        layout.template_list("VIEW3D_UL_CrafterResourcesInfo", "", context.scene, "Resources_Plans_Info_List", context.scene, "Resources_Plans_Info_List_index", rows=1)
+        layout.template_list("VIEW3D_UL_CrafterResources", "", context.scene, "Resources_Plans_List", addon_prefs, "Resources_Plans_List_index", rows=1)
+        layout.template_list("VIEW3D_UL_CrafterResourcesInfo", "", context.scene, "Resources_Plans_Info_List", addon_prefs, "Resources_Plans_Info_List_index", rows=1)
         #layout.operator()
         row_Texture_Interpolation = layout.row(align=True)
         row_Texture_Interpolation.prop(addon_prefs,"Texture_Interpolation")
