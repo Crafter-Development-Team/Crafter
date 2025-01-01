@@ -5,6 +5,7 @@ import subprocess
 import threading
 from ..config import __addon_name__
 
+#==========导入世界操作==========
 class VIEW3D_OT_CrafterImportWorld(bpy.types.Operator):
     bl_label = "Import World"
     bl_idname = "crafter.import_world"
@@ -20,6 +21,7 @@ class VIEW3D_OT_CrafterImportWorld(bpy.types.Operator):
         worldconfig = {
             "worldPath": addon_prefs.World_Path,
             "biomeMappingFile": "config\\mappings\\biomes_mapping.json",
+            "solid": addon_prefs.solid,
             "minX": min(addon_prefs.XYZ_1[0], addon_prefs.XYZ_2[0]),
             "maxX": max(addon_prefs.XYZ_1[0], addon_prefs.XYZ_2[0]),
             "minY": min(addon_prefs.XYZ_1[1], addon_prefs.XYZ_2[1]),
@@ -92,6 +94,38 @@ class VIEW3D_OT_CrafterImportWorld(bpy.types.Operator):
         else:
             self.report({'WARNING'}, f"output.obj not found at {output_obj}")
 
+class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):
+    bl_label = "Import Surface World"
+    bl_idname = "crafter.import_surface_world"
+    bl_description = "Import the surface world"
+    bl_options = {'REGISTER', 'UNDO'}
+    
+    @classmethod
+    def poll(cls, context: bpy.types.Context):
+        return True
+
+    def execute(self, context: bpy.types.Context):
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
+        addon_prefs.solid = 0
+        bpy.ops.crafter.improt_world()
+
+class VIEW3D_OT_CrafterImportSolidArea(bpy.types.Operator):
+    bl_label = "Import Solid Area"
+    bl_idname = "crafter.import_solid_area"
+    bl_description = "Import the solid area"
+    bl_options = {'REGISTER', 'UNDO'}
+    
+    @classmethod
+    def poll(cls, context: bpy.types.Context):
+        return False#完善后开启
+
+    def execute(self, context: bpy.types.Context):
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
+        #这里应该还要删除物体在坐标内的顶点，但时间紧任务重，稍后再写
+        addon_prefs.solid = 1
+        bpy.ops.crafter.improt_world()
+
+#==========导入纹理操作==========
 class VIEW3D_OT_CrafterSetTextureInterpolation(bpy.types.Operator):
     bl_label = "Set Texture Interpolation"    
     bl_idname = "crafter.set_texture_interpolation"

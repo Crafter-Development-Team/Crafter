@@ -1,8 +1,10 @@
 import bpy
+import os
 
 from ..config import __addon_name__
 from ....common.i18n.i18n import i18n
 from ....common.types.framework import reg_order
+from ..__init__ import resourcepacks_dir, materials_dir
 
 @reg_order(0)#==========导入预设面板==========
 class VIEW3D_PT_CrafterPlans(bpy.types.Panel):
@@ -33,12 +35,16 @@ class VIEW3D_PT_CrafterImportWorld(bpy.types.Panel):
         addon_prefs = context.preferences.addons[__addon_name__].preferences
 
         layout.prop(addon_prefs, "World_Path")
+
         cul_XYZ = layout.column(align=True)
         row_XYZ1 = cul_XYZ.row()
         row_XYZ1.prop(addon_prefs, "XYZ_1")
         row_XYZ2 = cul_XYZ.row()
         row_XYZ2.prop(addon_prefs, "XYZ_2")
-        layout.operator("crafter.import_world")
+        
+        row_ImportWorld = layout.row()
+        row_ImportWorld.operator("crafter.import_surface_world",text=i18n("Import World"))
+        row_ImportWorld.operator("crafter.import_solid_area",text=i18n("Import Editable Area"))
 
     @classmethod
     def poll(cls, context: bpy.types.Context):
@@ -66,6 +72,7 @@ class VIEW3D_PT_CrafterImportResources(bpy.types.Panel):
         layout = self.layout
         addon_prefs = context.preferences.addons[__addon_name__].preferences
 
+        # context.scene.Resources_Plans_List = [entry for entry in os.listdir(resourcepacks_dir) if os.path.isdir(os.path.join(resourcepacks_dir, entry))]
         layout.template_list("VIEW3D_UL_CrafterResources", "", context.scene, "Resources_Plans_List", addon_prefs, "Resources_Plans_List_index", rows=1)
         layout.template_list("VIEW3D_UL_CrafterResourcesInfo", "", context.scene, "Resources_Plans_Info_List", addon_prefs, "Resources_Plans_Info_List_index", rows=1)
         #layout.operator()
@@ -87,8 +94,6 @@ class VIEW3D_PT_Materials(bpy.types.Panel):
     def draw(self, context: bpy.types.Context):
 
         layout = self.layout
-        row = layout.row()
-        col = row.column()
 
         layout.label(text=i18n("Plans"))
 

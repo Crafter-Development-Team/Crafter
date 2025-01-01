@@ -33,6 +33,8 @@ class ExampleAddonPreferences(AddonPreferences):
     XYZ_2: IntVectorProperty(name="XYZ-2",
                              default=(0,0,0),
                              description="Ending coordinates")# type: ignore
+    solid: IntProperty(name="Solid",
+                       default=0,)# type: ignore
 #==========导入纹理属性==========
     Texture_Interpolation: EnumProperty(name="Texture Interpolation",
                                         items=[("Linear","Linear","Linear interpolation"),

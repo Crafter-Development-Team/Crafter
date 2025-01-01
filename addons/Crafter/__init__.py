@@ -43,6 +43,14 @@ _addon_properties = {
 #     },
 # }
 
+#==========初始化cafter_data地址==========
+extension_dir = os.path.dirname(os.path.abspath(__file__))
+extensions_dir = os.path.dirname(extension_dir)
+cafter_data_dir = os.path.join(extensions_dir, "cafter_data")
+resourcepacks_dir = os.path.join(cafter_data_dir, "resourcepacks")
+materials_dir = os.path.join(cafter_data_dir, "materials")
+
+#==========注册==========
 def register():
     # Register classes
     auto_load.init()
@@ -52,16 +60,16 @@ def register():
     # Internationalization
     load_dictionary(dictionary)
     bpy.app.translations.register(__addon_name__, common_dictionary)
-    # extension_directory = bpy.utils.extension_path_user(__package__, path="", create=True)
 
-    extension_dir = os.path.dirname(os.path.abspath(__file__))
-    mods_dir = os.path.join(extension_dir, "resourcepacks")
-    os.makedirs(mods_dir, exist_ok=True)
-    materials_dir = os.path.join(extension_dir, "materials")
+    #==========初始化cafter_data文件夹==========
+    os.makedirs(cafter_data_dir, exist_ok=True)
+    os.makedirs(resourcepacks_dir, exist_ok=True)
     os.makedirs(materials_dir, exist_ok=True)
+    print("cafter_data文件夹初始化完成,地址：" + cafter_data_dir)
 
     print("{} addon is installed.".format(__addon_name__))
 
+#==========注销==========
 def unregister():
     # Internationalization
     bpy.app.translations.unregister(__addon_name__)
