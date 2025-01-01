@@ -4,7 +4,6 @@ import os
 from ..config import __addon_name__
 from ....common.i18n.i18n import i18n
 from ....common.types.framework import reg_order
-from ..__init__ import resourcepacks_dir, materials_dir
 
 @reg_order(0)#==========导入预设面板==========
 class VIEW3D_PT_CrafterPlans(bpy.types.Panel):
@@ -72,8 +71,9 @@ class VIEW3D_PT_CrafterImportResources(bpy.types.Panel):
         layout = self.layout
         addon_prefs = context.preferences.addons[__addon_name__].preferences
 
-        # context.scene.Resources_Plans_List = [entry for entry in os.listdir(resourcepacks_dir) if os.path.isdir(os.path.join(resourcepacks_dir, entry))]
-        layout.template_list("VIEW3D_UL_CrafterResources", "", context.scene, "Resources_Plans_List", addon_prefs, "Resources_Plans_List_index", rows=1)
+        row_Plans_List = layout.row()
+        row_Plans_List.template_list("VIEW3D_UL_CrafterResources", "", context.scene, "Resources_Plans_List", addon_prefs, "Resources_Plans_List_index", rows=1)
+        row_Plans_List.operator("crafter.reload_resources_plans",icon="FILE_REFRESH",text="")
         layout.template_list("VIEW3D_UL_CrafterResourcesInfo", "", context.scene, "Resources_Plans_Info_List", addon_prefs, "Resources_Plans_Info_List_index", rows=1)
         #layout.operator()
         row_Texture_Interpolation = layout.row(align=True)

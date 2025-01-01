@@ -13,6 +13,7 @@ dictionary = {
         "XYZ-2":"坐标2",
             #==========导入纹理==========
         "Import Resources":"导入纹理",
+        "original":"原版",
         "Texture Interpolation":"纹理插值",
         "Set Texture Interpolation":"设置纹理插值",
             #==========加载材质==========
@@ -23,6 +24,7 @@ dictionary = {
         "Import the solid area":"导入实心区域",
         "Starting coordinates":"起始坐标",
         "Ending coordinates":"结束坐标",
+        "Reload resources plans":"刷新纹理方案",
     }
 }
 

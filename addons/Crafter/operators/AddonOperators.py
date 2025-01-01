@@ -4,6 +4,7 @@ import time
 import subprocess
 import threading
 from ..config import __addon_name__
+from ..__init__ import resourcepacks_dir, materials_dir
 
 #==========导入世界操作==========
 class VIEW3D_OT_CrafterImportWorld(bpy.types.Operator):
@@ -108,6 +109,7 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):
         addon_prefs = context.preferences.addons[__addon_name__].preferences
         addon_prefs.solid = 0
         bpy.ops.crafter.improt_world()
+        return {'FINISHED'}
 
 class VIEW3D_OT_CrafterImportSolidArea(bpy.types.Operator):
     bl_label = "Import Solid Area"
@@ -124,8 +126,27 @@ class VIEW3D_OT_CrafterImportSolidArea(bpy.types.Operator):
         #这里应该还要删除物体在坐标内的顶点，但时间紧任务重，稍后再写
         addon_prefs.solid = 1
         bpy.ops.crafter.improt_world()
+        return {'FINISHED'}
 
 #==========导入纹理操作==========
+class VIEW3D_OT_CrafterReloadResourcesPlans(bpy.types.Operator):
+    bl_label = "Reload Resources Plans"
+    bl_idname = "crafter.reload_resources_plans"
+    bl_description = "Reload resources plans"
+    bl_options = {'REGISTER'}
+    
+    @classmethod
+    def poll(cls, context: bpy.types.Context):
+        return True
+
+    def execute(self, context: bpy.types.Context):
+        context.scene.Resources_Plans_List.clear()
+        for folder in os.listdir(resourcepacks_dir):
+            if os.path.isdir(os.path.join(resourcepacks_dir, folder)):
+                plan_name = context.scene.Resources_Plans_List.add()
+                plan_name.name = folder
+        return {'FINISHED'}
+
 class VIEW3D_OT_CrafterSetTextureInterpolation(bpy.types.Operator):
     bl_label = "Set Texture Interpolation"    
     bl_idname = "crafter.set_texture_interpolation"

@@ -48,6 +48,7 @@ extension_dir = os.path.dirname(os.path.abspath(__file__))
 extensions_dir = os.path.dirname(extension_dir)
 cafter_data_dir = os.path.join(extensions_dir, "cafter_data")
 resourcepacks_dir = os.path.join(cafter_data_dir, "resourcepacks")
+original_dir = os.path.join(resourcepacks_dir, "original")
 materials_dir = os.path.join(cafter_data_dir, "materials")
 
 #==========注册==========
@@ -64,8 +65,12 @@ def register():
     #==========初始化cafter_data文件夹==========
     os.makedirs(cafter_data_dir, exist_ok=True)
     os.makedirs(resourcepacks_dir, exist_ok=True)
+    os.makedirs(original_dir, exist_ok=True)
     os.makedirs(materials_dir, exist_ok=True)
     print("cafter_data文件夹初始化完成,地址：" + cafter_data_dir)
+
+    #==========刷新UIList==========
+    bpy.ops.crafter.reload_resources_plans
 
     print("{} addon is installed.".format(__addon_name__))
 
