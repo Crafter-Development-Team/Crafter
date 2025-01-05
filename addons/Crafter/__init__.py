@@ -1,5 +1,6 @@
 import bpy
 import os
+import shutil
 
 from .config import __addon_name__
 from .i18n.dictionary import dictionary
@@ -43,10 +44,16 @@ _addon_properties = {
 #==========初始化cafter_data地址==========
 extension_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 extensions_dir = os.path.dirname(extension_dir)
+defaults_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "defaults")
+defaults_materials_dir = os.path.join(defaults_dir, "materials")
+defaults_classification_basis_dir = os.path.join(defaults_dir, "classification basis")
+
 cafter_data_dir = os.path.join(extensions_dir, "cafter_data")
 resourcepacks_dir = os.path.join(cafter_data_dir, "resourcepacks")
 original_dir = os.path.join(resourcepacks_dir, "original")
 materials_dir = os.path.join(cafter_data_dir, "materials")
+classification_basis_dir = os.path.join(cafter_data_dir, "classification basis")
+classification_basis_default_dir = os.path.join(classification_basis_dir, "default")
 
 #==========注册==========
 def register():
@@ -64,10 +71,25 @@ def register():
     os.makedirs(resourcepacks_dir, exist_ok=True)
     os.makedirs(original_dir, exist_ok=True)
     os.makedirs(materials_dir, exist_ok=True)
+    os.makedirs(classification_basis_dir, exist_ok=True)
+    os.makedirs(classification_basis_default_dir, exist_ok=True)
+
     print("cafter_data文件夹初始化完成,地址：" + cafter_data_dir)
+    #==========初始化默认方案==========
+    for filename in os.listdir(defaults_materials_dir):
+        src_file = os.path.join(defaults_materials_dir, filename)
+        dest_file = os.path.join(materials_dir, filename)
+        shutil.copy(src_file, dest_file)
+        print("材质"+filename+"初始化完成")
+    for filename in os.listdir(defaults_classification_basis_dir):
+        src_file = os.path.join(defaults_classification_basis_dir, filename)
+        dest_file = os.path.join(classification_basis_default_dir, filename)
+        shutil.copy(src_file, dest_file)
+        print("分类依据"+filename+"初始化完成")
 
     #==========刷新UIList==========
     bpy.ops.crafter.reload_resources_plans
+    bpy.ops.crafter.reload_materials
 
     print("{} addon is installed.".format(__addon_name__))
 
