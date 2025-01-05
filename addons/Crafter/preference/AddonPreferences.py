@@ -1,12 +1,13 @@
 import os
 
 import bpy
-from bpy.props import StringProperty, IntProperty, BoolProperty, IntVectorProperty, EnumProperty
+from bpy.props import StringProperty, IntProperty, BoolProperty, IntVectorProperty, EnumProperty, CollectionProperty
 from bpy.types import AddonPreferences
 from ..config import __addon_name__
+from ..properties import ResourcePlan, ResourcePlansInfo, Material
 
 
-class ExampleAddonPreferences(AddonPreferences):
+class AddonPreferences(AddonPreferences):
     # this must match the add-on name (the folder name of the unzipped file)
     bl_idname = __addon_name__
 
@@ -44,10 +45,13 @@ class ExampleAddonPreferences(AddonPreferences):
                                         default="Closest",
                                         description="Texture interpolation method.",
                                         update=lambda self, context: self.update_texture_interpolation(context))# type: ignore
+    Resources_Plans_List: CollectionProperty(name="Resources Plans",type=ResourcePlan)#type: ignore
     Resources_Plans_List_index: IntProperty(name="Resources Plans index",default=0)# type: ignore
+    Resources_Plans_Info_List: CollectionProperty(name="Resources Plans Info",type=ResourcePlansInfo)# type: ignore
     Resources_Plans_Info_List_index: IntProperty(name="Resources Plans Info index",default=0)# type: ignore
 #==========加载材质属性==========
-
+    Materials_List: CollectionProperty(name="Materials",type=Material)#type: ignore
+    Materials_List_index: IntProperty(name="Materials index",default=0)# type: ignore
 #==========偏好设置面板==========
     def draw(self, context: bpy.types.Context):
         layout = self.layout

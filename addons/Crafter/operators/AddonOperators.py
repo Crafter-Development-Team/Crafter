@@ -3,11 +3,21 @@ import os
 import time
 import subprocess
 import threading
+import platform
 from ..config import __addon_name__
 from ..__init__ import resourcepacks_dir, materials_dir
 
+#==========通用操作==========
+def open_folder(folder_path: str):
+    if platform.system() == "Windows":
+        os.startfile(folder_path)
+    elif platform.system() == "Darwin":  # MacOS
+        subprocess.run(["open", folder_path])
+    else:  # Linux
+        subprocess.run(["xdg-open", folder_path])
+
 #==========导入世界操作==========
-class VIEW3D_OT_CrafterImportWorld(bpy.types.Operator):
+class VIEW3D_OT_CrafterImportWorld(bpy.types.Operator):#导入世界
     bl_label = "Import World"
     bl_idname = "crafter.import_world"
     bl_description = "Import world"
@@ -95,7 +105,7 @@ class VIEW3D_OT_CrafterImportWorld(bpy.types.Operator):
         else:
             self.report({'WARNING'}, f"output.obj not found at {output_obj}")
 
-class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):
+class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世界
     bl_label = "Import Surface World"
     bl_idname = "crafter.import_surface_world"
     bl_description = "Import the surface world"
@@ -111,7 +121,7 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):
         bpy.ops.crafter.improt_world()
         return {'FINISHED'}
 
-class VIEW3D_OT_CrafterImportSolidArea(bpy.types.Operator):
+class VIEW3D_OT_CrafterImportSolidArea(bpy.types.Operator):#导入可编辑区域==========未完善==========
     bl_label = "Import Solid Area"
     bl_idname = "crafter.import_solid_area"
     bl_description = "Import the solid area"
@@ -129,7 +139,23 @@ class VIEW3D_OT_CrafterImportSolidArea(bpy.types.Operator):
         return {'FINISHED'}
 
 #==========导入纹理操作==========
-class VIEW3D_OT_CrafterReloadResourcesPlans(bpy.types.Operator):
+class VIEW3D_OT_CrafterOpenResourcesPlans(bpy.types.Operator):#打开纹理包列表文件夹
+    bl_label = "Open Resources Plans"
+    bl_idname = "crafter.open_resources_plans"
+    bl_description = "Open resources plans"
+    bl_options = {'REGISTER'}
+    
+    @classmethod
+    def poll(cls, context: bpy.types.Context):
+        return True
+
+    def execute(self, context: bpy.types.Context):
+        folder_path = resourcepacks_dir
+        open_folder(folder_path)
+
+        return {'FINISHED'}
+
+class VIEW3D_OT_CrafterReloadResourcesPlans(bpy.types.Operator):#刷新纹理包列表
     bl_label = "Reload Resources Plans"
     bl_idname = "crafter.reload_resources_plans"
     bl_description = "Reload resources plans"
@@ -140,14 +166,16 @@ class VIEW3D_OT_CrafterReloadResourcesPlans(bpy.types.Operator):
         return True
 
     def execute(self, context: bpy.types.Context):
-        context.scene.Resources_Plans_List.clear()
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
+
+        addon_prefs.Resources_Plans_List.clear()
         for folder in os.listdir(resourcepacks_dir):
             if os.path.isdir(os.path.join(resourcepacks_dir, folder)):
-                plan_name = context.scene.Resources_Plans_List.add()
+                plan_name = addon_prefs.Resources_Plans_List.add()
                 plan_name.name = folder
         return {'FINISHED'}
 
-class VIEW3D_OT_CrafterSetTextureInterpolation(bpy.types.Operator):
+class VIEW3D_OT_CrafterSetTextureInterpolation(bpy.types.Operator):#设置纹理插值
     bl_label = "Set Texture Interpolation"    
     bl_idname = "crafter.set_texture_interpolation"
     bl_description = "Set Texture Interpolation"
@@ -167,3 +195,44 @@ class VIEW3D_OT_CrafterSetTextureInterpolation(bpy.types.Operator):
                         if node.bl_idname == "ShaderNodeTexImage":
                             node.interpolation = addon_prefs.Texture_Interpolation
         return {'FINISHED'}
+
+#==========加载材质操作==========
+class VIEW3D_OT_CrafterOpenMaterials(bpy.types.Operator):#打开材质列表文件夹
+    bl_label = "Open Materials"
+    bl_idname = "crafter.open_materials"
+    bl_description = "Open materials"
+    bl_options = {'REGISTER'}
+    
+    @classmethod
+    def poll(cls, context: bpy.types.Context):
+        return True
+
+    def execute(self, context: bpy.types.Context):
+        folder_path = materials_dir
+        open_folder(folder_path)
+
+        return {'FINISHED'}
+
+class VIEW3D_OT_CrafterReloadMaterials(bpy.types.Operator):#刷新纹理包列表
+    bl_label = "Reload Materials"
+    bl_idname = "crafter.reload_materials"
+    bl_description = "Reload materials"
+    bl_options = {'REGISTER'}
+    
+    @classmethod
+    def poll(cls, context: bpy.types.Context):
+        return True
+
+    def execute(self, context: bpy.types.Context):
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
+
+        addon_prefs.Materials_List.clear()
+        for folder in os.listdir(materials_dir):
+            base, extension = os.path.splitext(folder)
+            if extension == ".blend":
+                material_name = addon_prefs.Materials_List.add()
+                material_name.name = base
+        return {'FINISHED'}
+
+
+

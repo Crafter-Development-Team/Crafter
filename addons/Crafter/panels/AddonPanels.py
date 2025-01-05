@@ -72,10 +72,13 @@ class VIEW3D_PT_CrafterImportResources(bpy.types.Panel):
         addon_prefs = context.preferences.addons[__addon_name__].preferences
 
         row_Plans_List = layout.row()
-        row_Plans_List.template_list("VIEW3D_UL_CrafterResources", "", context.scene, "Resources_Plans_List", addon_prefs, "Resources_Plans_List_index", rows=1)
-        row_Plans_List.operator("crafter.reload_resources_plans",icon="FILE_REFRESH",text="")
-        layout.template_list("VIEW3D_UL_CrafterResourcesInfo", "", context.scene, "Resources_Plans_Info_List", addon_prefs, "Resources_Plans_Info_List_index", rows=1)
-        #layout.operator()
+        row_Plans_List.template_list("VIEW3D_UL_CrafterResources", "", addon_prefs, "Resources_Plans_List", addon_prefs, "Resources_Plans_List_index", rows=1)
+        col_Plans_List_ops = row_Plans_List.column()
+        col_Plans_List_ops.operator("crafter.open_resources_plans",icon="FILE_FOLDER",text="")
+        col_Plans_List_ops.operator("crafter.reload_resources_plans",icon="FILE_REFRESH",text="")
+
+        layout.template_list("VIEW3D_UL_CrafterResourcesInfo", "", addon_prefs, "Resources_Plans_Info_List", addon_prefs, "Resources_Plans_Info_List_index", rows=1)
+        
         row_Texture_Interpolation = layout.row(align=True)
         row_Texture_Interpolation.prop(addon_prefs,"Texture_Interpolation")
         row_Texture_Interpolation.operator("crafter.set_texture_interpolation")
@@ -84,6 +87,11 @@ class VIEW3D_PT_CrafterImportResources(bpy.types.Panel):
     def poll(cls, context: bpy.types.Context):
         return context.preferences.addons[__addon_name__].preferences.Import_Resources
 
+#==========加载材质列表==========
+class VIEW3D_UL_CrafterMaterials(bpy.types.UIList):
+    def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
+        if self.layout_type in {"DEFAULT","COMPACT"}:
+            layout.label(text=item.name)
 @reg_order(3)#==========加载材质面板==========
 class VIEW3D_PT_Materials(bpy.types.Panel):
     bl_label = "Load Materials"
@@ -94,8 +102,13 @@ class VIEW3D_PT_Materials(bpy.types.Panel):
     def draw(self, context: bpy.types.Context):
 
         layout = self.layout
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
 
-        layout.label(text=i18n("Plans"))
+        row_Materials_List = layout.row()
+        row_Materials_List.template_list("VIEW3D_UL_CrafterMaterials", "", addon_prefs, "Materials_List", addon_prefs, "Materials_List_index", rows=1)
+        col_Materials_List_ops = row_Materials_List.column()
+        col_Materials_List_ops.operator("crafter.open_materials",icon="FILE_FOLDER",text="")
+        col_Materials_List_ops.operator("crafter.reload_materials",icon="FILE_REFRESH",text="")
 
     @classmethod
     def poll(cls, context: bpy.types.Context):

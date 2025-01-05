@@ -8,7 +8,7 @@ from ...common.class_loader.auto_load import add_properties, remove_properties
 from ...common.i18n.dictionary import common_dictionary
 from ...common.i18n.i18n import load_dictionary
 from bpy.props import StringProperty, IntProperty, BoolProperty, IntVectorProperty, EnumProperty, CollectionProperty
-from addons.Crafter.properties import ResourcePlans, ResourcePlansInfo
+from .properties import ResourcePlan, ResourcePlansInfo, Material
 
 
 # Add-on info
@@ -27,9 +27,6 @@ bl_info = {
 
 _addon_properties = {
     bpy.types.Scene: {
-#==========导入纹理属性==========
-        "Resources_Plans_List": CollectionProperty(name="Resources Plans",type=ResourcePlans),
-        "Resources_Plans_Info_List": CollectionProperty(name="Resources Plans Info",type=ResourcePlansInfo),
     }
 }
 
@@ -44,7 +41,7 @@ _addon_properties = {
 # }
 
 #==========初始化cafter_data地址==========
-extension_dir = os.path.dirname(os.path.abspath(__file__))
+extension_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 extensions_dir = os.path.dirname(extension_dir)
 cafter_data_dir = os.path.join(extensions_dir, "cafter_data")
 resourcepacks_dir = os.path.join(cafter_data_dir, "resourcepacks")

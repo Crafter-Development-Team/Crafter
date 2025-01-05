@@ -2,11 +2,16 @@ import bpy
 from bpy.props import StringProperty
 
 #==========导入纹理属性==========
-class ResourcePlans(bpy.types.PropertyGroup):
-    Resources_Plans: StringProperty(name="Resources_Plans_Name",
+class ResourcePlan(bpy.types.PropertyGroup):
+    Resources_Plan: StringProperty(name="Resources Plan",
                                     # subtype="DIR_PATH"
                                     )# type: ignore
 class ResourcePlansInfo(bpy.types.PropertyGroup):
-    Resources: StringProperty(name="Resources_Plans_Name",
+    Resource: StringProperty(name="Resource",
+                            #   subtype="DIR_PATH"
+                              )# type: ignore
+#==========导入材质属性==========
+class Material(bpy.types.PropertyGroup):
+    Material: StringProperty(name="Material",
                             #   subtype="DIR_PATH"
                               )# type: ignore
