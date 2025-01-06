@@ -18,14 +18,18 @@ dictionary = {
         "Open Resources Plans":"打开纹理包预设列表文件夹",
         "Reload Resources Plans":"刷新纹理预设列表",
         "Texture Interpolation":"纹理插值",
-        "Texture interpolation method.":"纹理插值类型",
+        "Texture interpolation method":"纹理插值类型",
         "Set Texture Interpolation":"设置纹理插值",
             #==========加载材质==========
         "Load Materials":"加载材质",
+        "Materials index":"材质索引",
         "Open Materials":"打开材质文件夹",
         "Reload Materials":"刷新材质列表",
+        "Classification Basis":"材质分类依据",
+        "default":"默认",
+        "Open Classification Basis":"打开材质分类依据文件夹",
         
-        #==========操作解释==========
+        #==========操作介绍==========
             #==========导入世界==========
         "Import world":"导入世界",
         "Import the surface world":"导入表面世界",
@@ -33,11 +37,9 @@ dictionary = {
         "Starting coordinates":"起始坐标",
         "Ending coordinates":"结束坐标",
             #==========导入纹理==========
-        "Reload resources plans":"刷新纹理预设列表",
-        "Open resources plans":"打开纹理包预设列表文件夹",
+        "Set texture interpolation":"设置纹理插值",
             #==========加载材质==========
-        "Open materials":"打开材质文件夹",
-        "Reload materials":"刷新材质列表",
+        "Classification basis":"材质分类依据",
     }
 }
 

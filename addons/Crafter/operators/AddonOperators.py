@@ -5,7 +5,7 @@ import subprocess
 import threading
 import platform
 from ..config import __addon_name__
-from ..__init__ import resourcepacks_dir, materials_dir
+from ..__init__ import resourcepacks_dir, materials_dir, classification_basis_dir
 
 #==========通用操作==========
 def open_folder(folder_path: str):
@@ -142,7 +142,7 @@ class VIEW3D_OT_CrafterImportSolidArea(bpy.types.Operator):#导入可编辑区�
 class VIEW3D_OT_CrafterOpenResourcesPlans(bpy.types.Operator):#打开纹理包列表文件夹
     bl_label = "Open Resources Plans"
     bl_idname = "crafter.open_resources_plans"
-    bl_description = "Open resources plans"
+    bl_description = " "
     bl_options = {'REGISTER'}
     
     @classmethod
@@ -158,7 +158,7 @@ class VIEW3D_OT_CrafterOpenResourcesPlans(bpy.types.Operator):#打开纹理包�
 class VIEW3D_OT_CrafterReloadResourcesPlans(bpy.types.Operator):#刷新纹理包列表
     bl_label = "Reload Resources Plans"
     bl_idname = "crafter.reload_resources_plans"
-    bl_description = "Reload resources plans"
+    bl_description = " "
     bl_options = {'REGISTER'}
     
     @classmethod
@@ -200,7 +200,7 @@ class VIEW3D_OT_CrafterSetTextureInterpolation(bpy.types.Operator):#设置纹理
 class VIEW3D_OT_CrafterOpenMaterials(bpy.types.Operator):#打开材质列表文件夹
     bl_label = "Open Materials"
     bl_idname = "crafter.open_materials"
-    bl_description = "Open materials"
+    bl_description = " "
     bl_options = {'REGISTER'}
     
     @classmethod
@@ -216,7 +216,7 @@ class VIEW3D_OT_CrafterOpenMaterials(bpy.types.Operator):#打开材质列表文�
 class VIEW3D_OT_CrafterReloadMaterials(bpy.types.Operator):#刷新纹理包列表
     bl_label = "Reload Materials"
     bl_idname = "crafter.reload_materials"
-    bl_description = "Reload materials"
+    bl_description = " "
     bl_options = {'REGISTER'}
     
     @classmethod
@@ -234,5 +234,42 @@ class VIEW3D_OT_CrafterReloadMaterials(bpy.types.Operator):#刷新纹理包列�
                 material_name.name = base
         return {'FINISHED'}
 
+class VIEW3D_OT_CrafterOpenClassificationBasis(bpy.types.Operator):#打开分类依据文件夹
+    bl_label = "Open Classification Basis"
+    bl_idname = "crafter.open_classification_basis"
+    bl_description = " "
+    bl_options = {'REGISTER'}
+    
+    @classmethod
+    def poll(cls, context: bpy.types.Context):
+        return True
+
+    def execute(self, context: bpy.types.Context):
+        folder_path = classification_basis_dir
+        open_folder(folder_path)
+
+        return {'FINISHED'}
+
+
+class VIEW3D_OT_CrafterReloadClassificationBasis(bpy.types.Operator):#刷新分类依据菜单
+    bl_label = "Reload Classification Basis"
+    bl_idname = "crafter.reload_classification_basis"
+    bl_description = " "
+    bl_options = {'REGISTER'}
+    
+    @classmethod
+    def poll(cls, context: bpy.types.Context):
+        return True
+
+    def execute(self, context: bpy.types.Context):
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
+
+        addon_prefs.Classification_Basis_list.clear()
+        for folder in os.listdir(classification_basis_dir):
+            if os.path.isdir(os.path.join(classification_basis_dir, folder)):
+                plan_name = addon_prefs.Classification_Basis_list.add()
+                plan_name.name = folder
+
+        return {'FINISHED'}
 
 

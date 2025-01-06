@@ -4,10 +4,10 @@ import bpy
 from bpy.props import StringProperty, IntProperty, BoolProperty, IntVectorProperty, EnumProperty, CollectionProperty
 from bpy.types import AddonPreferences
 from ..config import __addon_name__
-from ..properties import ResourcePlan, ResourcePlansInfo, Material
+from ..properties import ResourcePlan, ResourcePlansInfo, Material, ClassificationBasisl
 
 
-class AddonPreferences(AddonPreferences):
+class CrafterAddonPreferences(AddonPreferences):
     # this must match the add-on name (the folder name of the unzipped file)
     bl_idname = __addon_name__
 
@@ -43,7 +43,7 @@ class AddonPreferences(AddonPreferences):
                                                ("Cubic","Cubic","Cubic interpolation"),
                                                ("Smart","Smart","Bicubic when magnifying, else bilinear (OSL only)")],
                                         default="Closest",
-                                        description="Texture interpolation method.",
+                                        description="Texture interpolation method",
                                         update=lambda self, context: self.update_texture_interpolation(context))# type: ignore
     Resources_Plans_List: CollectionProperty(name="Resources Plans",type=ResourcePlan)#type: ignore
     Resources_Plans_List_index: IntProperty(name="Resources Plans index",default=0)# type: ignore
@@ -52,6 +52,8 @@ class AddonPreferences(AddonPreferences):
 #==========加载材质属性==========
     Materials_List: CollectionProperty(name="Materials",type=Material)#type: ignore
     Materials_List_index: IntProperty(name="Materials index",default=0)# type: ignore
+    Classification_Basis_list: CollectionProperty(name="Classification Basis",type=ClassificationBasisl)# type: ignore
+    Classification_Basis_list_index: IntProperty(name="Classification Basis index",default=0)# type: ignore
 #==========偏好设置面板==========
     def draw(self, context: bpy.types.Context):
         layout = self.layout

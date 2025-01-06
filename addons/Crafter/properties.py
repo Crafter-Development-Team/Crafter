@@ -15,3 +15,7 @@ class Material(bpy.types.PropertyGroup):
     Material: StringProperty(name="Material",
                             #   subtype="DIR_PATH"
                               )# type: ignore
+class ClassificationBasisl(bpy.types.PropertyGroup):
+    Classification_Basisl: StringProperty(name="Classification Basisl",
+                            #   subtype="DIR_PATH"
+                              )# type: ignore

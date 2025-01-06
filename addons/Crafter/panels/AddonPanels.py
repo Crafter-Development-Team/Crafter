@@ -42,8 +42,8 @@ class VIEW3D_PT_CrafterImportWorld(bpy.types.Panel):
         row_XYZ2.prop(addon_prefs, "XYZ_2")
         
         row_ImportWorld = layout.row()
-        row_ImportWorld.operator("crafter.import_surface_world",text=i18n("Import World"))
-        row_ImportWorld.operator("crafter.import_solid_area",text=i18n("Import Editable Area"))
+        row_ImportWorld.operator("crafter.import_surface_world",text="Import World")
+        row_ImportWorld.operator("crafter.import_solid_area",text="Import Editable Area")
 
     @classmethod
     def poll(cls, context: bpy.types.Context):
@@ -92,6 +92,11 @@ class VIEW3D_UL_CrafterMaterials(bpy.types.UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
         if self.layout_type in {"DEFAULT","COMPACT"}:
             layout.label(text=item.name)
+class VIEW3D_UL_CrafterClassificationBasis(bpy.types.UIList):
+     def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
+        if self.layout_type in {"DEFAULT","COMPACT"}:
+            layout.label(text=item.name)
+
 @reg_order(3)#==========加载材质面板==========
 class VIEW3D_PT_Materials(bpy.types.Panel):
     bl_label = "Load Materials"
@@ -109,6 +114,12 @@ class VIEW3D_PT_Materials(bpy.types.Panel):
         col_Materials_List_ops = row_Materials_List.column()
         col_Materials_List_ops.operator("crafter.open_materials",icon="FILE_FOLDER",text="")
         col_Materials_List_ops.operator("crafter.reload_materials",icon="FILE_REFRESH",text="")
+
+        row_Classification_Basis = layout.row()
+        row_Classification_Basis.template_list("VIEW3D_UL_CrafterClassificationBasis", "", addon_prefs, "Classification_Basis_list", addon_prefs, "Classification_Basis_list_index", rows=1)
+        row_Classification_Basis_ops = row_Classification_Basis.column()
+        row_Classification_Basis_ops.operator("crafter.open_classification_basis",icon="FILE_FOLDER",text="")
+        row_Classification_Basis_ops.operator("crafter.reload_classification_basis",icon="FILE_REFRESH",text="")
 
     @classmethod
     def poll(cls, context: bpy.types.Context):
