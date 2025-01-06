@@ -1,0 +1,17 @@
+{
+    "leaves": [
+        "oak_leaves",
+        "spruce_leaves",
+        "birch_leaves",
+        "jungle_leaves",
+        "acacia_leaves",
+        "dark_oak_leaves",
+        "azalea_leaves",
+        "flowering_azalea_leaves",
+        "mangrove_leaves",
+        "cherry_leaves"
+    ],
+    "water": [
+        "water_flow",
+        "water_still"]
+}
