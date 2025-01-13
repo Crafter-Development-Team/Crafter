@@ -52,8 +52,8 @@ class CrafterAddonPreferences(AddonPreferences):
 #==========加载材质属性==========
     Materials_List: CollectionProperty(name="Materials",type=Material)#type: ignore
     Materials_List_index: IntProperty(name="Materials index",default=0)# type: ignore
-    Classification_Basis_list: CollectionProperty(name="Classification Basis",type=ClassificationBasisl)# type: ignore
-    Classification_Basis_list_index: IntProperty(name="Classification Basis index",default=0)# type: ignore
+    Classification_Basis_List: CollectionProperty(name="Classification Basis",type=ClassificationBasisl)# type: ignore
+    Classification_Basis_List_index: IntProperty(name="Classification Basis index",default=0)# type: ignore
 #==========偏好设置面板==========
     def draw(self, context: bpy.types.Context):
         layout = self.layout

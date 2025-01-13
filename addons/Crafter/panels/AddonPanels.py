@@ -7,7 +7,6 @@ from ....common.types.framework import reg_order
 
 @reg_order(0)#==========导入预设面板==========
 class VIEW3D_PT_CrafterPlans(bpy.types.Panel):
-    bl_idname = "VIEW3D_PT_CrafterPlans"
     bl_label = "Plans"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
@@ -23,7 +22,6 @@ class VIEW3D_PT_CrafterPlans(bpy.types.Panel):
     
 @reg_order(1)#==========导入世界面板==========
 class VIEW3D_PT_CrafterImportWorld(bpy.types.Panel):
-    bl_idname = "VIEW3D_PT_CrafterImportWorld"
     bl_label = "Import World"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
@@ -61,7 +59,6 @@ class VIEW3D_UL_CrafterResourcesInfo(bpy.types.UIList):
 
 @reg_order(2)#==========导入纹理面板==========
 class VIEW3D_PT_CrafterImportResources(bpy.types.Panel):
-    bl_idname = "VIEW3D_PT_CrafterImportResources"
     bl_label = "Import Resources"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
@@ -115,8 +112,11 @@ class VIEW3D_PT_Materials(bpy.types.Panel):
         col_Materials_List_ops.operator("crafter.open_materials",icon="FILE_FOLDER",text="")
         col_Materials_List_ops.operator("crafter.reload_materials",icon="FILE_REFRESH",text="")
 
+        row_ops = layout.row()
+        row_ops.operator("crafter.load_material")
+
         row_Classification_Basis = layout.row()
-        row_Classification_Basis.template_list("VIEW3D_UL_CrafterClassificationBasis", "", addon_prefs, "Classification_Basis_list", addon_prefs, "Classification_Basis_list_index", rows=1)
+        row_Classification_Basis.template_list("VIEW3D_UL_CrafterClassificationBasis", "", addon_prefs, "Classification_Basis_List", addon_prefs, "Classification_Basis_List_index", rows=1)
         row_Classification_Basis_ops = row_Classification_Basis.column()
         row_Classification_Basis_ops.operator("crafter.open_classification_basis",icon="FILE_FOLDER",text="")
         row_Classification_Basis_ops.operator("crafter.reload_classification_basis",icon="FILE_REFRESH",text="")

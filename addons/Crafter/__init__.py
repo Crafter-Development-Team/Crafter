@@ -47,6 +47,7 @@ extensions_dir = os.path.dirname(extension_dir)
 defaults_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "defaults")
 defaults_materials_dir = os.path.join(defaults_dir, "materials")
 defaults_classification_basis_dir = os.path.join(defaults_dir, "classification basis")
+blend_append_dir = os.path.join(os.path.join(defaults_dir,"append.blend"))
 
 cafter_data_dir = os.path.join(extensions_dir, "cafter_data")
 resourcepacks_dir = os.path.join(cafter_data_dir, "resourcepacks")

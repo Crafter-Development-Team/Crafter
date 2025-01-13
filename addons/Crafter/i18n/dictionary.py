@@ -25,10 +25,11 @@ dictionary = {
         "Materials index":"材质索引",
         "Open Materials":"打开材质文件夹",
         "Reload Materials":"刷新材质列表",
+        "Load Material":"加载材质",
         "Classification Basis":"材质分类依据",
         "default":"默认",
         "Open Classification Basis":"打开材质分类依据文件夹",
-        
+        "Reload Classification Basis":"刷新材质分类依据列表",
         #==========操作介绍==========
             #==========导入世界==========
         "Import world":"导入世界",
@@ -39,7 +40,9 @@ dictionary = {
             #==========导入纹理==========
         "Set texture interpolation":"设置纹理插值",
             #==========加载材质==========
+        "Load material":"加载材质",
         "Classification basis":"材质分类依据",
+        
     }
 }
 

@@ -4,8 +4,10 @@ import time
 import subprocess
 import threading
 import platform
+import json
+
 from ..config import __addon_name__
-from ..__init__ import resourcepacks_dir, materials_dir, classification_basis_dir
+from ..__init__ import resourcepacks_dir, materials_dir, classification_basis_dir, blend_append_dir
 
 #==========通用操作==========
 def open_folder(folder_path: str):
@@ -21,7 +23,7 @@ class VIEW3D_OT_CrafterImportWorld(bpy.types.Operator):#导入世界
     bl_label = "Import World"
     bl_idname = "crafter.import_world"
     bl_description = "Import world"
-    bl_options = {'REGISTER', 'UNDO'}
+    bl_options = {'INTERNAL'}
 
     @classmethod
     def poll(cls, context: bpy.types.Context):
@@ -143,7 +145,6 @@ class VIEW3D_OT_CrafterOpenResourcesPlans(bpy.types.Operator):#打开纹理包�
     bl_label = "Open Resources Plans"
     bl_idname = "crafter.open_resources_plans"
     bl_description = " "
-    bl_options = {'REGISTER'}
     
     @classmethod
     def poll(cls, context: bpy.types.Context):
@@ -159,7 +160,6 @@ class VIEW3D_OT_CrafterReloadResourcesPlans(bpy.types.Operator):#刷新纹理包
     bl_label = "Reload Resources Plans"
     bl_idname = "crafter.reload_resources_plans"
     bl_description = " "
-    bl_options = {'REGISTER'}
     
     @classmethod
     def poll(cls, context: bpy.types.Context):
@@ -183,16 +183,16 @@ class VIEW3D_OT_CrafterSetTextureInterpolation(bpy.types.Operator):#设置纹理
 
     @classmethod
     def poll(cls, context):
-        if context.selected_objects and bpy.context.active_object.type == "MESH":
-            return True
+        return context.selected_objects
 
     def execute(self, context):
         addon_prefs = context.preferences.addons[__addon_name__].preferences
-        if context.active_object.type == "MESH":
-            for mat in bpy.context.active_object.data.materials:
-                if mat.node_tree:
-                    for node in mat.node_tree.nodes:
-                        if node.bl_idname == "ShaderNodeTexImage":
+
+        for object in context.selected_objects:
+            if object.type == "MESH":
+                for material in object.data.materials:
+                    for node in material.node_tree.nodes:
+                        if node.type == 'TEX_IMAGE':
                             node.interpolation = addon_prefs.Texture_Interpolation
         return {'FINISHED'}
 
@@ -201,7 +201,6 @@ class VIEW3D_OT_CrafterOpenMaterials(bpy.types.Operator):#打开材质列表文�
     bl_label = "Open Materials"
     bl_idname = "crafter.open_materials"
     bl_description = " "
-    bl_options = {'REGISTER'}
     
     @classmethod
     def poll(cls, context: bpy.types.Context):
@@ -217,7 +216,6 @@ class VIEW3D_OT_CrafterReloadMaterials(bpy.types.Operator):#刷新纹理包列�
     bl_label = "Reload Materials"
     bl_idname = "crafter.reload_materials"
     bl_description = " "
-    bl_options = {'REGISTER'}
     
     @classmethod
     def poll(cls, context: bpy.types.Context):
@@ -232,6 +230,123 @@ class VIEW3D_OT_CrafterReloadMaterials(bpy.types.Operator):#刷新纹理包列�
             if extension == ".blend":
                 material_name = addon_prefs.Materials_List.add()
                 material_name.name = base
+        return {'FINISHED'}
+
+class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
+    bl_label = "Load Material"
+    bl_idname = "crafter.load_material"
+    bl_description = "Load Material"
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context: bpy.types.Context):
+        return context.selected_objects
+
+    def execute(self, context: bpy.types.Context):
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
+
+        bpy.ops.crafter.reload_materials()
+        bpy.ops.crafter.reload_classification_basis()
+        # 删除startswith(CO-)、startswith(CI-)节点组
+        for node in bpy.data.node_groups:
+            if node.name.startswith("CO-") or node.name.startswith("CI-"):
+                bpy.data.node_groups.remove(node)
+        # 删除AAAAA-CrafterIn物体、材质
+        try:
+            bpy.data.objects.remove(bpy.data.objects["AAAAA-CrafterIn"])
+            bpy.data.materials.remove(bpy.data.materials["AAAAA-CrafterIn"], do_unlink=True)
+        except:
+            pass
+        # 导入CO-节点组
+        with bpy.data.libraries.load(blend_append_dir, link=False) as (data_from, data_to):
+            data_to.node_groups = [name for name in data_from.node_groups if name == "CO-"]
+        # 导入AAAAA-CrafterIn物体、材质、startswith(CI-)
+        blend_material_dir = os.path.join(materials_dir, addon_prefs.Materials_List[addon_prefs.Materials_List_index].name + ".blend")
+        with bpy.data.libraries.load(blend_material_dir, link=False) as (data_from, data_to):
+            data_to.objects = [name for name in data_from.objects if name == "AAAAA-CrafterIn"]
+        if "AAAAA-CrafterIn"  in bpy.data.collections:
+            collection_CrafterIn = bpy.data.collections["AAAAA-CrafterIn"]
+        else:
+            collection_CrafterIn = bpy.data.collections.new(name="AAAAA-CrafterIn")
+            bpy.context.scene.collection.children.link(collection_CrafterIn)
+        
+        collection_CrafterIn.objects.link(bpy.data.objects["AAAAA-CrafterIn"])
+        # 获取分类依据
+        classification_folder_name = addon_prefs.Classification_Basis_List[addon_prefs.Classification_Basis_List_index].name
+        classification_folder_dir = os.path.join(classification_basis_dir, classification_folder_name)
+        # 初始化COs，classification_list
+        COs = ["CO-"]
+        classification_list = {}
+        # 获取classification_list
+        for classification_name in os.listdir(classification_folder_dir):
+            classification_dir = os.path.join(classification_folder_dir, classification_name)
+            with open(classification_dir, 'r', encoding='utf-8') as file:
+                classification = json.load(file)
+                for key, value in classification.items():
+                    if key not in classification_list:
+                        classification_list[key] = []
+                        classification_list[key].extend(value)
+        # 创建所有startswith(CO-)节点组
+        for group_name in classification_list:
+            group_CO = bpy.data.node_groups['CO-']
+            group_new = group_CO.copy()
+            group_new.name = "CO-" + group_name
+            COs.append("CO-" + group_name)
+        ## 删去原有着色器 并 重新添加startswith(CO-)节点组
+        for object in context.selected_objects:
+            if object.type == "MESH":
+                for material in object.data.materials:
+                    node_tree_material = material.node_tree
+                    nodes = node_tree_material.nodes
+                    links = node_tree_material.links
+                    node_output = nodes["Material Output"]
+                    # 删去原有着色器
+                    try:
+                        from_node = node_output.inputs[0].links[0].from_node
+                        if (from_node.type == "BSDF_PRINCIPLED" or from_node.node_tree == None)  and material.name != "AAAAA-CrafterIn":
+                            node_tree_material.nodes.remove(from_node)
+                    except:
+                        pass
+                    # 重新添加startswith(CO-)节点组
+                    group_COn = nodes.new(type='ShaderNodeGroup')
+                    group_COn.location = (node_output.location.x - 200, node_output.location.y)
+                    for group_name in classification_list:
+                        real_material_name = material.name
+                        last_dot_index = real_material_name.rfind('.')
+                        if not last_dot_index == -1:
+                            real_material_name = real_material_name[:last_dot_index]
+                        if real_material_name in classification_list[group_name] or material.name in classification_list[group_name]:
+                            group_COn.node_tree = bpy.data.node_groups["CO-" + group_name]
+                            break
+                        else:
+                            group_COn.node_tree = bpy.data.node_groups["CO-"]
+                    # 连接节点
+                    for output in group_COn.outputs:
+                        links.new(output, node_output.inputs[output.name])
+                    for node in nodes:
+                        if node.type == "TEX_IMAGE":
+                            links.new(node.outputs[0], group_COn.inputs[0])
+                            links.new(node.outputs[1], group_COn.inputs[1])
+        #连接startswith(CO-)、startswith(CI-)节点组
+        for aCO in COs:
+            group_CO = bpy.data.node_groups[aCO]
+            nodes = group_CO.nodes
+            links = group_CO.links
+            node_output = nodes["Group Output"]
+            node_input = nodes["Group Input"]
+            group_CI = nodes.new(type='ShaderNodeGroup')
+            group_CI.location = (node_output.location.x - 200, node_output.location.y)
+            try:
+                group_CI.node_tree = bpy.data.node_groups["CI-" + aCO[3:]]
+            except:
+                group_CI.node_tree = bpy.data.node_groups["CI-"]
+            try:
+                for output in group_CI.outputs:
+                    links.new(output, node_output.inputs[output.name])
+                for input in group_CI.inputs:
+                    links.new(input, node_input.outputs[input.name])
+            except:
+                pass
         return {'FINISHED'}
 
 class VIEW3D_OT_CrafterOpenClassificationBasis(bpy.types.Operator):#打开分类依据文件夹
@@ -250,7 +365,6 @@ class VIEW3D_OT_CrafterOpenClassificationBasis(bpy.types.Operator):#打开分类
 
         return {'FINISHED'}
 
-
 class VIEW3D_OT_CrafterReloadClassificationBasis(bpy.types.Operator):#刷新分类依据菜单
     bl_label = "Reload Classification Basis"
     bl_idname = "crafter.reload_classification_basis"
@@ -264,10 +378,10 @@ class VIEW3D_OT_CrafterReloadClassificationBasis(bpy.types.Operator):#刷新分�
     def execute(self, context: bpy.types.Context):
         addon_prefs = context.preferences.addons[__addon_name__].preferences
 
-        addon_prefs.Classification_Basis_list.clear()
+        addon_prefs.Classification_Basis_List.clear()
         for folder in os.listdir(classification_basis_dir):
             if os.path.isdir(os.path.join(classification_basis_dir, folder)):
-                plan_name = addon_prefs.Classification_Basis_list.add()
+                plan_name = addon_prefs.Classification_Basis_List.add()
                 plan_name.name = folder
 
         return {'FINISHED'}
