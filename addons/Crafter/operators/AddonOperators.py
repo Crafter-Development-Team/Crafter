@@ -310,11 +310,11 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
                     # 重新添加startswith(CO-)节点组
                     group_COn = nodes.new(type='ShaderNodeGroup')
                     group_COn.location = (node_output.location.x - 200, node_output.location.y)
+                    real_material_name = material.name
+                    last_dot_index = real_material_name.rfind('.')
+                    if not last_dot_index == -1:
+                        real_material_name = real_material_name[:last_dot_index]
                     for group_name in classification_list:
-                        real_material_name = material.name
-                        last_dot_index = real_material_name.rfind('.')
-                        if not last_dot_index == -1:
-                            real_material_name = real_material_name[:last_dot_index]
                         if real_material_name in classification_list[group_name] or material.name in classification_list[group_name]:
                             group_COn.node_tree = bpy.data.node_groups["CO-" + group_name]
                             break
