@@ -299,7 +299,10 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
                     node_tree_material = material.node_tree
                     nodes = node_tree_material.nodes
                     links = node_tree_material.links
-                    node_output = nodes["Material Output"]
+                    print(material.name)
+                    for node in nodes:
+                        if node.type == "OUTPUT_MATERIAL" and node.is_active_output:
+                            node_output = node
                     # 删去原有着色器
                     try:
                         from_node = node_output.inputs[0].links[0].from_node
@@ -332,8 +335,11 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
             group_CO = bpy.data.node_groups[aCO]
             nodes = group_CO.nodes
             links = group_CO.links
-            node_output = nodes["Group Output"]
-            node_input = nodes["Group Input"]
+            for node in nodes:
+                if node.type == "GROUP_OUTPUT" and node.is_active_output:
+                    node_output = node
+                if node.type == "GROUP_INPUT":
+                    node_input = node
             group_CI = nodes.new(type='ShaderNodeGroup')
             group_CI.location = (node_output.location.x - 200, node_output.location.y)
             try:
