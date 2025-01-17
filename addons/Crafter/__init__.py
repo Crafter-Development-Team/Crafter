@@ -81,12 +81,10 @@ def register():
         src_file = os.path.join(defaults_materials_dir, filename)
         dest_file = os.path.join(materials_dir, filename)
         shutil.copy(src_file, dest_file)
-        print("材质"+filename+"初始化完成")
     for filename in os.listdir(defaults_classification_basis_dir):
         src_file = os.path.join(defaults_classification_basis_dir, filename)
         dest_file = os.path.join(classification_basis_default_dir, filename)
         shutil.copy(src_file, dest_file)
-        print("分类依据"+filename+"初始化完成")
 
     #==========刷新UIList==========
     bpy.ops.crafter.reload_resources_plans

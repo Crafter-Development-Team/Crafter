@@ -18,6 +18,18 @@ def open_folder(folder_path: str):
     else:  # Linux
         subprocess.run(["xdg-open", folder_path])
 
+def make_json_together(dict1, dict2):
+    for key, value in dict2.items():
+        if key in dict1:
+            if isinstance(dict1[key], dict) and isinstance(value, dict):
+                make_json_together(dict1[key], value)
+            elif isinstance(dict1[key], list) and isinstance(value, list):
+                dict1[key] = list(set(dict1[key] + value))
+            else:
+                dict1[key] = value
+        else:
+            dict1[key] = value
+
 #==========导入世界操作==========
 class VIEW3D_OT_CrafterImportWorld(bpy.types.Operator):#导入世界
     bl_label = "Import World"
@@ -269,37 +281,59 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
         else:
             collection_CrafterIn = bpy.data.collections.new(name="AAAAA-CrafterIn")
             bpy.context.scene.collection.children.link(collection_CrafterIn)
-        
         collection_CrafterIn.objects.link(bpy.data.objects["AAAAA-CrafterIn"])
-        # 获取分类依据
+        # 获取分类依据地址
         classification_folder_name = addon_prefs.Classification_Basis_List[addon_prefs.Classification_Basis_List_index].name
         classification_folder_dir = os.path.join(classification_basis_dir, classification_folder_name)
-        # 初始化COs，classification_list
+        # 初始化COs，classification_list,banlist
         COs = ["CO-"]
         classification_list = {}
+        banlist = []
         # 获取classification_list
-        for classification_name in os.listdir(classification_folder_dir):
-            classification_dir = os.path.join(classification_folder_dir, classification_name)
-            with open(classification_dir, 'r', encoding='utf-8') as file:
-                classification = json.load(file)
-                for key, value in classification.items():
-                    if key not in classification_list:
-                        classification_list[key] = []
-                        classification_list[key].extend(value)
+        for filename in os.listdir(classification_folder_dir):
+            file_path = os.path.join(classification_folder_dir, filename)
+            if filename.endswith(".json"):
+                try:
+                    with open(file_path, 'r', encoding='utf-8') as file:
+                        data = json.load(file)
+                        banlist.extend(data["banlist"])
+                        make_json_together(classification_list, data)
+                except Exception as e:
+                    print(e)
         # 创建所有startswith(CO-)节点组
-        for group_name in classification_list:
-            group_CO = bpy.data.node_groups['CO-']
-            group_new = group_CO.copy()
-            group_new.name = "CO-" + group_name
-            COs.append("CO-" + group_name)
+        group_CO = bpy.data.node_groups['CO-']
+        for type_name in classification_list:
+            if type_name == "banlist":
+                continue
+            for group_name in classification_list[type_name]:
+                group_new = group_CO.copy()
+                group_new.name = "CO-" + group_name
+                COs.append("CO-" + group_name)
         ## 删去原有着色器 并 重新添加startswith(CO-)节点组
         for object in context.selected_objects:
             if object.type == "MESH":
                 for material in object.data.materials:
+                    # 获得real_material_name(如果有mod_name,type_name,获得之,但目前好像没用...)
+                    real_material_name = material.name
+                    last_dot_index = real_material_name.rfind('.')
+                    last_hen_index = real_material_name.rfind('-')
+                    mod_name = "minecraft"
+                    type_name = "block"
+                    if not last_dot_index == -1:
+                        real_material_name = real_material_name[:last_dot_index]
+                    if not last_hen_index == -1:
+                        mod_and_type = real_material_name[:last_hen_index]
+                        real_material_name = real_material_name[last_hen_index+1:]
+                        last____index = mod_and_type.rfind('_')
+                        mod_name = real_material_name[:last____index]
+                        type_name = real_material_name[last____index+1:last_hen_index]
+                    # 如果在banlist里直接跳过
+                    if real_material_name in banlist:
+                        continue
                     node_tree_material = material.node_tree
                     nodes = node_tree_material.nodes
                     links = node_tree_material.links
-                    print(material.name)
+                    #获得node_output
                     for node in nodes:
                         if node.type == "OUTPUT_MATERIAL" and node.is_active_output:
                             node_output = node
@@ -313,23 +347,44 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
                     # 重新添加startswith(CO-)节点组
                     group_COn = nodes.new(type='ShaderNodeGroup')
                     group_COn.location = (node_output.location.x - 200, node_output.location.y)
-                    real_material_name = material.name
-                    last_dot_index = real_material_name.rfind('.')
-                    if not last_dot_index == -1:
-                        real_material_name = real_material_name[:last_dot_index]
-                    for group_name in classification_list:
-                        if real_material_name in classification_list[group_name] or material.name in classification_list[group_name]:
-                            group_COn.node_tree = bpy.data.node_groups["CO-" + group_name]
-                            break
-                        else:
-                            group_COn.node_tree = bpy.data.node_groups["CO-"]
-                    # 连接节点
+                    for type_name in classification_list:
+                        if type_name == "banlist":
+                            continue
+                        for group_name in classification_list[type_name]:
+                            breakout = False
+                            if "banlist" in classification_list[type_name][group_name]:
+                                for item in classification_list[type_name][group_name]["banlist"]:
+                                    if item in real_material_name:
+                                        breakout = True
+                                        break
+                            if breakout:
+                                break
+                            if "key_words" in classification_list[type_name][group_name]:
+                                for item in classification_list[type_name][group_name]["key_words"]:
+                                    if item in real_material_name:
+                                        group_COn.node_tree = bpy.data.node_groups["CO-" + group_name]
+                                        breakout = True
+                                        break
+                            if breakout:
+                                break
+                            if "full_name" in classification_list[type_name][group_name]:
+                                for item in classification_list[type_name][group_name]["full_name"]:
+                                    if item == real_material_name:
+                                        group_COn.node_tree = bpy.data.node_groups["CO-" + group_name]
+                                        breakout = True
+                                        break
+                            if not breakout:
+                                group_COn.node_tree = bpy.data.node_groups["CO-"]
+                    # 连接外层节点
                     for output in group_COn.outputs:
                         links.new(output, node_output.inputs[output.name])
-                    for node in nodes:
-                        if node.type == "TEX_IMAGE":
-                            links.new(node.outputs[0], group_COn.inputs[0])
-                            links.new(node.outputs[1], group_COn.inputs[1])
+                    try:
+                        for node in nodes:
+                            if node.type == "TEX_IMAGE":
+                                links.new(node.outputs[0], group_COn.inputs[0])
+                                links.new(node.outputs[1], group_COn.inputs[1])
+                    except Exception as e:
+                        print(e)
         #连接startswith(CO-)、startswith(CI-)节点组
         for aCO in COs:
             group_CO = bpy.data.node_groups[aCO]

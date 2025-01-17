@@ -1,17 +1,35 @@
 {
-    "leaves": [
-        "oak_leaves",
-        "spruce_leaves",
-        "birch_leaves",
-        "jungle_leaves",
-        "acacia_leaves",
-        "dark_oak_leaves",
-        "azalea_leaves",
-        "flowering_azalea_leaves",
-        "mangrove_leaves",
-        "cherry_leaves"
+    "banlist":[
+        "skin"
     ],
-    "water": [
-        "water_flow",
-        "water_still"]
+    "block":{
+        "leaves": {
+            "banlist":[
+            ],
+            "key_words":[
+                "oak_leaves",
+                "spruce_leaves",
+                "birch_leaves",
+                "jungle_leaves",
+                "acacia_leaves",
+                "dark_oak_leaves",
+                "azalea_leaves",
+                "flowering_azalea_leaves",
+                "mangrove_leaves",
+                "cherry_leaves"
+            ],
+            "full_name":[
+            ]
+        },
+        "water":{
+            "banlist":[
+            ],
+            "key_words":[
+                "water_flow",
+                "water_still"
+            ],
+            "full_name":[
+            ]
+        }
+    }
 }
