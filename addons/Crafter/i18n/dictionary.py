@@ -11,12 +11,12 @@ dictionary = {
         "World path":"存档地址",
         "XYZ-1":"坐标1",
         "XYZ-2":"坐标2",
-            #==========导入纹理==========
-        "Import Resources":"导入纹理",
-        "Resources Plans index":"纹理包预设索引",
+            #==========导入资源==========
+        "Import Resources":"导入资源",
+        "Resources Plans index":"资源包预设索引",
         "original":"原版",
-        "Open Resources Plans":"打开纹理包预设列表文件夹",
-        "Reload Resources Plans":"刷新纹理预设列表",
+        "Open Resources Plans":"打开资源包预设列表文件夹",
+        "Reload Resources Plans":"刷新资源预设列表",
         "Texture Interpolation":"纹理插值",
         "Texture interpolation method":"纹理插值类型",
         "Set Texture Interpolation":"设置纹理插值",
@@ -37,7 +37,7 @@ dictionary = {
         "Import the solid area":"导入实心区域",
         "Starting coordinates":"起始坐标",
         "Ending coordinates":"结束坐标",
-            #==========导入纹理==========
+            #==========导入资源==========
         "Set texture interpolation":"设置纹理插值",
             #==========加载材质==========
         "Load material":"加载材质",

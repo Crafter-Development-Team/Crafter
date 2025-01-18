@@ -152,8 +152,8 @@ class VIEW3D_OT_CrafterImportSolidArea(bpy.types.Operator):#导入可编辑区�
         bpy.ops.crafter.improt_world()
         return {'FINISHED'}
 
-#==========导入纹理操作==========
-class VIEW3D_OT_CrafterOpenResourcesPlans(bpy.types.Operator):#打开纹理包列表文件夹
+#==========导入资源操作==========
+class VIEW3D_OT_CrafterOpenResourcesPlans(bpy.types.Operator):#打开资源包列表文件夹
     bl_label = "Open Resources Plans"
     bl_idname = "crafter.open_resources_plans"
     bl_description = " "
@@ -168,7 +168,7 @@ class VIEW3D_OT_CrafterOpenResourcesPlans(bpy.types.Operator):#打开纹理包�
 
         return {'FINISHED'}
 
-class VIEW3D_OT_CrafterReloadResourcesPlans(bpy.types.Operator):#刷新纹理包列表
+class VIEW3D_OT_CrafterReloadResourcesPlans(bpy.types.Operator):#刷新资源包列表
     bl_label = "Reload Resources Plans"
     bl_idname = "crafter.reload_resources_plans"
     bl_description = " "
@@ -187,7 +187,6 @@ class VIEW3D_OT_CrafterReloadResourcesPlans(bpy.types.Operator):#刷新纹理包
                 plan_name.name = folder
         return {'FINISHED'}
 
-class VIEW3D_OT_CrafterSetTextureInterpolation(bpy.types.Operator):#设置纹理插值
     bl_label = "Set Texture Interpolation"    
     bl_idname = "crafter.set_texture_interpolation"
     bl_description = "Set Texture Interpolation"
@@ -224,7 +223,7 @@ class VIEW3D_OT_CrafterOpenMaterials(bpy.types.Operator):#打开材质列表文�
 
         return {'FINISHED'}
 
-class VIEW3D_OT_CrafterReloadMaterials(bpy.types.Operator):#刷新纹理包列表
+class VIEW3D_OT_CrafterReloadMaterials(bpy.types.Operator):#刷新资源包列表
     bl_label = "Reload Materials"
     bl_idname = "crafter.reload_materials"
     bl_description = " "

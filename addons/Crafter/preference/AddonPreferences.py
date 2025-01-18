@@ -36,7 +36,7 @@ class CrafterAddonPreferences(AddonPreferences):
                              description="Ending coordinates")# type: ignore
     solid: IntProperty(name="Solid",
                        default=0,)# type: ignore
-#==========导入纹理属性==========
+#==========导入资源属性==========
     Texture_Interpolation: EnumProperty(name="Texture Interpolation",
                                         items=[("Linear","Linear","Linear interpolation"),
                                                ("Closest","Closest","No interpolation (sample closest texel)"),

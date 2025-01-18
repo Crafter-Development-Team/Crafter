@@ -1,7 +1,7 @@
 import bpy
 from bpy.props import StringProperty
 
-#==========导入纹理属性==========
+#==========导入资源属性==========
 class ResourcePlan(bpy.types.PropertyGroup):
     Resources_Plan: StringProperty(name="Resources Plan",
                                     # subtype="DIR_PATH"

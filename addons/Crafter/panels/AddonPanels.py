@@ -47,7 +47,7 @@ class VIEW3D_PT_CrafterImportWorld(bpy.types.Panel):
     def poll(cls, context: bpy.types.Context):
             return context.preferences.addons[__addon_name__].preferences.Import_World
 
-#==========导入纹理列表==========
+#==========导入资源列表==========
 class VIEW3D_UL_CrafterResources(bpy.types.UIList):
      def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
         if self.layout_type in {"DEFAULT","COMPACT"}:
@@ -57,7 +57,7 @@ class VIEW3D_UL_CrafterResourcesInfo(bpy.types.UIList):
         if self.layout_type in {"DEFAULT","COMPACT"}:
             layout.label(text=item.name)
 
-@reg_order(2)#==========导入纹理面板==========
+@reg_order(2)#==========导入资源面板==========
 class VIEW3D_PT_CrafterImportResources(bpy.types.Panel):
     bl_label = "Import Resources"
     bl_space_type = "VIEW_3D"
