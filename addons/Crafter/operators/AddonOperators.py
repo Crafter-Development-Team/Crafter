@@ -187,26 +187,26 @@ class VIEW3D_OT_CrafterReloadResourcesPlans(bpy.types.Operator):#刷新资源包
                 plan_name.name = folder
         return {'FINISHED'}
 
-    class VIEW3D_OT_CrafterSetTextureInterpolation(bpy.types.Operator):#设置纹理插值
-        bl_label = "Set Texture Interpolation"    
-        bl_idname = "crafter.set_texture_interpolation"
-        bl_description = "Set Texture Interpolation"
-        bl_options = {"REGISTER", "UNDO"}
+class VIEW3D_OT_CrafterSetTextureInterpolation(bpy.types.Operator):#设置纹理插值
+    bl_label = "Set Texture Interpolation"    
+    bl_idname = "crafter.set_texture_interpolation"
+    bl_description = "Set Texture Interpolation"
+    bl_options = {"REGISTER", "UNDO"}
 
-        @classmethod
-        def poll(cls, context):
-            return context.selected_objects
+    @classmethod
+    def poll(cls, context):
+        return context.selected_objects
 
-        def execute(self, context):
-            addon_prefs = context.preferences.addons[__addon_name__].preferences
+    def execute(self, context):
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
 
-            for object in context.selected_objects:
-                if object.type == "MESH":
-                    for material in object.data.materials:
-                        for node in material.node_tree.nodes:
-                            if node.type == 'TEX_IMAGE':
-                                node.interpolation = addon_prefs.Texture_Interpolation
-            return {'FINISHED'}
+        for object in context.selected_objects:
+            if object.type == "MESH":
+                for material in object.data.materials:
+                    for node in material.node_tree.nodes:
+                        if node.type == 'TEX_IMAGE':
+                            node.interpolation = addon_prefs.Texture_Interpolation
+        return {'FINISHED'}
 
 #==========加载材质操作==========
 class VIEW3D_OT_CrafterOpenMaterials(bpy.types.Operator):#打开材质列表文件夹
