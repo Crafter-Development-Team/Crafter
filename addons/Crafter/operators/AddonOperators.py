@@ -312,6 +312,8 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
                 COs.append("CO-" + group_name)
         # 删去原有着色器 并 重新添加startswith(CO-)节点组
         for object in context.selected_objects:
+            if object.name == "CrafterIn":
+                continue
             if object.type == "MESH":
                 for material in object.data.materials:
                     # 获得real_material_name(如果有mod_name,type_name,获得之,但目前好像没用...)
@@ -404,7 +406,7 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
                     node_tex_base = None
                     for node in nodes:
                         if node.type == "TEX_IMAGE":
-                            if "image" in dir(node):
+                            if node.image != None:
                                 if node.image.name.startswith(real_material_name + ".png"):
                                     node_tex_base = node
                                     dir_image = os.path.dirname(node_tex_base.image.filepath)
@@ -416,7 +418,7 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
                                     except:
                                         pass
                                     have_pbr = True
-                                elif node.image.name.startswith(real_material_name + "_s.png"):
+                                elif node.image.name.startswith(real_material_name + "_s.png") or node.image.name.startswith(real_material_name + "_a.png"):
                                     node_tex = node
                                     bpy.data.images[node_tex.image.name].colorspace_settings.name = "Non-Color"
                                     try:
@@ -431,19 +433,25 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
                             dir_image = os.path.dirname(node_tex_base.image.filepath)
                             dir_n = os.path.join(dir_image,real_material_name + "_n.png")
                             dir_s = os.path.join(dir_image,real_material_name + "_s.png")
+                            dir_a = os.path.join(dir_image,real_material_name + "_a.png")
                             if os.path.exists(bpy.path.abspath(dir_n)):
                                 node_tex = nodes.new(type="ShaderNodeTexImage")
                                 node_tex.location = (node_tex_base.location.x, node_tex_base.location.y - 300)
                                 node_tex.image = bpy.data.images.load(dir_n)
                                 bpy.data.images[node_tex.image.name].colorspace_settings.name = "Non-Color"
                                 links.new(node_tex.outputs["Color"], group_COn.inputs["Normal"])
+                            if os.path.exists(bpy.path.abspath(dir_a)):
+                                node_tex = nodes.new(type="ShaderNodeTexImage")
+                                node_tex.location = (node_tex_base.location.x, node_tex_base.location.y - 600)
+                                node_tex.image = bpy.data.images.load(dir_a)
+                                bpy.data.images[node_tex.image.name].colorspace_settings.name = "Non-Color"
+                                links.new(node_tex.outputs["Color"], group_COn.inputs["PBR"])
                             if os.path.exists(bpy.path.abspath(dir_s)):
                                 node_tex = nodes.new(type="ShaderNodeTexImage")
                                 node_tex.location = (node_tex_base.location.x, node_tex_base.location.y - 600)
                                 node_tex.image = bpy.data.images.load(dir_s)
                                 bpy.data.images[node_tex.image.name].colorspace_settings.name = "Non-Color"
                                 links.new(node_tex.outputs["Color"], group_COn.inputs["PBR"])
-                    
         #连接startswith(CO-)、startswith(CI-)节点组
         for aCO in COs:
             group_CO = bpy.data.node_groups[aCO]
