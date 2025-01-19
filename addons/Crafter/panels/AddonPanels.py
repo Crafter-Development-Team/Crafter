@@ -106,6 +106,8 @@ class VIEW3D_PT_Materials(bpy.types.Panel):
         layout = self.layout
         addon_prefs = context.preferences.addons[__addon_name__].preferences
 
+        layout.prop(context.scene, "Crafter_rain")
+
         row_Materials_List = layout.row()
         row_Materials_List.template_list("VIEW3D_UL_CrafterMaterials", "", addon_prefs, "Materials_List", addon_prefs, "Materials_List_index", rows=1)
         col_Materials_List_ops = row_Materials_List.column()

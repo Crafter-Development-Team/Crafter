@@ -8,7 +8,7 @@ from ...common.class_loader import auto_load
 from ...common.class_loader.auto_load import add_properties, remove_properties
 from ...common.i18n.dictionary import common_dictionary
 from ...common.i18n.i18n import load_dictionary
-from bpy.props import StringProperty, IntProperty, BoolProperty, IntVectorProperty, EnumProperty, CollectionProperty
+from bpy.props import StringProperty, IntProperty, BoolProperty, IntVectorProperty, EnumProperty, CollectionProperty, FloatProperty
 from .properties import ResourcePlan, ResourcePlansInfo, Material
 
 
@@ -28,6 +28,12 @@ bl_info = {
 
 _addon_properties = {
     bpy.types.Scene: {
+        "Crafter_rain":FloatProperty(name="Rain",
+                                   description="rain",
+                                   subtype="FACTOR",
+                                   min=0,
+                                   max=1,
+                                   default=0)
     }
 }
 
@@ -74,8 +80,6 @@ def register():
     os.makedirs(materials_dir, exist_ok=True)
     os.makedirs(classification_basis_dir, exist_ok=True)
     os.makedirs(classification_basis_default_dir, exist_ok=True)
-
-    print("cafter_data文件夹初始化完成,地址：" + cafter_data_dir)
     #==========初始化默认方案==========
     for filename in os.listdir(defaults_materials_dir):
         src_file = os.path.join(defaults_materials_dir, filename)

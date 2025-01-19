@@ -22,6 +22,7 @@ dictionary = {
         "Set Texture Interpolation":"设置纹理插值",
             #==========加载材质==========
         "Load Materials":"加载材质",
+        "Rain":"雨",
         "Materials index":"材质索引",
         "Open Materials":"打开材质文件夹",
         "Reload Materials":"刷新材质列表",

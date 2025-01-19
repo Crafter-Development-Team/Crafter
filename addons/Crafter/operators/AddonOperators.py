@@ -270,8 +270,9 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
         except:
             pass
         # 导入CO-节点组
+        CO_node_groups = ["CO-"]
         with bpy.data.libraries.load(blend_append_dir, link=False) as (data_from, data_to):
-            data_to.node_groups = [name for name in data_from.node_groups if name == "CO-"]
+            data_to.node_groups = [name for name in data_from.node_groups if name in CO_node_groups]
         # 导入CrafterIn物体、材质、startswith(CI-)
         blend_material_dir = os.path.join(materials_dir, addon_prefs.Materials_List[addon_prefs.Materials_List_index].name + ".blend")
         with bpy.data.libraries.load(blend_material_dir, link=False) as (data_from, data_to):
@@ -333,48 +334,69 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
                     node_tree_material = material.node_tree
                     nodes = node_tree_material.nodes
                     links = node_tree_material.links
-                    #获得node_output
+                    #获得node_output 并 删去无内容节点组 并 删去Rain_value
                     for node in nodes:
                         if node.type == "OUTPUT_MATERIAL" and node.is_active_output:
                             node_output = node
+                        if (node.type == "GROUP" and node.node_tree == None) or (node.type == "VALUE" and node.bl_label == "Rain_value"):
+                            node_tree_material.nodes.remove(node)
                     # 删去原有着色器
                     try:
                         from_node = node_output.inputs[0].links[0].from_node
-                        if (from_node.type == "BSDF_PRINCIPLED" or from_node.node_tree == None)  and material.name != "CrafterIn":
+                        if from_node.type == "BSDF_PRINCIPLED" and material.name != "CrafterIn":
                             node_tree_material.nodes.remove(from_node)
                     except:
                         pass
                     # 重新添加startswith(CO-)节点组
-                    group_COn = nodes.new(type='ShaderNodeGroup')
+                    group_COn = nodes.new(type="ShaderNodeGroup")
                     group_COn.location = (node_output.location.x - 200, node_output.location.y)
+                    found = False
                     for type_name in classification_list:
                         if type_name == "banlist":
                             continue
                         for group_name in classification_list[type_name]:
-                            breakout = False
+                            banout = False
                             if "banlist" in classification_list[type_name][group_name]:
                                 for item in classification_list[type_name][group_name]["banlist"]:
                                     if item in real_material_name:
-                                        breakout = True
+                                        banout = True
                                         break
-                            if breakout:
+                            if banout:
                                 break
                             if "key_words" in classification_list[type_name][group_name]:
                                 for item in classification_list[type_name][group_name]["key_words"]:
                                     if item in real_material_name:
                                         group_COn.node_tree = bpy.data.node_groups["CO-" + group_name]
-                                        breakout = True
+                                        found = True
                                         break
-                            if breakout:
+                            if found:
                                 break
                             if "full_name" in classification_list[type_name][group_name]:
                                 for item in classification_list[type_name][group_name]["full_name"]:
                                     if item == real_material_name:
                                         group_COn.node_tree = bpy.data.node_groups["CO-" + group_name]
-                                        breakout = True
+                                        found = True
                                         break
-                            if not breakout:
-                                group_COn.node_tree = bpy.data.node_groups["CO-"]
+                            if found:
+                                break
+                        if found:
+                            break
+                    if not found:
+                        group_COn.node_tree = bpy.data.node_groups["CO-"]
+                    # 提供Rain_value节点
+                    CO_Crafter_Rain_value = nodes.new(type="ShaderNodeValue")
+                    CO_Crafter_Rain_value.location = (group_COn.location.x - 200, group_COn.location.y)
+                    CO_Crafter_Rain_value.bl_label = "Rain_value"
+                    fcurve = CO_Crafter_Rain_value.outputs["Value"].driver_add("default_value")
+                    driver = fcurve.driver
+                    var = driver.variables.new()
+                    var.name = "Crafter_rain_var"
+                    var.type = 'SINGLE_PROP'
+                    var.targets[0].id_type = 'SCENE'
+                    var.targets[0].id = bpy.context.scene
+                    var.targets[0].data_path = '["Crafter_rain"]'
+                    driver.expression = "Crafter_rain_var"
+                    links.new(CO_Crafter_Rain_value.outputs["Value"], group_COn.inputs["Rain"])
                     # 连接CO节点
                     for output in group_COn.outputs:
                         links.new(output, node_output.inputs[output.name])
@@ -421,6 +443,7 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
                                 node_tex.image = bpy.data.images.load(dir_s)
                                 bpy.data.images[node_tex.image.name].colorspace_settings.name = "Non-Color"
                                 links.new(node_tex.outputs["Color"], group_COn.inputs["PBR"])
+                    
         #连接startswith(CO-)、startswith(CI-)节点组
         for aCO in COs:
             group_CO = bpy.data.node_groups[aCO]
