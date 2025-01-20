@@ -402,56 +402,41 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
                     # 连接CO节点
                     for output in group_COn.outputs:
                         links.new(output, node_output.inputs[output.name])
-                    have_pbr = False
                     node_tex_base = None
                     for node in nodes:
                         if node.type == "TEX_IMAGE":
                             if node.image != None:
-                                if node.image.name.startswith(real_material_name + ".png"):
+                                if node.image.name.endswith(real_material_name + ".png"):
                                     node_tex_base = node
                                     dir_image = os.path.dirname(node_tex_base.image.filepath)
-                                elif node.image.name.startswith(real_material_name + "_n.png"):
-                                    node_tex = node
-                                    bpy.data.images[node_tex.image.name].colorspace_settings.name = "Non-Color"
-                                    try:
-                                        links.new(node_tex.outputs["Color"], group_COn.inputs["Normal"])
-                                    except:
-                                        pass
-                                    have_pbr = True
-                                elif node.image.name.startswith(real_material_name + "_s.png") or node.image.name.startswith(real_material_name + "_a.png"):
-                                    node_tex = node
-                                    bpy.data.images[node_tex.image.name].colorspace_settings.name = "Non-Color"
-                                    try:
-                                        links.new(node_tex.outputs["Color"], group_COn.inputs["PBR"])
-                                    except:
-                                        pass
-                                    have_pbr = True
+                                elif node.image.name.endswith(real_material_name + "_n.png") or node.image.name.endswith(real_material_name + "_s.png") or node.image.name.endswith(real_material_name + "_a.png"):
+                                    bpy.data.images.remove(node.image)
+                                    nodes.remove(node)
                     if node_tex_base != None:
                         links.new(node_tex_base.outputs["Color"], group_COn.inputs["Base Color"])
                         links.new(node_tex_base.outputs["Alpha"], group_COn.inputs["Alpha"])
-                        if not have_pbr:
-                            dir_image = os.path.dirname(node_tex_base.image.filepath)
-                            dir_n = os.path.join(dir_image,real_material_name + "_n.png")
-                            dir_s = os.path.join(dir_image,real_material_name + "_s.png")
-                            dir_a = os.path.join(dir_image,real_material_name + "_a.png")
-                            if os.path.exists(bpy.path.abspath(dir_n)):
-                                node_tex = nodes.new(type="ShaderNodeTexImage")
-                                node_tex.location = (node_tex_base.location.x, node_tex_base.location.y - 300)
-                                node_tex.image = bpy.data.images.load(dir_n)
-                                bpy.data.images[node_tex.image.name].colorspace_settings.name = "Non-Color"
-                                links.new(node_tex.outputs["Color"], group_COn.inputs["Normal"])
-                            if os.path.exists(bpy.path.abspath(dir_a)):
-                                node_tex = nodes.new(type="ShaderNodeTexImage")
-                                node_tex.location = (node_tex_base.location.x, node_tex_base.location.y - 600)
-                                node_tex.image = bpy.data.images.load(dir_a)
-                                bpy.data.images[node_tex.image.name].colorspace_settings.name = "Non-Color"
-                                links.new(node_tex.outputs["Color"], group_COn.inputs["PBR"])
-                            if os.path.exists(bpy.path.abspath(dir_s)):
-                                node_tex = nodes.new(type="ShaderNodeTexImage")
-                                node_tex.location = (node_tex_base.location.x, node_tex_base.location.y - 600)
-                                node_tex.image = bpy.data.images.load(dir_s)
-                                bpy.data.images[node_tex.image.name].colorspace_settings.name = "Non-Color"
-                                links.new(node_tex.outputs["Color"], group_COn.inputs["PBR"])
+                        dir_image = os.path.dirname(node_tex_base.image.filepath)
+                        dir_n = os.path.join(dir_image,real_material_name + "_n.png")
+                        dir_s = os.path.join(dir_image,real_material_name + "_s.png")
+                        dir_a = os.path.join(dir_image,real_material_name + "_a.png")
+                        if os.path.exists(bpy.path.abspath(dir_n)):
+                            node_tex = nodes.new(type="ShaderNodeTexImage")
+                            node_tex.location = (node_tex_base.location.x, node_tex_base.location.y - 300)
+                            node_tex.image = bpy.data.images.load(dir_n)
+                            bpy.data.images[node_tex.image.name].colorspace_settings.name = "Non-Color"
+                            links.new(node_tex.outputs["Color"], group_COn.inputs["Normal"])
+                        if os.path.exists(bpy.path.abspath(dir_s)):
+                            node_tex = nodes.new(type="ShaderNodeTexImage")
+                            node_tex.location = (node_tex_base.location.x, node_tex_base.location.y - 600)
+                            node_tex.image = bpy.data.images.load(dir_s)
+                            bpy.data.images[node_tex.image.name].colorspace_settings.name = "Non-Color"
+                            links.new(node_tex.outputs["Color"], group_COn.inputs["PBR"])
+                        elif os.path.exists(bpy.path.abspath(dir_a)):
+                            node_tex = nodes.new(type="ShaderNodeTexImage")
+                            node_tex.location = (node_tex_base.location.x, node_tex_base.location.y - 600)
+                            node_tex.image = bpy.data.images.load(dir_a)
+                            bpy.data.images[node_tex.image.name].colorspace_settings.name = "Non-Color"
+                            links.new(node_tex.outputs["Color"], group_COn.inputs["PBR"])
         #连接startswith(CO-)、startswith(CI-)节点组
         for aCO in COs:
             group_CO = bpy.data.node_groups[aCO]
