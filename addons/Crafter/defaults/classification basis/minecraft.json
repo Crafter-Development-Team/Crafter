@@ -31,6 +31,22 @@
             ],
             "full_name":[
             ]
+        },
+        "add_green":{
+            "key_words":[
+                "grass_block_top",
+                "FD",
+                "tall_grass_top",
+                "fern",
+                "vine"
+            ],
+            "full_name":[
+                "grass",
+                "F"
+            ]
+        },
+        "plants":{
+
         }
     },
     "entity":{
