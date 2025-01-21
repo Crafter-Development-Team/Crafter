@@ -43,7 +43,8 @@
                 "tall_grass_top",
                 "fern",
                 "vine",
-                "lily_pad"
+                "lily_pad",
+                "tall_grass_bottom"
             ],
             "full_name":[
                 "grass",

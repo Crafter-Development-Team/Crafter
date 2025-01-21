@@ -26,6 +26,8 @@ class VIEW3D_PT_CrafterPlans(bpy.types.Panel):
         layout.label(text="使用方法：在导出obj后将tex中")
         layout.label(text="的纹理替换为材质包的纹理")
         layout.separator()
+        layout.label(text="导入obj世界")
+        layout.separator()
         layout.label(text="在选择了全部世界后点击 加载材")
         layout.label(text="质")
         layout.separator()
