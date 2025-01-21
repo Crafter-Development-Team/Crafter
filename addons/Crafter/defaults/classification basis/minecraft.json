@@ -32,10 +32,14 @@
             "full_name":[
             ]
         },
-        "add_green":{
+        "grass_block_top":{
             "key_words":[
                 "grass_block_top",
-                "FD",
+                "FD"
+            ]
+        },
+        "add_green":{
+            "key_words":[
                 "tall_grass_top",
                 "fern",
                 "vine",
@@ -48,6 +52,12 @@
         },
         "plants":{
 
+        },
+        "no_rain":{
+            "key_words":[
+                "lava_still",
+                "lava_flow"
+            ]
         }
     },
     "entity":{

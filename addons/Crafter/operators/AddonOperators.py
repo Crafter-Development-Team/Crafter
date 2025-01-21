@@ -270,7 +270,7 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
         except:
             pass
         # 导入CO-节点组
-        CO_node_groups = ["CO-"]
+        CO_node_groups = ["CO-","CO-Moving_texture"]
         with bpy.data.libraries.load(blend_append_dir, link=False) as (data_from, data_to):
             data_to.node_groups = [name for name in data_from.node_groups if name in CO_node_groups]
         # 导入CrafterIn物体、材质、startswith(CI-)
@@ -336,11 +336,15 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
                     node_tree_material = material.node_tree
                     nodes = node_tree_material.nodes
                     links = node_tree_material.links
+                    # 初始化node_Moving_texture
+                    node_Moving_texture = None
+                    # 设置材质置换方式为仅置换
+                    material.displacement_method = "DISPLACEMENT"
                     #获得node_output 并 删去无内容节点组 并 删去Rain_value
                     for node in nodes:
                         if node.type == "OUTPUT_MATERIAL" and node.is_active_output:
                             node_output = node
-                        if (node.type == "GROUP" and node.node_tree == None) or (node.type == "VALUE" and node.bl_label == "Rain_value"):
+                        if (node.type == "GROUP" and node.node_tree == None) or (node.type == "VALUE" and node.name.startswith("Rain_value")):
                             node_tree_material.nodes.remove(node)
                     # 删去原有着色器
                     try:
@@ -388,7 +392,8 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
                     # 提供Rain_value节点
                     CO_Crafter_Rain_value = nodes.new(type="ShaderNodeValue")
                     CO_Crafter_Rain_value.location = (group_COn.location.x - 200, group_COn.location.y)
-                    CO_Crafter_Rain_value.bl_label = "Rain_value"
+                    CO_Crafter_Rain_value.bl_label = "Value"
+                    CO_Crafter_Rain_value.name = "Rain_value"
                     fcurve = CO_Crafter_Rain_value.outputs["Value"].driver_add("default_value")
                     driver = fcurve.driver
                     var = driver.variables.new()
@@ -411,15 +416,32 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
                                     nodes.remove(node)
                                 elif node.image.name.endswith(".png"):
                                     node_tex_base = node
-                                    texture_naem = node_tex_base.image.name[:-4]
+                                    texture_name = node_tex_base.image.name[:-4]
                                     dir_image = os.path.dirname(node_tex_base.image.filepath)
+                                    if node.image.size[0] != node.image.size[1]:
+                                        node_Moving_texture = nodes.new(type="ShaderNodeGroup")
+                                        node_Moving_texture.location = (node_tex_base.location.x - 200, node_tex_base.location.y)
+                                        node_Moving_texture.node_tree = bpy.data.node_groups["CO-Moving_texture"]
+                                        try:
+                                            dir_mcmeta = os.path.join(bpy.path.abspath(dir_image), node_tex_base.image.name + ".mcmeta")
+                                            with open(dir_mcmeta, 'r', encoding='utf-8') as file:
+                                                print("读取mcmeta文件成功")
+                                                mcmeta = json.load(file)
+                                                print(mcmeta)
+                                                frametime = mcmeta["animation"]["frametime"]
+                                                print(frametime)
+                                                node_Moving_texture.inputs["frametime"].default_value = frametime
+                                        except:
+                                            pass
+                                        node_Moving_texture.inputs["row"].default_value = node.image.size[1] / node.image.size[0]
+                                        links.new(node_Moving_texture.outputs["Vector"], node_tex_base.inputs["Vector"])
                     if node_tex_base != None:
                         links.new(node_tex_base.outputs["Color"], group_COn.inputs["Base Color"])
                         links.new(node_tex_base.outputs["Alpha"], group_COn.inputs["Alpha"])
                         dir_image = os.path.dirname(node_tex_base.image.filepath)
-                        dir_n = os.path.join(dir_image,texture_naem + "_n.png")
-                        dir_s = os.path.join(dir_image,texture_naem + "_s.png")
-                        dir_a = os.path.join(dir_image,texture_naem + "_a.png")
+                        dir_n = os.path.join(dir_image,texture_name + "_n.png")
+                        dir_s = os.path.join(dir_image,texture_name + "_s.png")
+                        dir_a = os.path.join(dir_image,texture_name + "_a.png")
                         if os.path.exists(bpy.path.abspath(dir_n)):
                             node_tex = nodes.new(type="ShaderNodeTexImage")
                             node_tex.location = (node_tex_base.location.x, node_tex_base.location.y - 300)
@@ -427,6 +449,8 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
                             bpy.data.images[node_tex.image.name].colorspace_settings.name = "Non-Color"
                             links.new(node_tex.outputs["Color"], group_COn.inputs["Normal"])
                             links.new(node_tex.outputs["Alpha"], group_COn.inputs["Normal Alpha"])
+                            if node_Moving_texture != None:
+                                links.new(node_Moving_texture.outputs["Vector"], node_tex.inputs["Vector"])
                         if os.path.exists(bpy.path.abspath(dir_s)):
                             node_tex = nodes.new(type="ShaderNodeTexImage")
                             node_tex.location = (node_tex_base.location.x, node_tex_base.location.y - 600)
@@ -434,6 +458,8 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
                             bpy.data.images[node_tex.image.name].colorspace_settings.name = "Non-Color"
                             links.new(node_tex.outputs["Color"], group_COn.inputs["PBR"])
                             links.new(node_tex.outputs["Alpha"], group_COn.inputs["PBR Alpha"])
+                            if node_Moving_texture != None:
+                                links.new(node_Moving_texture.outputs["Vector"], node_tex.inputs["Vector"])
                         elif os.path.exists(bpy.path.abspath(dir_a)):
                             node_tex = nodes.new(type="ShaderNodeTexImage")
                             node_tex.location = (node_tex_base.location.x, node_tex_base.location.y - 600)
@@ -441,6 +467,8 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
                             bpy.data.images[node_tex.image.name].colorspace_settings.name = "Non-Color"
                             links.new(node_tex.outputs["Color"], group_COn.inputs["PBR"])
                             links.new(node_tex.outputs["Alpha"], group_COn.inputs["PBR Alpha"])
+                            if node_Moving_texture != None:
+                                links.new(node_Moving_texture.outputs["Vector"], node_tex.inputs["Vector"])
         #连接startswith(CO-)、startswith(CI-)节点组
         for aCO in COs:
             group_CO = bpy.data.node_groups[aCO]
