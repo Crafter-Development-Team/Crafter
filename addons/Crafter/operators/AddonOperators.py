@@ -283,6 +283,8 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
             collection_CrafterIns = bpy.data.collections.new(name="CrafterIns")
             bpy.context.scene.collection.children.link(collection_CrafterIns)
         collection_CrafterIns.objects.link(bpy.data.objects["CrafterIn"])
+        bpy.data.objects["CrafterIn"].hide_viewport = True
+        bpy.data.objects["CrafterIn"].hide_render = True
         # 获取分类依据地址
         classification_folder_name = addon_prefs.Classification_Basis_List[addon_prefs.Classification_Basis_List_index].name
         classification_folder_dir = os.path.join(classification_basis_dir, classification_folder_name)
