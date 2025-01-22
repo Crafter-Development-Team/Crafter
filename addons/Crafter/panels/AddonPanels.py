@@ -80,6 +80,7 @@ class VIEW3D_UL_CrafterResources(bpy.types.UIList):
      def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
         if self.layout_type in {"DEFAULT","COMPACT"}:
             layout.label(text=item.name)
+
 class VIEW3D_UL_CrafterResourcesInfo(bpy.types.UIList):
      def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
         if self.layout_type in {"DEFAULT","COMPACT"}:
@@ -116,6 +117,10 @@ class VIEW3D_PT_CrafterImportResources(bpy.types.Panel):
         if len(addon_prefs.Resources_List) > 0:
             row_Resources_List = layout.row()
             row_Resources_List.template_list("VIEW3D_UL_CrafterResourcesInfo", "", addon_prefs, "Resources_List", addon_prefs, "Resources_List_index", rows=1)
+            if len(addon_prefs.Resources_List) > 1:
+                col_Resources_List_ops = row_Resources_List.column()
+                col_Resources_List_ops.operator("crafter.up_resource",icon="TRIA_UP",text="")
+                col_Resources_List_ops.operator("crafter.down_resource",icon="TRIA_DOWN",text="")
             
         # row_Texture_Interpolation = layout.row(align=True)
         # row_Texture_Interpolation.prop(addon_prefs,"Texture_Interpolation")
@@ -130,6 +135,7 @@ class VIEW3D_UL_CrafterMaterials(bpy.types.UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
         if self.layout_type in {"DEFAULT","COMPACT"}:
             layout.label(text=item.name)
+
 class VIEW3D_UL_CrafterClassificationBasis(bpy.types.UIList):
      def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
         if self.layout_type in {"DEFAULT","COMPACT"}:

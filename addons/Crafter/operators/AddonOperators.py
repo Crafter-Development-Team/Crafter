@@ -73,9 +73,6 @@ class VIEW3D_OT_CrafterReloadResources(bpy.types.Operator):#刷新资源包列�
         if "crafter.json" in list_dir_resourcepacks:
             with open(dir_crafter_json, "r", encoding="utf-8") as file:
                 crafter_json = json.load(file)
-            for resourcepack in crafter_json:
-                if not resourcepack in list_dir_resourcepacks:
-                    crafter_json.remove(resourcepack)
             for folder in list_dir_resourcepacks:
                 if os.path.isdir(os.path.join(dir_resourcepacks, folder)):
                     if not folder in crafter_json:
@@ -86,6 +83,10 @@ class VIEW3D_OT_CrafterReloadResources(bpy.types.Operator):#刷新资源包列�
                     unzip(os.path.join(dir_resourcepacks, folder), dir_resourcepack)
                     os.remove(os.path.join(dir_resourcepacks, folder))
                     crafter_json.append(folder[:-4])
+            crafter_json_copy =crafter_json.copy()
+            for resourcepack in crafter_json_copy:
+                if not resourcepack in list_dir_resourcepacks:
+                    crafter_json.remove(resourcepack)
             with open(dir_crafter_json, "w", encoding="utf-8") as file:
                 json.dump(crafter_json, file, ensure_ascii=False, indent=4)
             for resourcepack in crafter_json:
@@ -299,6 +300,68 @@ class VIEW3D_OT_CrafterOpenResourcesPlans(bpy.types.Operator):#打开资源包�
     def execute(self, context: bpy.types.Context):
         folder_path = dir_resourcepacks_plans
         open_folder(folder_path)
+
+        return {'FINISHED'}
+
+class VIEW3D_OT_CrafterUpResource(bpy.types.Operator):#提高资源包优先级
+    bl_label = "Up resource's priority"    
+    bl_idname = "crafter.up_resource"
+    bl_description = " "
+
+    @classmethod
+    def poll(cls, context: bpy.types.Context):
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
+        
+        return addon_prefs.Resources_List_index > 0
+
+    def execute(self, context: bpy.types.Context):
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
+        dir_resourcepacks = os.path.join(dir_resourcepacks_plans, addon_prefs.Resources_Plans_List[addon_prefs.Resources_Plans_List_index].name)
+        dir_crafter_json = os.path.join(dir_resourcepacks, "crafter.json")
+
+        with open(dir_crafter_json, 'r', encoding='utf-8') as file:
+            crafter_json = json.load(file)
+        target_name = addon_prefs.Resources_List[addon_prefs.Resources_List_index].name
+        for i in range(len(crafter_json)):
+            if crafter_json[i] == target_name:
+                if i > 0:
+                    crafter_json[i], crafter_json[i - 1] = crafter_json[i - 1], crafter_json[i]
+                    addon_prefs.Resources_List_index -= 1
+                    break
+        with open(dir_crafter_json, 'w', encoding='utf-8') as file:
+            json.dump(crafter_json, file, indent=4)
+        bpy.ops.crafter.reload_resources()
+
+        return {'FINISHED'}
+
+class VIEW3D_OT_CrafterDownResource(bpy.types.Operator):#降低资源包优先级
+    bl_label = "Down resource's priority"    
+    bl_idname = "crafter.down_resource"
+    bl_description = " "
+
+    @classmethod
+    def poll(cls, context: bpy.types.Context):
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
+        
+        return addon_prefs.Resources_List_index < len(addon_prefs.Resources_List) - 1
+
+    def execute(self, context: bpy.types.Context):
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
+        dir_resourcepacks = os.path.join(dir_resourcepacks_plans, addon_prefs.Resources_Plans_List[addon_prefs.Resources_Plans_List_index].name)
+        dir_crafter_json = os.path.join(dir_resourcepacks, "crafter.json")
+
+        with open(dir_crafter_json, 'r', encoding='utf-8') as file:
+            crafter_json = json.load(file)
+        target_name = addon_prefs.Resources_List[addon_prefs.Resources_List_index].name
+        for i in range(len(crafter_json)):
+            if crafter_json[i] == target_name:
+                if i < len(addon_prefs.Resources_List) - 1:
+                    crafter_json[i], crafter_json[i + 1] = crafter_json[i + 1], crafter_json[i]
+                    addon_prefs.Resources_List_index += 1
+                    break
+        with open(dir_crafter_json, 'w', encoding='utf-8') as file:
+            json.dump(crafter_json, file, indent=4)
+        bpy.ops.crafter.reload_resources()
 
         return {'FINISHED'}
 
