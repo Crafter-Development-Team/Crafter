@@ -30,6 +30,99 @@ def make_json_together(dict1, dict2):
         else:
             dict1[key] = value
 
+class VIEW3D_OT_CrafterReloadResourcesPlans(bpy.types.Operator):#刷新资源包预设列表
+    bl_label = "Reload Resources Plans"
+    bl_idname = "crafter.reload_resources_plans"
+    bl_description = " "
+    
+    @classmethod
+    def poll(cls, context: bpy.types.Context):
+        return True
+
+    def execute(self, context: bpy.types.Context):
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
+
+        addon_prefs.Resources_Plans_List.clear()
+        for folder in os.listdir(resourcepacks_dir):
+            if os.path.isdir(os.path.join(resourcepacks_dir, folder)):
+                plan_name = addon_prefs.Resources_Plans_List.add()
+                plan_name.name = folder
+        return {'FINISHED'}
+
+# class VIEW3D_OT_CrafterReloadResources(bpy.types.Operator):#刷新资源包列表
+#     bl_label = "Reload Resources"
+#     bl_idname = "crafter.reload_resources"
+#     bl_description = " "
+    
+#     @classmethod
+#     def poll(cls, context: bpy.types.Context):
+#         return True
+
+#     def execute(self, context: bpy.types.Context):
+#         addon_prefs = context.preferences.addons[__addon_name__].preferences
+
+#         addon_prefs.Resources_Plans_List.clear()
+#         for folder in os.listdir(resourcepacks_dir):
+#             if os.path.isdir(os.path.join(resourcepacks_dir, folder)):
+#                 plan_name = addon_prefs.Resources_Plans_List.add()
+#                 plan_name.name = folder
+#         return {'FINISHED'}
+
+class VIEW3D_OT_CrafterReloadMaterials(bpy.types.Operator):#刷新材质列表
+    bl_label = "Reload Materials"
+    bl_idname = "crafter.reload_materials"
+    bl_description = " "
+    
+    @classmethod
+    def poll(cls, context: bpy.types.Context):
+        return True
+
+    def execute(self, context: bpy.types.Context):
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
+
+        addon_prefs.Materials_List.clear()
+        for folder in os.listdir(materials_dir):
+            base, extension = os.path.splitext(folder)
+            if extension == ".blend":
+                material_name = addon_prefs.Materials_List.add()
+                material_name.name = base
+        return {'FINISHED'}
+
+class VIEW3D_OT_CrafterReloadClassificationBasis(bpy.types.Operator):#刷新分类依据菜单
+    bl_label = "Reload Classification Basis"
+    bl_idname = "crafter.reload_classification_basis"
+    bl_description = " "
+    bl_options = {'REGISTER'}
+    
+    @classmethod
+    def poll(cls, context: bpy.types.Context):
+        return True
+
+    def execute(self, context: bpy.types.Context):
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
+
+        addon_prefs.Classification_Basis_List.clear()
+        for folder in os.listdir(classification_basis_dir):
+            if os.path.isdir(os.path.join(classification_basis_dir, folder)):
+                plan_name = addon_prefs.Classification_Basis_List.add()
+                plan_name.name = folder
+
+        return {'FINISHED'}
+
+class VIEW3D_OT_CrafterReloadAll(bpy.types.Operator):#刷新全部应刷新的
+    bl_label = "Reload All"
+    bl_idname = "crafter.reload_all"
+    bl_description = " "
+    @classmethod
+    def poll(cls, context: bpy.types.Context):
+        return True
+
+    def execute(self, context: bpy.types.Context):
+        bpy.ops.crafter.reload_resources_plans()
+        bpy.ops.crafter.reload_materials()
+        bpy.ops.crafter.reload_classification_basis()
+        return {'FINISHED'}
+
 #==========导入世界操作==========
 class VIEW3D_OT_CrafterImportWorld(bpy.types.Operator):#导入世界
     bl_label = "Import World"
@@ -168,25 +261,6 @@ class VIEW3D_OT_CrafterOpenResourcesPlans(bpy.types.Operator):#打开资源包�
 
         return {'FINISHED'}
 
-class VIEW3D_OT_CrafterReloadResourcesPlans(bpy.types.Operator):#刷新资源包列表
-    bl_label = "Reload Resources Plans"
-    bl_idname = "crafter.reload_resources_plans"
-    bl_description = " "
-    
-    @classmethod
-    def poll(cls, context: bpy.types.Context):
-        return True
-
-    def execute(self, context: bpy.types.Context):
-        addon_prefs = context.preferences.addons[__addon_name__].preferences
-
-        addon_prefs.Resources_Plans_List.clear()
-        for folder in os.listdir(resourcepacks_dir):
-            if os.path.isdir(os.path.join(resourcepacks_dir, folder)):
-                plan_name = addon_prefs.Resources_Plans_List.add()
-                plan_name.name = folder
-        return {'FINISHED'}
-
 class VIEW3D_OT_CrafterSetTextureInterpolation(bpy.types.Operator):#设置纹理插值
     bl_label = "Set Texture Interpolation"    
     bl_idname = "crafter.set_texture_interpolation"
@@ -222,26 +296,6 @@ class VIEW3D_OT_CrafterOpenMaterials(bpy.types.Operator):#打开材质列表文�
         folder_path = materials_dir
         open_folder(folder_path)
 
-        return {'FINISHED'}
-
-class VIEW3D_OT_CrafterReloadMaterials(bpy.types.Operator):#刷新资源包列表
-    bl_label = "Reload Materials"
-    bl_idname = "crafter.reload_materials"
-    bl_description = " "
-    
-    @classmethod
-    def poll(cls, context: bpy.types.Context):
-        return True
-
-    def execute(self, context: bpy.types.Context):
-        addon_prefs = context.preferences.addons[__addon_name__].preferences
-
-        addon_prefs.Materials_List.clear()
-        for folder in os.listdir(materials_dir):
-            base, extension = os.path.splitext(folder)
-            if extension == ".blend":
-                material_name = addon_prefs.Materials_List.add()
-                material_name.name = base
         return {'FINISHED'}
 
 class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
@@ -512,25 +566,6 @@ class VIEW3D_OT_CrafterOpenClassificationBasis(bpy.types.Operator):#打开分类
 
         return {'FINISHED'}
 
-class VIEW3D_OT_CrafterReloadClassificationBasis(bpy.types.Operator):#刷新分类依据菜单
-    bl_label = "Reload Classification Basis"
-    bl_idname = "crafter.reload_classification_basis"
-    bl_description = " "
-    bl_options = {'REGISTER'}
-    
-    @classmethod
-    def poll(cls, context: bpy.types.Context):
-        return True
 
-    def execute(self, context: bpy.types.Context):
-        addon_prefs = context.preferences.addons[__addon_name__].preferences
-
-        addon_prefs.Classification_Basis_List.clear()
-        for folder in os.listdir(classification_basis_dir):
-            if os.path.isdir(os.path.join(classification_basis_dir, folder)):
-                plan_name = addon_prefs.Classification_Basis_List.add()
-                plan_name.name = folder
-
-        return {'FINISHED'}
 
 

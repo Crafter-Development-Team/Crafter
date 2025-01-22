@@ -90,10 +90,6 @@ def register():
         dest_file = os.path.join(classification_basis_default_dir, filename)
         shutil.copy(src_file, dest_file)
 
-    #==========刷新UIList==========
-    bpy.ops.crafter.reload_resources_plans
-    bpy.ops.crafter.reload_materials
-
     print("{} addon is installed.".format(__addon_name__))
 
 #==========注销==========
