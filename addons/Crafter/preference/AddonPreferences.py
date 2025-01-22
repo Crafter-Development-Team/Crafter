@@ -38,11 +38,11 @@ class CrafterAddonPreferences(AddonPreferences):
                        default=0,)# type: ignore
 #==========导入资源属性==========
     Resources_Plans_List: CollectionProperty(name="Resources Plans",type=ResourcePlan)#type: ignore
-    Resources_Plans_List_index: IntProperty(name="Resources Plans index",
+    Resources_Plans_List_index: IntProperty(name="Resources",
                                             default=0,
                                             update=lambda self, context: self.update_resources_plans_list_index(context))# type: ignore
-    Resources_List: CollectionProperty(name="Resources Plans Info",type=ResourcePlansInfo)# type: ignore
-    Resources_List_index: IntProperty(name="Resources Plans Info index",
+    Resources_List: CollectionProperty(name="Resources",type=ResourcePlansInfo)# type: ignore
+    Resources_List_index: IntProperty(name="Resource",
                                       default=0,
                                       update=lambda self, context: self.update_resources_list_index(context))# type: ignore
     Texture_Interpolation: EnumProperty(name="Texture Interpolation",
@@ -55,9 +55,9 @@ class CrafterAddonPreferences(AddonPreferences):
                                         update=lambda self, context: self.update_texture_interpolation(context))# type: ignore
 #==========加载材质属性==========
     Materials_List: CollectionProperty(name="Materials",type=Material)#type: ignore
-    Materials_List_index: IntProperty(name="Materials index",default=0)# type: ignore
+    Materials_List_index: IntProperty(name="Material",default=0)# type: ignore
     Classification_Basis_List: CollectionProperty(name="Classification Basis",type=ClassificationBasisl)# type: ignore
-    Classification_Basis_List_index: IntProperty(name="Classification Basis index",default=0)# type: ignore
+    Classification_Basis_List_index: IntProperty(name="Classification Basis",default=0)# type: ignore
 #==========偏好设置面板==========
     def draw(self, context: bpy.types.Context):
         layout = self.layout
