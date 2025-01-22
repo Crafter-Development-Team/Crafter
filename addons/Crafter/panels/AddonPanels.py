@@ -83,7 +83,18 @@ class VIEW3D_UL_CrafterResources(bpy.types.UIList):
 class VIEW3D_UL_CrafterResourcesInfo(bpy.types.UIList):
      def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
         if self.layout_type in {"DEFAULT","COMPACT"}:
-            layout.label(text=item.name)
+            item_name = ""
+            i = 0
+            while i < len(item.name):
+                if item.name[i] == "§":
+                    i+=1
+                elif item.name[i] == ".":
+                    break
+                elif item.name[i] != "!":
+                    item_name += item.name[i]
+                i+=1
+                    
+            layout.label(text=item_name)
 
 @reg_order(2)#==========导入资源面板==========
 class VIEW3D_PT_CrafterImportResources(bpy.types.Panel):
@@ -102,11 +113,13 @@ class VIEW3D_PT_CrafterImportResources(bpy.types.Panel):
         col_Plans_List_ops.operator("crafter.open_resources_plans",icon="FILE_FOLDER",text="")
         col_Plans_List_ops.operator("crafter.reload_all",icon="FILE_REFRESH",text="")
 
-        layout.template_list("VIEW3D_UL_CrafterResourcesInfo", "", addon_prefs, "Resources_Plans_Info_List", addon_prefs, "Resources_Plans_Info_List_index", rows=1)
-        
-        row_Texture_Interpolation = layout.row(align=True)
-        row_Texture_Interpolation.prop(addon_prefs,"Texture_Interpolation")
-        row_Texture_Interpolation.operator("crafter.set_texture_interpolation")
+        if len(addon_prefs.Resources_List) > 0:
+            row_Resources_List = layout.row()
+            row_Resources_List.template_list("VIEW3D_UL_CrafterResourcesInfo", "", addon_prefs, "Resources_List", addon_prefs, "Resources_List_index", rows=1)
+            
+        # row_Texture_Interpolation = layout.row(align=True)
+        # row_Texture_Interpolation.prop(addon_prefs,"Texture_Interpolation")
+        # row_Texture_Interpolation.operator("crafter.set_texture_interpolation")
 
     @classmethod
     def poll(cls, context: bpy.types.Context):

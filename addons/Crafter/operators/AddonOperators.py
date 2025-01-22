@@ -5,9 +5,10 @@ import subprocess
 import threading
 import platform
 import json
+import zipfile
 
 from ..config import __addon_name__
-from ..__init__ import resourcepacks_dir, materials_dir, classification_basis_dir, blend_append_dir
+from ..__init__ import dir_resourcepacks_plans, dir_materials, dir_classification_basis, dir_blend_append
 
 #==========通用操作==========
 def open_folder(folder_path: str):
@@ -30,6 +31,10 @@ def make_json_together(dict1, dict2):
         else:
             dict1[key] = value
 
+def unzip(zip_path, extract_to):
+    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+        zip_ref.extractall(extract_to)
+
 class VIEW3D_OT_CrafterReloadResourcesPlans(bpy.types.Operator):#刷新资源包预设列表
     bl_label = "Reload Resources Plans"
     bl_idname = "crafter.reload_resources_plans"
@@ -43,30 +48,65 @@ class VIEW3D_OT_CrafterReloadResourcesPlans(bpy.types.Operator):#刷新资源包
         addon_prefs = context.preferences.addons[__addon_name__].preferences
 
         addon_prefs.Resources_Plans_List.clear()
-        for folder in os.listdir(resourcepacks_dir):
-            if os.path.isdir(os.path.join(resourcepacks_dir, folder)):
+        for folder in os.listdir(dir_resourcepacks_plans):
+            if os.path.isdir(os.path.join(dir_resourcepacks_plans, folder)):
                 plan_name = addon_prefs.Resources_Plans_List.add()
                 plan_name.name = folder
         return {'FINISHED'}
 
-# class VIEW3D_OT_CrafterReloadResources(bpy.types.Operator):#刷新资源包列表
-#     bl_label = "Reload Resources"
-#     bl_idname = "crafter.reload_resources"
-#     bl_description = " "
+class VIEW3D_OT_CrafterReloadResources(bpy.types.Operator):#刷新资源包列表
+    bl_label = "Reload Resources"
+    bl_idname = "crafter.reload_resources"
+    bl_description = " "
     
-#     @classmethod
-#     def poll(cls, context: bpy.types.Context):
-#         return True
+    @classmethod
+    def poll(cls, context: bpy.types.Context):
+        return True
 
-#     def execute(self, context: bpy.types.Context):
-#         addon_prefs = context.preferences.addons[__addon_name__].preferences
+    def execute(self, context: bpy.types.Context):
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
+        dir_resourcepacks = os.path.join(dir_resourcepacks_plans, addon_prefs.Resources_Plans_List[addon_prefs.Resources_Plans_List_index].name)
+        list_dir_resourcepacks = os.listdir(dir_resourcepacks)
+        dir_crafter_json = os.path.join(dir_resourcepacks, "crafter.json")
 
-#         addon_prefs.Resources_Plans_List.clear()
-#         for folder in os.listdir(resourcepacks_dir):
-#             if os.path.isdir(os.path.join(resourcepacks_dir, folder)):
-#                 plan_name = addon_prefs.Resources_Plans_List.add()
-#                 plan_name.name = folder
-#         return {'FINISHED'}
+        addon_prefs.Resources_List.clear()
+        if "crafter.json" in list_dir_resourcepacks:
+            with open(dir_crafter_json, "r", encoding="utf-8") as file:
+                crafter_json = json.load(file)
+            for resourcepack in crafter_json:
+                if not resourcepack in list_dir_resourcepacks:
+                    crafter_json.remove(resourcepack)
+            for folder in list_dir_resourcepacks:
+                if os.path.isdir(os.path.join(dir_resourcepacks, folder)):
+                    if not folder in crafter_json:
+                        crafter_json.append(folder)
+                if folder.endswith(".zip"):
+                    dir_resourcepack = os.path.join(dir_resourcepacks, folder[:-4])
+                    os.makedirs(dir_resourcepack, exist_ok=True)
+                    unzip(os.path.join(dir_resourcepacks, folder), dir_resourcepack)
+                    os.remove(os.path.join(dir_resourcepacks, folder))
+                    crafter_json.append(folder[:-4])
+            with open(dir_crafter_json, "w", encoding="utf-8") as file:
+                json.dump(crafter_json, file, ensure_ascii=False, indent=4)
+            for resourcepack in crafter_json:
+                resourcespack_name = addon_prefs.Resources_List.add()
+                resourcespack_name.name = resourcepack
+        else:
+            crafter_json = []
+            for folder in list_dir_resourcepacks:
+                if os.path.isdir(os.path.join(dir_resourcepacks, folder)):
+                    crafter_json.append(folder)
+                if folder.endswith(".zip"):
+                    dir_resourcepack = os.path.join(dir_resourcepacks, folder[:-4])
+                    os.makedirs(dir_resourcepack, exist_ok=True)
+                    unzip(os.path.join(dir_resourcepacks, folder), dir_resourcepack)
+                    os.remove(os.path.join(dir_resourcepacks, folder))
+                    crafter_json.append(folder[:-4])
+            with open(dir_crafter_json, "w", encoding="utf-8") as file:
+                json.dump(crafter_json, file, ensure_ascii=False, indent=4)
+            bpy.ops.crafter.reload_resources()
+
+        return {'FINISHED'}
 
 class VIEW3D_OT_CrafterReloadMaterials(bpy.types.Operator):#刷新材质列表
     bl_label = "Reload Materials"
@@ -81,7 +121,7 @@ class VIEW3D_OT_CrafterReloadMaterials(bpy.types.Operator):#刷新材质列表
         addon_prefs = context.preferences.addons[__addon_name__].preferences
 
         addon_prefs.Materials_List.clear()
-        for folder in os.listdir(materials_dir):
+        for folder in os.listdir(dir_materials):
             base, extension = os.path.splitext(folder)
             if extension == ".blend":
                 material_name = addon_prefs.Materials_List.add()
@@ -102,15 +142,15 @@ class VIEW3D_OT_CrafterReloadClassificationBasis(bpy.types.Operator):#刷新分�
         addon_prefs = context.preferences.addons[__addon_name__].preferences
 
         addon_prefs.Classification_Basis_List.clear()
-        for folder in os.listdir(classification_basis_dir):
-            if os.path.isdir(os.path.join(classification_basis_dir, folder)):
+        for folder in os.listdir(dir_classification_basis):
+            if os.path.isdir(os.path.join(dir_classification_basis, folder)):
                 plan_name = addon_prefs.Classification_Basis_List.add()
                 plan_name.name = folder
 
         return {'FINISHED'}
 
-class VIEW3D_OT_CrafterReloadAll(bpy.types.Operator):#刷新全部应刷新的
-    bl_label = "Reload All"
+class VIEW3D_OT_CrafterReloadAll(bpy.types.Operator):#刷新全部
+    bl_label = "Reload"
     bl_idname = "crafter.reload_all"
     bl_description = " "
     @classmethod
@@ -119,6 +159,7 @@ class VIEW3D_OT_CrafterReloadAll(bpy.types.Operator):#刷新全部应刷新的
 
     def execute(self, context: bpy.types.Context):
         bpy.ops.crafter.reload_resources_plans()
+        bpy.ops.crafter.reload_resources()
         bpy.ops.crafter.reload_materials()
         bpy.ops.crafter.reload_classification_basis()
         return {'FINISHED'}
@@ -256,7 +297,7 @@ class VIEW3D_OT_CrafterOpenResourcesPlans(bpy.types.Operator):#打开资源包�
         return True
 
     def execute(self, context: bpy.types.Context):
-        folder_path = resourcepacks_dir
+        folder_path = dir_resourcepacks_plans
         open_folder(folder_path)
 
         return {'FINISHED'}
@@ -293,7 +334,7 @@ class VIEW3D_OT_CrafterOpenMaterials(bpy.types.Operator):#打开材质列表文�
         return True
 
     def execute(self, context: bpy.types.Context):
-        folder_path = materials_dir
+        folder_path = dir_materials
         open_folder(folder_path)
 
         return {'FINISHED'}
@@ -325,10 +366,10 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
             pass
         # 导入CO-节点组
         CO_node_groups = ["CO-","CO-Moving_texture"]
-        with bpy.data.libraries.load(blend_append_dir, link=False) as (data_from, data_to):
+        with bpy.data.libraries.load(dir_blend_append, link=False) as (data_from, data_to):
             data_to.node_groups = [name for name in data_from.node_groups if name in CO_node_groups]
         # 导入CrafterIn物体、材质、startswith(CI-)
-        blend_material_dir = os.path.join(materials_dir, addon_prefs.Materials_List[addon_prefs.Materials_List_index].name + ".blend")
+        blend_material_dir = os.path.join(dir_materials, addon_prefs.Materials_List[addon_prefs.Materials_List_index].name + ".blend")
         with bpy.data.libraries.load(blend_material_dir, link=False) as (data_from, data_to):
             data_to.objects = [name for name in data_from.objects if name == "CrafterIn"]
         if "CrafterIns"  in bpy.data.collections:
@@ -341,7 +382,7 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
         bpy.data.objects["CrafterIn"].hide_render = True
         # 获取分类依据地址
         classification_folder_name = addon_prefs.Classification_Basis_List[addon_prefs.Classification_Basis_List_index].name
-        classification_folder_dir = os.path.join(classification_basis_dir, classification_folder_name)
+        classification_folder_dir = os.path.join(dir_classification_basis, classification_folder_name)
         # 初始化COs，classification_list,banlist
         COs = ["CO-"]
         classification_list = {}
@@ -471,6 +512,7 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
                                     bpy.data.images.remove(node.image)
                                     nodes.remove(node)
                                 elif node.image.name.endswith(".png"):
+                                    node.interpolation = "Closest"
                                     node_tex_base = node
                                     texture_name = node_tex_base.image.name[:-4]
                                     dir_image = os.path.dirname(node_tex_base.image.filepath)
@@ -502,6 +544,7 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
                             node_tex = nodes.new(type="ShaderNodeTexImage")
                             node_tex.location = (node_tex_base.location.x, node_tex_base.location.y - 300)
                             node_tex.image = bpy.data.images.load(dir_n)
+                            node_tex.interpolation = "Closest"
                             bpy.data.images[node_tex.image.name].colorspace_settings.name = "Non-Color"
                             links.new(node_tex.outputs["Color"], group_COn.inputs["Normal"])
                             links.new(node_tex.outputs["Alpha"], group_COn.inputs["Normal Alpha"])
@@ -511,6 +554,7 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
                             node_tex = nodes.new(type="ShaderNodeTexImage")
                             node_tex.location = (node_tex_base.location.x, node_tex_base.location.y - 600)
                             node_tex.image = bpy.data.images.load(dir_s)
+                            node_tex.interpolation = "Closest"
                             bpy.data.images[node_tex.image.name].colorspace_settings.name = "Non-Color"
                             links.new(node_tex.outputs["Color"], group_COn.inputs["PBR"])
                             links.new(node_tex.outputs["Alpha"], group_COn.inputs["PBR Alpha"])
@@ -520,6 +564,7 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
                             node_tex = nodes.new(type="ShaderNodeTexImage")
                             node_tex.location = (node_tex_base.location.x, node_tex_base.location.y - 600)
                             node_tex.image = bpy.data.images.load(dir_a)
+                            node_tex.interpolation = "Closest"
                             bpy.data.images[node_tex.image.name].colorspace_settings.name = "Non-Color"
                             links.new(node_tex.outputs["Color"], group_COn.inputs["PBR"])
                             links.new(node_tex.outputs["Alpha"], group_COn.inputs["PBR Alpha"])
@@ -561,7 +606,7 @@ class VIEW3D_OT_CrafterOpenClassificationBasis(bpy.types.Operator):#打开分类
         return True
 
     def execute(self, context: bpy.types.Context):
-        folder_path = classification_basis_dir
+        folder_path = dir_classification_basis
         open_folder(folder_path)
 
         return {'FINISHED'}

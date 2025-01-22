@@ -37,6 +37,13 @@ class CrafterAddonPreferences(AddonPreferences):
     solid: IntProperty(name="Solid",
                        default=0,)# type: ignore
 #==========导入资源属性==========
+    Resources_Plans_List: CollectionProperty(name="Resources Plans",type=ResourcePlan)#type: ignore
+    Resources_Plans_List_index: IntProperty(name="Resources Plans index",
+                                            default=0,
+                                            update=lambda self, context: self.update_resources_plans_list_index(context))# type: ignore
+    Resources_List: CollectionProperty(name="Resources Plans Info",type=ResourcePlansInfo)# type: ignore
+    Resources_List_index: IntProperty(name="Resources Plans Info index",
+                                      default=0)# type: ignore
     Texture_Interpolation: EnumProperty(name="Texture Interpolation",
                                         items=[("Linear","Linear","Linear interpolation"),
                                                ("Closest","Closest","No interpolation (sample closest texel)"),
@@ -45,10 +52,6 @@ class CrafterAddonPreferences(AddonPreferences):
                                         default="Closest",
                                         description="Texture interpolation method",
                                         update=lambda self, context: self.update_texture_interpolation(context))# type: ignore
-    Resources_Plans_List: CollectionProperty(name="Resources Plans",type=ResourcePlan)#type: ignore
-    Resources_Plans_List_index: IntProperty(name="Resources Plans index",default=0)# type: ignore
-    Resources_Plans_Info_List: CollectionProperty(name="Resources Plans Info",type=ResourcePlansInfo)# type: ignore
-    Resources_Plans_Info_List_index: IntProperty(name="Resources Plans Info index",default=0)# type: ignore
 #==========加载材质属性==========
     Materials_List: CollectionProperty(name="Materials",type=Material)#type: ignore
     Materials_List_index: IntProperty(name="Materials index",default=0)# type: ignore
@@ -64,4 +67,8 @@ class CrafterAddonPreferences(AddonPreferences):
 #==========修改变量操作==========
     def update_texture_interpolation(self, context):
         bpy.ops.crafter.set_texture_interpolation()
+        return None
+    
+    def update_resources_plans_list_index(self, context):
+        bpy.ops.crafter.reload_all()
         return None

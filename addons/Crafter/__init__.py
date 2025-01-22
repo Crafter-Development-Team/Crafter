@@ -48,19 +48,19 @@ _addon_properties = {
 # }
 
 #==========初始化cafter_data地址==========
-extension_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-extensions_dir = os.path.dirname(extension_dir)
-defaults_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "defaults")
-defaults_materials_dir = os.path.join(defaults_dir, "materials")
-defaults_classification_basis_dir = os.path.join(defaults_dir, "classification basis")
-blend_append_dir = os.path.join(os.path.join(defaults_dir,"append.blend"))
+dir_extension = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+dir_extensions = os.path.dirname(dir_extension)
+dir_defaults = os.path.join(os.path.dirname(os.path.abspath(__file__)), "defaults")
+dir_defaults_materials = os.path.join(dir_defaults, "materials")
+dir_defaults_classification_basis = os.path.join(dir_defaults, "classification basis")
+dir_blend_append = os.path.join(os.path.join(dir_defaults,"append.blend"))
 
-cafter_data_dir = os.path.join(extensions_dir, "cafter_data")
-resourcepacks_dir = os.path.join(cafter_data_dir, "resourcepacks")
-original_dir = os.path.join(resourcepacks_dir, "original")
-materials_dir = os.path.join(cafter_data_dir, "materials")
-classification_basis_dir = os.path.join(cafter_data_dir, "classification basis")
-classification_basis_default_dir = os.path.join(classification_basis_dir, "default")
+dir_cafter_data = os.path.join(dir_extensions, "cafter_data")
+dir_resourcepacks_plans = os.path.join(dir_cafter_data, "resourcepacks")
+dir_original = os.path.join(dir_resourcepacks_plans, "original")
+dir_materials = os.path.join(dir_cafter_data, "materials")
+dir_classification_basis = os.path.join(dir_cafter_data, "classification basis")
+dir_classification_basis_default = os.path.join(dir_classification_basis, "default")
 
 #==========注册==========
 def register():
@@ -74,20 +74,20 @@ def register():
     bpy.app.translations.register(__addon_name__, common_dictionary)
 
     #==========初始化cafter_data文件夹==========
-    os.makedirs(cafter_data_dir, exist_ok=True)
-    os.makedirs(resourcepacks_dir, exist_ok=True)
-    os.makedirs(original_dir, exist_ok=True)
-    os.makedirs(materials_dir, exist_ok=True)
-    os.makedirs(classification_basis_dir, exist_ok=True)
-    os.makedirs(classification_basis_default_dir, exist_ok=True)
+    os.makedirs(dir_cafter_data, exist_ok=True)
+    os.makedirs(dir_resourcepacks_plans, exist_ok=True)
+    os.makedirs(dir_original, exist_ok=True)
+    os.makedirs(dir_materials, exist_ok=True)
+    os.makedirs(dir_classification_basis, exist_ok=True)
+    os.makedirs(dir_classification_basis_default, exist_ok=True)
     #==========初始化默认方案==========
-    for filename in os.listdir(defaults_materials_dir):
-        src_file = os.path.join(defaults_materials_dir, filename)
-        dest_file = os.path.join(materials_dir, filename)
+    for filename in os.listdir(dir_defaults_materials):
+        src_file = os.path.join(dir_defaults_materials, filename)
+        dest_file = os.path.join(dir_materials, filename)
         shutil.copy(src_file, dest_file)
-    for filename in os.listdir(defaults_classification_basis_dir):
-        src_file = os.path.join(defaults_classification_basis_dir, filename)
-        dest_file = os.path.join(classification_basis_default_dir, filename)
+    for filename in os.listdir(dir_defaults_classification_basis):
+        src_file = os.path.join(dir_defaults_classification_basis, filename)
+        dest_file = os.path.join(dir_classification_basis_default, filename)
         shutil.copy(src_file, dest_file)
 
     print("{} addon is installed.".format(__addon_name__))
