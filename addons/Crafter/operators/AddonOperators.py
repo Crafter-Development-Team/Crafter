@@ -10,6 +10,7 @@ import zipfile
 from ..config import __addon_name__
 from ..__init__ import dir_resourcepacks_plans, dir_materials, dir_classification_basis, dir_blend_append
 
+# crafter_resources_icons = bpy.utils.previews.new()
 #==========通用操作==========
 def open_folder(folder_path: str):
     if platform.system() == "Windows":
@@ -90,8 +91,13 @@ class VIEW3D_OT_CrafterReloadResources(bpy.types.Operator):#刷新资源包列�
             with open(dir_crafter_json, "w", encoding="utf-8") as file:
                 json.dump(crafter_json, file, ensure_ascii=False, indent=4)
             for resourcepack in crafter_json:
+                # dir_resourcepack = os.path.join(dir_resourcepacks, resourcepack)
+                # crafter_resources_icons.clear()
                 resourcespack_name = addon_prefs.Resources_List.add()
                 resourcespack_name.name = resourcepack
+                # if "pack.png" in os.listdir(dir_resourcepack):
+                #     crafter_resources_icons.load("crafter_resources" + resourcepack,os.path.join(dir_resourcepack,"pack.png"),"IMAGE")
+                #     for icon in crafter_resources_icons:
         else:
             crafter_json = []
             for folder in list_dir_resourcepacks:

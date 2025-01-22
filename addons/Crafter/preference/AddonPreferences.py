@@ -43,7 +43,8 @@ class CrafterAddonPreferences(AddonPreferences):
                                             update=lambda self, context: self.update_resources_plans_list_index(context))# type: ignore
     Resources_List: CollectionProperty(name="Resources Plans Info",type=ResourcePlansInfo)# type: ignore
     Resources_List_index: IntProperty(name="Resources Plans Info index",
-                                      default=0)# type: ignore
+                                      default=0,
+                                      update=lambda self, context: self.update_resources_list_index(context))# type: ignore
     Texture_Interpolation: EnumProperty(name="Texture Interpolation",
                                         items=[("Linear","Linear","Linear interpolation"),
                                                ("Closest","Closest","No interpolation (sample closest texel)"),
@@ -70,5 +71,9 @@ class CrafterAddonPreferences(AddonPreferences):
         return None
     
     def update_resources_plans_list_index(self, context):
+        bpy.ops.crafter.reload_all()
+        return None
+    
+    def update_resources_list_index(self, context):
         bpy.ops.crafter.reload_all()
         return None

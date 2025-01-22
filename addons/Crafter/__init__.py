@@ -94,6 +94,9 @@ def register():
 
 #==========注销==========
 def unregister():
+    # #==========注销crafter_resource_icons==========
+    # from .operators.AddonOperators import crafter_resources_icons
+    # bpy.utils.previews.remove(crafter_resources_icons)
     # Internationalization
     bpy.app.translations.unregister(__addon_name__)
     # unRegister classes

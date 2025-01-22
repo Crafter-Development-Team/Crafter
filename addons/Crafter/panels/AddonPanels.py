@@ -4,6 +4,7 @@ import os
 from ..config import __addon_name__
 from ....common.i18n.i18n import i18n
 from ....common.types.framework import reg_order
+from ..__init__ import dir_resourcepacks_plans
 
 @reg_order(0)#==========导入预设面板==========
 class VIEW3D_PT_CrafterPlans(bpy.types.Panel):
@@ -83,6 +84,10 @@ class VIEW3D_UL_CrafterResources(bpy.types.UIList):
 
 class VIEW3D_UL_CrafterResourcesInfo(bpy.types.UIList):
      def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
+        dir_resourcepacks = os.path.join(dir_resourcepacks_plans, addon_prefs.Resources_Plans_List[addon_prefs.Resources_Plans_List_index].name)
+        dir_resourcepack = os.path.join(dir_resourcepacks, item.name)
+        
         if self.layout_type in {"DEFAULT","COMPACT"}:
             item_name = ""
             i = 0
@@ -94,7 +99,10 @@ class VIEW3D_UL_CrafterResourcesInfo(bpy.types.UIList):
                 elif item.name[i] != "!":
                     item_name += item.name[i]
                 i+=1
-                    
+            # if "pack.png" in os.listdir(dir_resourcepack):
+            #     layout.label(text=item_name,icon="crafter_resources" + item.name)
+            # else:
+            #     layout.label(text=item_name)
             layout.label(text=item_name)
 
 @reg_order(2)#==========导入资源面板==========
@@ -118,7 +126,7 @@ class VIEW3D_PT_CrafterImportResources(bpy.types.Panel):
             row_Resources_List = layout.row()
             row_Resources_List.template_list("VIEW3D_UL_CrafterResourcesInfo", "", addon_prefs, "Resources_List", addon_prefs, "Resources_List_index", rows=1)
             if len(addon_prefs.Resources_List) > 1:
-                col_Resources_List_ops = row_Resources_List.column()
+                col_Resources_List_ops = row_Resources_List.column(align=True)
                 col_Resources_List_ops.operator("crafter.up_resource",icon="TRIA_UP",text="")
                 col_Resources_List_ops.operator("crafter.down_resource",icon="TRIA_DOWN",text="")
             
