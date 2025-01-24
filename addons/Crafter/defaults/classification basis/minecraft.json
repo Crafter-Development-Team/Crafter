@@ -34,8 +34,7 @@
         },
         "grass_block_top":{
             "key_words":[
-                "grass_block_top",
-                "FD"
+                "grass_block_top"
             ]
         },
         "add_green":{
@@ -47,8 +46,7 @@
                 "tall_grass_bottom"
             ],
             "full_name":[
-                "grass",
-                "F"
+                "grass"
             ]
         },
         "plants":{

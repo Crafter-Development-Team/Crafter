@@ -36,7 +36,7 @@ class CrafterAddonPreferences(AddonPreferences):
                              description="Ending coordinates")# type: ignore
     solid: IntProperty(name="Solid",
                        default=0,)# type: ignore
-#==========导入资源属性==========
+#==========导入资源包属性==========
     Resources_Plans_List: CollectionProperty(name="Resources Plans",type=ResourcePlan)#type: ignore
     Resources_Plans_List_index: IntProperty(name="Resources",
                                             default=0,

@@ -33,7 +33,13 @@ _addon_properties = {
                                    subtype="FACTOR",
                                    min=0,
                                    max=1,
-                                   default=0)
+                                   default=0),
+    },
+    bpy.types.Object:{
+        "Crafter_import_by": BoolProperty(name="import by Crafter",
+                                          default=False),
+        "Crafter_name": StringProperty(name="Crafter name",
+                                       default="")
     }
 }
 

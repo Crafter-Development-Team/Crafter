@@ -76,7 +76,7 @@ class VIEW3D_PT_CrafterImportWorld(bpy.types.Panel):
     def poll(cls, context: bpy.types.Context):
             return context.preferences.addons[__addon_name__].preferences.Import_World
 
-#==========导入资源列表==========
+#==========导入资源包列表==========
 class VIEW3D_UL_CrafterResources(bpy.types.UIList):
      def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
         if self.layout_type in {"DEFAULT","COMPACT"}:
@@ -105,7 +105,7 @@ class VIEW3D_UL_CrafterResourcesInfo(bpy.types.UIList):
             #     layout.label(text=item_name)
             layout.label(text=item_name)
 
-@reg_order(2)#==========导入资源面板==========
+@reg_order(2)#==========导入资源包面板==========
 class VIEW3D_PT_CrafterImportResources(bpy.types.Panel):
     bl_label = "Import Resources"
     bl_space_type = "VIEW_3D"
@@ -130,6 +130,9 @@ class VIEW3D_PT_CrafterImportResources(bpy.types.Panel):
                 col_Resources_List_ops.operator("crafter.up_resource",icon="TRIA_UP",text="")
                 col_Resources_List_ops.operator("crafter.down_resource",icon="TRIA_DOWN",text="")
             
+        row_Import_Resources = layout.row()
+        row_Import_Resources.operator("crafter.import_resources")
+        
         # row_Texture_Interpolation = layout.row(align=True)
         # row_Texture_Interpolation.prop(addon_prefs,"Texture_Interpolation")
         # row_Texture_Interpolation.operator("crafter.set_texture_interpolation")

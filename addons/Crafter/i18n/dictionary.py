@@ -11,8 +11,8 @@ dictionary = {
         "World path":"存档地址",
         "XYZ-1":"坐标1",
         "XYZ-2":"坐标2",
-            #==========导入资源==========
-        "Import Resources":"导入资源",
+            #==========导入资源包==========
+        "Import Resources":"导入资源包",
         "Resources":"资源包预设",
         "original":"原版",
         "Open Resources Plans":"打开资源包预设列表文件夹",
@@ -41,7 +41,8 @@ dictionary = {
         "Import the solid area":"导入实心区域",
         "Starting coordinates":"起始坐标",
         "Ending coordinates":"结束坐标",
-            #==========导入资源==========
+            #==========导入资源包==========
+        "Import resources":"导入资源包",
         "Set texture interpolation":"设置纹理插值",
             #==========加载材质==========
         "rain":"雨",
