@@ -26,6 +26,8 @@ dictionary = {
             #==========加载材质==========
         "Load Materials":"加载材质",
         "Rain":"雨",
+        "PBR Parser":"PBR解析器",
+        "Mix Parser":"混合解析器",
         "Materials index":"材质索引",
         "Open Materials":"打开材质文件夹",
         "Reload Materials":"刷新材质列表",
@@ -46,6 +48,10 @@ dictionary = {
         "Set texture interpolation":"设置纹理插值",
             #==========加载材质==========
         "rain":"雨",
+        "How to parse PBR texture(and normal texture)":"如何解析PBR贴图(以及法线贴图)",
+        "Try to parse both of them":"尝试适配两种格式",
+        "AO √ Height √ porosity √ SSS √":"AO √ 高度 √ 孔隙度 √ SSS √",
+        "AO X Height X porosity X SSS X":"AO X 高度 X 孔隙度 X SSS X",
         "Load material":"加载材质",
         "Classification basis":"材质分类依据",
         

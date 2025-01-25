@@ -54,6 +54,12 @@ class CrafterAddonPreferences(AddonPreferences):
                                         description="Texture interpolation method",
                                         update=lambda self, context: self.update_texture_interpolation(context))# type: ignore
 #==========加载材质属性==========
+    PBR_Parser: EnumProperty(name="PBR Parser",
+                              items=[("Mix_Parser","Mix Parser","Try to parse both of them"),
+                                     ("lab_PBR_1.3","lab PBR 1.3","AO √ Height √ porosity √ SSS √"),
+                                     ("SEUS/old_PBR","SEUS/old PBR","AO X Height X porosity X SSS X")],
+                              default="Mix_Parser",
+                              description="How to parse PBR texture(and normal texture)")# type: ignore
     Materials_List: CollectionProperty(name="Materials",type=Material)#type: ignore
     Materials_List_index: IntProperty(name="Material",default=0)# type: ignore
     Classification_Basis_List: CollectionProperty(name="Classification Basis",type=ClassificationBasisl)# type: ignore

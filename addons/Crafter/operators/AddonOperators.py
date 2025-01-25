@@ -497,8 +497,9 @@ class VIEW3D_OT_CrafterImportResources(bpy.types.Operator):#导入资源包
             files_list = []
             for root, dirs, files in os.walk(dir_assets):
                 for file in files:
-                    file_path = os.path.join(root, file)
-                    files_list.append((file, file_path))
+                    if not root.endswith("colormap"):
+                        file_path = os.path.join(root, file)
+                        files_list.append((file, file_path))
             images.append(files_list)
         is_original = False
         if len(crafter_json) == 0:
