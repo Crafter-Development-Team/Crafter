@@ -48,10 +48,11 @@ def unzip(zip_path, extract_to):
     zip_path: 压缩文件路径
     extract_to: 解压路径
     '''
+    os.makedirs(extract_to, exist_ok=True)
     with zipfile.ZipFile(zip_path, 'r') as zip_ref:
         zip_ref.extractall(extract_to)
 
-def add_node_moving_texture(node_tex_base, nodes, links):
+def add_node_moving_texture(node_tex, nodes, links):
     '''
     为基础色节点添加动态纹理节点并连接
     node_tex_base: 基础纹理节点
@@ -59,29 +60,28 @@ def add_node_moving_texture(node_tex_base, nodes, links):
     links:目标材质连接组
     return:动态纹理节点
     '''
-    if node_tex_base.image.size[0] != node_tex_base.image.size[1]:
-        dir_image = os.path.dirname(node_tex_base.image.filepath)
+    if node_tex.image.size[0] != node_tex.image.size[1]:
+        dir_image = os.path.dirname(node_tex.image.filepath)
         node_Moving_texture = nodes.new(type="ShaderNodeGroup")
-        node_Moving_texture.location = (node_tex_base.location.x - 200, node_tex_base.location.y)
+        node_Moving_texture.location = (node_tex.location.x - 200, node_tex.location.y)
         node_Moving_texture.node_tree = bpy.data.node_groups["C-Moving_texture"]
         try:
-            dir_mcmeta = os.path.join(bpy.path.abspath(dir_image), node_tex_base.image.name + ".mcmeta")
+            dir_mcmeta = os.path.join(bpy.path.abspath(dir_image), node_tex.image.name + ".mcmeta")
             with open(dir_mcmeta, 'r', encoding='utf-8') as file:
                 mcmeta = json.load(file)
                 frametime = mcmeta["animation"]["frametime"]
                 node_Moving_texture.inputs["frametime"].default_value = frametime
         except:
             pass
-        node_Moving_texture.inputs["row"].default_value = node_tex_base.image.size[1] / node_tex_base.image.size[0]
-        links.new(node_Moving_texture.outputs["Vector"], node_tex_base.inputs["Vector"])
+        node_Moving_texture.inputs["row"].default_value = node_tex.image.size[1] / node_tex.image.size[0]
+        links.new(node_Moving_texture.outputs["Vector"], node_tex.inputs["Vector"])
         return node_Moving_texture
 
-def import_normal_and_PBR_and_link_all(node_tex_base, group_COn, node_Moving_texture, nodes, links):
+def import_normal_and_PBR_and_link_all(node_tex_base, group_COn, nodes, links):
     '''
-    以基础色节点添加法向贴图节点和PBR贴图节点并连接
+    以基础色节点添加法向贴图节点和PBR贴图节点、连接并添加动态纹理节点
     node_tex_base: 基础色节点
     group_COn: 材质组节点
-    node_Moving_texture: 动态纹理节点,无则输入None
     nodes: 目标材质节点组
     links:目标材质连接组
     '''
@@ -93,6 +93,7 @@ def import_normal_and_PBR_and_link_all(node_tex_base, group_COn, node_Moving_tex
     dir_n = os.path.join(dir_image,name_block + "_n.png")
     dir_s = os.path.join(dir_image,name_block + "_s.png")
     dir_a = os.path.join(dir_image,name_block + "_a.png")
+    add_node_moving_texture(node_tex_base, nodes, links)
     if os.path.exists(bpy.path.abspath(dir_n)):
         node_tex = nodes.new(type="ShaderNodeTexImage")
         node_tex.location = (node_tex_base.location.x, node_tex_base.location.y - 300)
@@ -101,8 +102,7 @@ def import_normal_and_PBR_and_link_all(node_tex_base, group_COn, node_Moving_tex
         bpy.data.images[node_tex.image.name].colorspace_settings.name = "Non-Color"
         links.new(node_tex.outputs["Color"], group_COn.inputs["Normal"])
         links.new(node_tex.outputs["Alpha"], group_COn.inputs["Normal Alpha"])
-        if node_Moving_texture != None:
-            links.new(node_Moving_texture.outputs["Vector"], node_tex.inputs["Vector"])
+        add_node_moving_texture(node_tex, nodes, links)
     if os.path.exists(bpy.path.abspath(dir_s)):
         node_tex = nodes.new(type="ShaderNodeTexImage")
         node_tex.location = (node_tex_base.location.x, node_tex_base.location.y - 600)
@@ -111,8 +111,7 @@ def import_normal_and_PBR_and_link_all(node_tex_base, group_COn, node_Moving_tex
         bpy.data.images[node_tex.image.name].colorspace_settings.name = "Non-Color"
         links.new(node_tex.outputs["Color"], group_COn.inputs["PBR"])
         links.new(node_tex.outputs["Alpha"], group_COn.inputs["PBR Alpha"])
-        if node_Moving_texture != None:
-            links.new(node_Moving_texture.outputs["Vector"], node_tex.inputs["Vector"])
+        add_node_moving_texture(node_tex, nodes, links)
     elif os.path.exists(bpy.path.abspath(dir_a)):
         node_tex = nodes.new(type="ShaderNodeTexImage")
         node_tex.location = (node_tex_base.location.x, node_tex_base.location.y - 600)
@@ -121,8 +120,7 @@ def import_normal_and_PBR_and_link_all(node_tex_base, group_COn, node_Moving_tex
         bpy.data.images[node_tex.image.name].colorspace_settings.name = "Non-Color"
         links.new(node_tex.outputs["Color"], group_COn.inputs["PBR"])
         links.new(node_tex.outputs["Alpha"], group_COn.inputs["PBR Alpha"])
-        if node_Moving_texture != None:
-            links.new(node_Moving_texture.outputs["Vector"], node_tex.inputs["Vector"])
+        add_node_moving_texture(node_tex, nodes, links)
 
 def fuq_bl_dot_number(name: str):
     '''
@@ -174,20 +172,21 @@ class VIEW3D_OT_CrafterReloadResources(bpy.types.Operator):#刷新资源包列�
         if "crafter.json" in list_dir_resourcepacks:
             with open(dir_crafter_json, "r", encoding="utf-8") as file:
                 crafter_json = json.load(file)
+            crafter_json_copy =crafter_json.copy()
+            crafter_json = []
             for folder in list_dir_resourcepacks:
-                if os.path.isdir(os.path.join(dir_resourcepacks, folder)):
-                    if not folder in crafter_json:
-                        crafter_json.append(folder)
                 if folder.endswith(".zip"):
                     dir_resourcepack = os.path.join(dir_resourcepacks, folder[:-4])
                     os.makedirs(dir_resourcepack, exist_ok=True)
-                    unzip(os.path.join(dir_resourcepacks, folder), dir_resourcepack)
+                    try:
+                        unzip(os.path.join(dir_resourcepacks, folder), dir_resourcepack)
+                    except Exception as e:
+                        print(e)
                     os.remove(os.path.join(dir_resourcepacks, folder))
                     crafter_json.append(folder[:-4])
-            crafter_json_copy =crafter_json.copy()
             for resourcepack in crafter_json_copy:
-                if not resourcepack in list_dir_resourcepacks:
-                    crafter_json.remove(resourcepack)
+                if  os.path.isdir(os.path.join(dir_resourcepacks, resourcepack)) and resourcepack not in crafter_json:
+                    crafter_json.append(resourcepack)
             with open(dir_crafter_json, "w", encoding="utf-8") as file:
                 json.dump(crafter_json, file, ensure_ascii=False, indent=4)
             for resourcepack in crafter_json:
@@ -206,7 +205,10 @@ class VIEW3D_OT_CrafterReloadResources(bpy.types.Operator):#刷新资源包列�
                 if folder.endswith(".zip"):
                     dir_resourcepack = os.path.join(dir_resourcepacks, folder[:-4])
                     os.makedirs(dir_resourcepack, exist_ok=True)
-                    unzip(os.path.join(dir_resourcepacks, folder), dir_resourcepack)
+                    try:
+                        unzip(os.path.join(dir_resourcepacks, folder), dir_resourcepack)
+                    except Exception as e:
+                        print(e)
                     os.remove(os.path.join(dir_resourcepacks, folder))
                     crafter_json.append(folder[:-4])
             with open(dir_crafter_json, "w", encoding="utf-8") as file:
@@ -513,7 +515,6 @@ class VIEW3D_OT_CrafterImportResources(bpy.types.Operator):#导入资源包
                     nodes = node_tree_material.nodes
                     links = node_tree_material.links
                     is_materialed = False
-                    node_Moving_texture = None
                     for node in nodes:
                         if node.type == 'TEX_IMAGE':
                             if node.image == None:
@@ -535,7 +536,6 @@ class VIEW3D_OT_CrafterImportResources(bpy.types.Operator):#导入资源包
                                             while j < len(images[i]) and not found_texture:
                                                 if name_image == images[i][j][0]:
                                                     node.image = bpy.data.images.load(images[i][j][1])
-                                                    node_Moving_texture = add_node_moving_texture(node_tex_base=node_tex_base, nodes=nodes, links=links)
                                                     found_texture = True
                                                 j += 1
                                             i += 1
@@ -545,7 +545,7 @@ class VIEW3D_OT_CrafterImportResources(bpy.types.Operator):#导入资源包
                                     is_materialed = True
                                     group_COn = node
                     if is_materialed and (not is_original):
-                        import_normal_and_PBR_and_link_all(node_tex_base=node_tex_base, group_COn=group_COn, node_Moving_texture=node_Moving_texture, nodes=nodes, links=links)
+                        import_normal_and_PBR_and_link_all(node_tex_base=node_tex_base, group_COn=group_COn, nodes=nodes, links=links)
 
         return {'FINISHED'}
 
@@ -608,11 +608,14 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
         # 删除CrafterIn物体、材质
         try:
             bpy.data.objects.remove(bpy.data.objects["CrafterIn"])
+        except:
+            pass
+        try:
             bpy.data.materials.remove(bpy.data.materials["CrafterIn"], do_unlink=True)
         except:
             pass
         # 导入CO-节点组
-        CO_node_groups = ["CO-","C-Moving_texture"]
+        CO_node_groups = ["CO-","C-Moving_texture","C-lab_PBR_1.3"]
         with bpy.data.libraries.load(dir_blend_append, link=False) as (data_from, data_to):
             data_to.node_groups = [name for name in data_from.node_groups if name in CO_node_groups]
         # 导入CrafterIn物体、材质、startswith(CI-)
@@ -677,8 +680,6 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
                                     node_tex_base = node
                                     block_name = fuq_bl_dot_number(node_tex_base.image.name)
                                     real_block_name = block_name[:-4]
-                                    #若是动态纹理，添加支持
-                                    node_Moving_texture = add_node_moving_texture(node_tex_base=node_tex_base,nodes=nodes,links=links)
                     # 注释部分为旧的通过材质名获得mod_name和type_name的方式，暂作保留
 
                     # real_block_name = material.name
@@ -696,8 +697,6 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
                     # 如果在banlist里直接跳过
                     if real_block_name in banlist:
                         continue
-                    # 初始化node_Moving_texture
-                    node_Moving_texture = None
                     # 设置材质置换方式为仅置换
                     material.displacement_method = "DISPLACEMENT"
                     #获得node_output 并 删去无内容节点组 并 删去Rain_value
@@ -769,7 +768,7 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
                         links.new(output, node_output.inputs[output.name])
                     if node_tex_base == None:
                         continue
-                    import_normal_and_PBR_and_link_all(node_tex_base=node_tex_base, group_COn=group_COn, nodes=nodes, links=links, node_Moving_texture=node_Moving_texture)
+                    import_normal_and_PBR_and_link_all(node_tex_base=node_tex_base, group_COn=group_COn, nodes=nodes, links=links)
         #连接startswith(CO-)、startswith(CI-)节点组
         for aCO in COs:
             group_CO = bpy.data.node_groups[aCO]
@@ -780,6 +779,10 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
                     node_output = node
                 if node.type == "GROUP_INPUT":
                     node_input = node
+                if node.type == "GROUP":
+                    if node.node_tree.name != None:
+                        if node.node_tree.name.startswith("C-"):
+                            node_group_C_CO_Group = node
             group_CI = nodes.new(type='ShaderNodeGroup')
             group_CI.location = (node_output.location.x - 200, node_output.location.y)
             try:
@@ -787,12 +790,28 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
             except:
                 group_CI.node_tree = bpy.data.node_groups["CI-"]
             try:
-                for output in group_CI.outputs:
-                    links.new(output, node_output.inputs[output.name])
-                for input in group_CI.inputs:
-                    links.new(input, node_input.outputs[input.name])
+                node_group_C_CO_Group.node_tree = bpy.data.node_groups["C-" + addon_prefs.PBR_Parser]
             except:
                 pass
+            for output in group_CI.outputs:
+                try:
+                    links.new(output, node_output.inputs[output.name])
+                except:
+                    pass
+            for input in group_CI.inputs:
+                try:
+                    links.new(input, node_input.outputs[input.name])
+                except:
+                    pass
+                try:
+                    links.new(input, node_group_C_CO_Group.inputs[input.name])
+                except:
+                    pass
+            for input in node_group_C_CO_Group.inputs:
+                try:
+                    links.new(input, node_input.outputs[input.name])
+                except:
+                    pass
         return {'FINISHED'}
 
 class VIEW3D_OT_CrafterOpenClassificationBasis(bpy.types.Operator):#打开分类依据文件夹

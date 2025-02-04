@@ -58,7 +58,7 @@ class CrafterAddonPreferences(AddonPreferences):
                               items=[("Mix_Parser","Mix Parser","Try to parse both of them"),
                                      ("lab_PBR_1.3","lab PBR 1.3","AO √ Height √ porosity √ SSS √"),
                                      ("SEUS/old_PBR","SEUS/old PBR","AO X Height X porosity X SSS X")],
-                              default="Mix_Parser",
+                              default="lab_PBR_1.3",
                               description="How to parse PBR texture(and normal texture)")# type: ignore
     Materials_List: CollectionProperty(name="Materials",type=Material)#type: ignore
     Materials_List_index: IntProperty(name="Material",default=0)# type: ignore

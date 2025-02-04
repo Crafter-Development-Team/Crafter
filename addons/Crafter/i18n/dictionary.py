@@ -54,6 +54,9 @@ dictionary = {
         "AO X Height X porosity X SSS X":"AO X 高度 X 孔隙度 X SSS X",
         "Load material":"加载材质",
         "Classification basis":"材质分类依据",
+        #==========节点接口==========
+        "Normal Alpha":"法向Alpha",
+        "Parsed Normal":"已解析法向",
         
     }
 }
