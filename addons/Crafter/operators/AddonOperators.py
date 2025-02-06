@@ -571,6 +571,52 @@ class VIEW3D_OT_CrafterSetTextureInterpolation(bpy.types.Operator):#设置纹理
         return {'FINISHED'}
 
 #==========加载材质操作==========
+class VIEW3D_OT_CrafterSetPBRParser(bpy.types.Operator):#设置PBR解析器
+    bl_label = "Set PBR Parser"
+    bl_idname = "crafter.set_pbr_parser"
+    bl_description = " "
+    
+    @classmethod
+    def poll(cls, context: bpy.types.Context):
+        return True
+
+    def execute(self, context: bpy.types.Context):
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
+
+        COs = []
+        for group in bpy.data.node_groups:
+            if group.name.startswith("CO-"):
+                COs.append(group.name)
+        for aCO in COs:
+            group_CO = bpy.data.node_groups[aCO]
+            nodes = group_CO.nodes
+            links = group_CO.links
+            for node in nodes:
+                if node.type == "GROUP_INPUT":
+                    node_input = node
+                if node.type == "GROUP":
+                    if node.node_tree.name != None:
+                        if node.node_tree.name.startswith("C-"):
+                            node_group_C_Group = node
+                        if node.node_tree.name.startswith("CI-"):
+                            group_CI = node
+            try:
+                print("PBR Parser changed to:", addon_prefs.PBR_Parser)
+                node_group_C_Group.node_tree = bpy.data.node_groups["C-" + addon_prefs.PBR_Parser]
+            except:
+                pass
+            for input in group_CI.inputs:
+                try:
+                    links.new(input, node_group_C_Group.outputs[input.name])
+                except:
+                    pass
+            for input in node_group_C_Group.inputs:
+                try:
+                    links.new(input, node_input.outputs[input.name])
+                except:
+                    pass
+        return {'FINISHED'}
+
 class VIEW3D_OT_CrafterOpenMaterials(bpy.types.Operator):#打开材质列表文件夹
     bl_label = "Open Materials"
     bl_idname = "crafter.open_materials"
@@ -615,7 +661,7 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
         except:
             pass
         # 导入CO-节点组
-        CO_node_groups = ["CO-","C-Moving_texture","C-lab_PBR_1.3"]
+        CO_node_groups = ["CO-","C-Moving_texture","C-lab_PBR_1.3","C-old_continuum","C-old_BSL","C-SEUS_PBR"]
         with bpy.data.libraries.load(dir_blend_append, link=False) as (data_from, data_to):
             data_to.node_groups = [name for name in data_from.node_groups if name in CO_node_groups]
         # 导入CrafterIn物体、材质、startswith(CI-)

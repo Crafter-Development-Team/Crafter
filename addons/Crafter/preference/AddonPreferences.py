@@ -60,7 +60,8 @@ class CrafterAddonPreferences(AddonPreferences):
                                      ("old_BSL","old BSL","1-R,G as Metallic,Emission in B"),
                                      ("SEUS_PBR","SEUS PBR","1-R,G as Metallic,No Emission")],
                               default="lab_PBR_1.3",
-                              description="How to parse PBR texture(and normal texture)")# type: ignore
+                              description="How to parse PBR texture(and normal texture)",
+                              update=lambda self, context: self.update_PBR_Parser(context))# type: ignore
     Materials_List: CollectionProperty(name="Materials",type=Material)#type: ignore
     Materials_List_index: IntProperty(name="Material",default=0)# type: ignore
     Classification_Basis_List: CollectionProperty(name="Classification Basis",type=ClassificationBasisl)# type: ignore
@@ -83,4 +84,8 @@ class CrafterAddonPreferences(AddonPreferences):
     
     def update_resources_list_index(self, context):
         bpy.ops.crafter.reload_all()
+        return None
+    
+    def update_PBR_Parser(self, context):
+        bpy.ops.crafter.set_pbr_parser()
         return None
