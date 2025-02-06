@@ -7,17 +7,8 @@
             "banlist":[
             ],
             "key_words":[
-                "leaves",
-                "oak_leaves",
-                "spruce_leaves",
-                "birch_leaves",
-                "jungle_leaves",
-                "acacia_leaves",
-                "dark_oak_leaves",
-                "azalea_leaves",
                 "flowering_azalea_leaves",
-                "mangrove_leaves",
-                "cherry_leaves"
+                "mangrove_leaves"
             ],
             "full_name":[
             ]
@@ -38,12 +29,25 @@
             ]
         },
         "add_green":{
+            "banlist":[
+                "flowering_azalea_leaves",
+                "mangrove_leaves"
+            ],
             "key_words":[
                 "tall_grass_top",
                 "fern",
                 "vine",
                 "lily_pad",
-                "tall_grass_bottom"
+                "tall_grass_bottom",
+                "leaves",
+                "oak_leaves",
+                "spruce_leaves",
+                "birch_leaves",
+                "jungle_leaves",
+                "acacia_leaves",
+                "dark_oak_leaves",
+                "azalea_leaves",
+                "cherry_leaves"
             ],
             "full_name":[
                 "grass"

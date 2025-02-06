@@ -782,7 +782,7 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
                 if node.type == "GROUP":
                     if node.node_tree.name != None:
                         if node.node_tree.name.startswith("C-"):
-                            node_group_C_CO_Group = node
+                            node_group_C_Group = node
             group_CI = nodes.new(type='ShaderNodeGroup')
             group_CI.location = (node_output.location.x - 200, node_output.location.y)
             try:
@@ -790,7 +790,7 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
             except:
                 group_CI.node_tree = bpy.data.node_groups["CI-"]
             try:
-                node_group_C_CO_Group.node_tree = bpy.data.node_groups["C-" + addon_prefs.PBR_Parser]
+                node_group_C_Group.node_tree = bpy.data.node_groups["C-" + addon_prefs.PBR_Parser]
             except:
                 pass
             for output in group_CI.outputs:
@@ -804,10 +804,10 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
                 except:
                     pass
                 try:
-                    links.new(input, node_group_C_CO_Group.inputs[input.name])
+                    links.new(input, node_group_C_Group.outputs[input.name])
                 except:
                     pass
-            for input in node_group_C_CO_Group.inputs:
+            for input in node_group_C_Group.inputs:
                 try:
                     links.new(input, node_input.outputs[input.name])
                 except:
