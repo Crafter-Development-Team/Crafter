@@ -664,6 +664,9 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
         CO_node_groups = ["CO-","C-Moving_texture","C-lab_PBR_1.3","C-old_continuum","C-old_BSL","C-SEUS_PBR"]
         with bpy.data.libraries.load(dir_blend_append, link=False) as (data_from, data_to):
             data_to.node_groups = [name for name in data_from.node_groups if name in CO_node_groups]
+        for node_group in bpy.data.node_groups:
+            if node_group.name in CO_node_groups:
+                node_group.use_fake_user = True
         # 导入CrafterIn物体、材质、startswith(CI-)
         blend_material_dir = os.path.join(dir_materials, addon_prefs.Materials_List[addon_prefs.Materials_List_index].name + ".blend")
         with bpy.data.libraries.load(blend_material_dir, link=False) as (data_from, data_to):
