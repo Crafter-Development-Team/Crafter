@@ -55,8 +55,8 @@ class CrafterAddonPreferences(AddonPreferences):
                                         update=lambda self, context: self.update_texture_interpolation(context))# type: ignore
 #==========加载材质属性==========
     PBR_Parser: EnumProperty(name="PBR Parser",
-                              items=[("lab_PBR_1.3","lab PBR 1.3","(1-R)**2,G as F0,Emission in alpha"),
-                                     ("old_continuum","old continuum","(1-R)**2,G as Metallic,Emission in alpha"),
+                              items=[("lab_PBR_1.3","lab PBR 1.3","(1-R)**2,G as F0,Emission in Alpha"),
+                                     ("old_continuum","old continuum","(1-R)**2,G as Metallic,Emission in Alpha"),
                                      ("old_BSL","old BSL","1-R,G as Metallic,Emission in B"),
                                      ("SEUS_PBR","SEUS PBR","1-R,G as Metallic,No Emission")],
                               default="lab_PBR_1.3",

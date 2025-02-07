@@ -49,9 +49,10 @@ dictionary = {
             #==========加载材质==========
         "rain":"雨",
         "How to parse PBR texture(and normal texture)":"如何解析PBR贴图(以及法线贴图)",
-        "Try to parse both of them":"尝试适配两种格式",
-        "AO √ Height √ porosity √ SSS √":"AO √ 高度 √ 孔隙度 √ SSS √",
-        "AO X Height X porosity X SSS X":"AO X 高度 X 孔隙度 X SSS X",
+        "(1-R)**2,G as F0,Emission in Alpha":"(1-R)**2,G为F0,Alpha为自发光",
+        "(1-R)**2,G as Metallic,Emission in Alpha":"(1-R)**2,G为金属度,Alpha为自发光",
+        "1-R,G as Metallic,Emission in B":"1-R,G为金属度,B为自发光",
+        "1-R,G as Metallic,No Emission":"1-R,G为金属度,无自发光",
         "Load material":"加载材质",
         "Classification basis":"材质分类依据",
         #==========节点接口==========
