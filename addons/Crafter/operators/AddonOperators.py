@@ -601,7 +601,6 @@ class VIEW3D_OT_CrafterSetPBRParser(bpy.types.Operator):#设置PBR解析器
                         if node.node_tree.name.startswith("CI-"):
                             group_CI = node
             try:
-                print("PBR Parser changed to:", addon_prefs.PBR_Parser)
                 node_group_C_Group.node_tree = bpy.data.node_groups["C-" + addon_prefs.PBR_Parser]
             except:
                 pass
@@ -686,6 +685,7 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
         COs = ["CO-"]
         classification_list = {}
         banlist = []
+        banlist_key_words = []
         # 获取classification_list
         for filename in os.listdir(classification_folder_dir):
             file_path = os.path.join(classification_folder_dir, filename)
@@ -693,14 +693,17 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
                 try:
                     with open(file_path, 'r', encoding='utf-8') as file:
                         data = json.load(file)
-                        banlist.extend(data["banlist"])
                         classification_list = make_json_together(classification_list, data)
+                        if "banlist" in data:
+                            banlist.extend(data["banlist"])
+                        if "banlist_key_words" in data:
+                            banlist_key_words.extend(data["banlist_key_words"])
                 except Exception as e:
                     print(e)
         # 创建所有startswith(CO-)节点组
         group_CO = bpy.data.node_groups['CO-']
         for type_name in classification_list:
-            if type_name == "banlist":
+            if type_name == "banlist" or type_name == "banlist_key_words":
                 continue
             for group_name in classification_list[type_name]:
                 group_new = group_CO.copy()
@@ -744,7 +747,12 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
                     #     mod_name = real_material_name[:last____index]
                     #     type_name = real_material_name[last____index+1:last_hen_index]
                     # 如果在banlist里直接跳过
-                    if real_block_name in banlist:
+                    ban = False
+                    for ban_key in banlist_key_words:
+                        if real_block_name in ban_key:
+                            ban = True
+                            break
+                    if ban or real_block_name in banlist:
                         continue
                     # 设置材质置换方式为仅置换
                     material.displacement_method = "DISPLACEMENT"
@@ -766,13 +774,22 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
                     group_COn.location = (node_output.location.x - 200, node_output.location.y)
                     found = False
                     for type_name in classification_list:
-                        if type_name == "banlist":
+                        if type_name == "banlist" or type_name == "banlist_key_words":
                             continue
                         for group_name in classification_list[type_name]:
                             banout = False
-                            if "banlist" in classification_list[type_name][group_name]:
+                            if "banlist_key_words" in classification_list[type_name][group_name]:
                                 for item in classification_list[type_name][group_name]["banlist"]:
                                     if item in real_block_name:
+                                        banout = True
+                                        print("in ban",item)
+                                        break
+                            if banout:
+                                break
+                            if "banlist" in classification_list[type_name][group_name]:
+                                for item in classification_list[type_name][group_name]["banlist"]:
+                                    if item == real_block_name:
+                                        print("= Ban", item)
                                         banout = True
                                         break
                             if banout:

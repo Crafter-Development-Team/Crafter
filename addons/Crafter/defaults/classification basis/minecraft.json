@@ -1,12 +1,24 @@
 {
-    "banlist":[
+    "banlist_key_words":[
         "skin"
+    ],
+    "banlist":[
+
     ],
     "block":{
         "leaves": {
             "banlist":[
+                "oak_leaves",
+                "spruce_leaves",
+                "birch_leaves",
+                "jungle_leaves",
+                "acacia_leaves",
+                "dark_oak_leaves",
+                "azalea_leaves",
+                "cherry_leaves"
             ],
             "key_words":[
+                "leaves",
                 "flowering_azalea_leaves",
                 "mangrove_leaves"
             ],
@@ -38,8 +50,10 @@
                 "fern",
                 "vine",
                 "lily_pad",
-                "tall_grass_bottom",
-                "leaves",
+                "tall_grass_bottom"
+            ],
+            "full_name":[
+                "grass",
                 "oak_leaves",
                 "spruce_leaves",
                 "birch_leaves",
@@ -48,9 +62,6 @@
                 "dark_oak_leaves",
                 "azalea_leaves",
                 "cherry_leaves"
-            ],
-            "full_name":[
-                "grass"
             ]
         },
         "plants":{
