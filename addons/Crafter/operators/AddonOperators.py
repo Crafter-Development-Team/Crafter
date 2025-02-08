@@ -861,7 +861,8 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
                 pass
             for output in group_CI.outputs:
                 try:
-                    links.new(output, node_output.inputs[output.name])
+                    links.new(output, 
+                    node_output.inputs[output.name])
                 except:
                     pass
             for input in group_CI.inputs:

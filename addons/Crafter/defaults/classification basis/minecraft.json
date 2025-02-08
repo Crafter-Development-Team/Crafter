@@ -6,7 +6,13 @@
 
     ],
     "block":{
-        "leaves": {
+        "water":{
+            "full_name":[
+                "water_flow",
+                "water_still"
+            ]
+        },
+        "sss_tran_move": {
             "banlist":[
                 "oak_leaves",
                 "spruce_leaves",
@@ -18,54 +24,46 @@
                 "cherry_leaves"
             ],
             "key_words":[
-                "leaves",
+                "leaves"
+            ],
+            "full_name":[
                 "flowering_azalea_leaves",
                 "mangrove_leaves"
-            ],
-            "full_name":[
             ]
         },
-        "water":{
-            "banlist":[
-            ],
-            "key_words":[
-                "water_flow",
-                "water_still"
-            ],
+        "color_sss_tran_move":{
             "full_name":[
+                "oak_leaves",
+                "spruce_leaves",
+                "birch_leaves",
+                "jungle_leaves",
+                "acacia_leaves",
+                "dark_oak_leaves",
+                "azalea_leaves",
+                "cherry_leaves"
             ]
         },
-        "grass_block_top":{
+        "color":{
             "key_words":[
                 "grass_block_top"
             ]
         },
-        "add_green":{
-            "banlist":[
-                "flowering_azalea_leaves",
-                "mangrove_leaves"
-            ],
-            "key_words":[
+        "tran_move":{
+            "full_name":[
+                "poppy",
+                "dandelion",
+                "azure_bluet"
+            ]
+        },
+        "color_tran_move":{
+            "full_name":[
+                "grass",
                 "tall_grass_top",
                 "fern",
                 "vine",
                 "lily_pad",
                 "tall_grass_bottom"
-            ],
-            "full_name":[
-                "grass",
-                "oak_leaves",
-                "spruce_leaves",
-                "birch_leaves",
-                "jungle_leaves",
-                "acacia_leaves",
-                "dark_oak_leaves",
-                "azalea_leaves",
-                "cherry_leaves"
             ]
-        },
-        "plants":{
-
         },
         "no_rain":{
             "key_words":[
