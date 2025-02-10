@@ -614,6 +614,25 @@ class VIEW3D_OT_CrafterSetPBRParser(bpy.types.Operator):#设置PBR解析器
                     links.new(input, node_input.outputs[input.name])
                 except:
                     pass
+        PBR_value = [0.291769,0.039546,0,1]
+        if addon_prefs.PBR_Parser == "old_continuum":
+            PBR_value = [0.291769,0,0,1]
+        elif addon_prefs.PBR_Parser == "old_BSL":
+            PBR_value = [0.5,0,0,1]
+        elif addon_prefs.PBR_Parser == "SEUS_PBR":
+            PBR_value = [0.5,0,0,1]
+        for material in bpy.data.materials:
+            if material.node_tree != None:
+                for node in material.node_tree.nodes:
+                    if node.type == "GROUP":
+                        if node.node_tree.name != None:
+                            if node.node_tree.name.startswith("CO-"):
+                                try:
+                                    node.inputs["PBR"].default_value = PBR_value
+                                except:
+                                    pass
+                                
+
         return {'FINISHED'}
 
 class VIEW3D_OT_CrafterOpenMaterials(bpy.types.Operator):#打开材质列表文件夹
@@ -879,6 +898,23 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
                     links.new(input, node_input.outputs[input.name])
                 except:
                     pass
+        PBR_value = [0.291769,0.039546,0,1]
+        if addon_prefs.PBR_Parser == "old_continuum":
+            PBR_value = [0.291769,0,0,1]
+        elif addon_prefs.PBR_Parser == "old_BSL":
+            PBR_value = [0.5,0,0,1]
+        elif addon_prefs.PBR_Parser == "SEUS_PBR":
+            PBR_value = [0.5,0,0,1]
+        for material in bpy.data.materials:
+            if material.node_tree != None:
+                for node in material.node_tree.nodes:
+                    if node.type == "GROUP":
+                        if node.node_tree.name != None:
+                            if node.node_tree.name.startswith("CO-"):
+                                try:
+                                    node.inputs["PBR"].default_value = PBR_value
+                                except:
+                                    pass
         return {'FINISHED'}
 
 class VIEW3D_OT_CrafterOpenClassificationBasis(bpy.types.Operator):#打开分类依据文件夹
