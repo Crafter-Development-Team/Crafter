@@ -292,7 +292,7 @@ class VIEW3D_OT_CrafterImportWorld(bpy.types.Operator):#导入世界
             status = 3
         worldconfig = {
             "worldPath": addon_prefs.World_Path,
-            "biomeMappingFile": "config\\mappings\\biomes_mapping.json",
+            "biomeMappingFile": "config\\jsons\\biomes.json",
             "solid": addon_prefs.solid,
             "minX": min(addon_prefs.XYZ_1[0], addon_prefs.XYZ_2[0]),
             "maxX": max(addon_prefs.XYZ_1[0], addon_prefs.XYZ_2[0]),
@@ -310,7 +310,7 @@ class VIEW3D_OT_CrafterImportWorld(bpy.types.Operator):#导入世界
 
         config_file_path = os.path.join(config_dir, "config.json")
 
-        with open(config_file_path, 'w', encoding='gbk') as config_file:
+        with open(config_file_path, 'w', encoding='utf-8') as config_file:
             for key, value in worldconfig.items():
                 config_file.write(f"{key} = {value}\n")
 
@@ -344,11 +344,11 @@ class VIEW3D_OT_CrafterImportWorld(bpy.types.Operator):#导入世界
         while True:
             time.sleep(0.2)  # 每秒检查一次
             try:
-                with open(config_file_path, 'r', encoding='gbk') as config_file:
+                with open(config_file_path, 'r', encoding='utf-8') as config_file:
                     content = config_file.read()
                     if "status = 3" in content:
                         content = content.replace("status = 3", "status = 0")
-                        with open(config_file_path, 'w', encoding='gbk') as config_file:
+                        with open(config_file_path, 'w', encoding='utf-8') as config_file:
                             config_file.write(content)
                         bpy.app.timers.register(self.import_output)
                         break
