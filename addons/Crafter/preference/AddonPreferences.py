@@ -34,6 +34,8 @@ class CrafterAddonPreferences(AddonPreferences):
     XYZ_2: IntVectorProperty(name="XYZ-2",
                              default=(0,0,0),
                              description="Ending coordinates")# type: ignore
+    Point_Cloud_Mode: BoolProperty(name="Point Cloud Mode",
+                                   default=True,)# type: ignore
     solid: IntProperty(name="Solid",
                        default=0,)# type: ignore
 #==========导入资源包属性==========

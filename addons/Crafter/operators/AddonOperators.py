@@ -286,6 +286,10 @@ class VIEW3D_OT_CrafterImportWorld(bpy.types.Operator):#导入世界
 
     def execute(self, context: bpy.types.Context):
         addon_prefs = context.preferences.addons[__addon_name__].preferences
+        if addon_prefs.Point_Cloud_Mode:
+            status = 1
+        else:
+            status = 2
         worldconfig = {
             "worldPath": addon_prefs.World_Path,
             "biomeMappingFile": "config\\mappings\\biomes_mapping.json",
@@ -296,7 +300,7 @@ class VIEW3D_OT_CrafterImportWorld(bpy.types.Operator):#导入世界
             "maxY": max(addon_prefs.XYZ_1[1], addon_prefs.XYZ_2[1]),
             "minZ": min(addon_prefs.XYZ_1[2], addon_prefs.XYZ_2[2]),
             "maxZ": max(addon_prefs.XYZ_1[2], addon_prefs.XYZ_2[2]),
-            "status": 0,
+            "status": status,
         }
 
         parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

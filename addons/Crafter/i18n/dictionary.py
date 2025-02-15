@@ -11,6 +11,7 @@ dictionary = {
         "World path":"存档地址",
         "XYZ-1":"坐标1",
         "XYZ-2":"坐标2",
+        "Point Cloud Mode":"点云模式",
             #==========导入资源包==========
         "Import Resources":"导入资源包",
         "Resources":"资源包预设",

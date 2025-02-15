@@ -68,9 +68,13 @@ class VIEW3D_PT_CrafterImportWorld(bpy.types.Panel):
         row_XYZ2 = cul_XYZ.row()
         row_XYZ2.prop(addon_prefs, "XYZ_2")
         
+        row_setting = layout.row()
+        row_setting.prop(addon_prefs, "Point_Cloud_Mode")
+        
         row_ImportWorld = layout.row()
         row_ImportWorld.operator("crafter.import_surface_world",text="Import World")
-        row_ImportWorld.operator("crafter.import_solid_area",text="Import Editable Area")
+        if addon_prefs.Point_Cloud_Mode:
+            row_ImportWorld.operator("crafter.import_solid_area",text="Import Editable Area")
 
     @classmethod
     def poll(cls, context: bpy.types.Context):
