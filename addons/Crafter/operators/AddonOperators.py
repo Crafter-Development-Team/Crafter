@@ -379,7 +379,7 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
     def execute(self, context: bpy.types.Context):
         addon_prefs = context.preferences.addons[__addon_name__].preferences
         addon_prefs.solid = 0
-        bpy.ops.crafter.improt_world()
+        bpy.ops.crafter.import_world()
         return {'FINISHED'}
 
 class VIEW3D_OT_CrafterImportSolidArea(bpy.types.Operator):#导入可编辑区域==========未完善==========
