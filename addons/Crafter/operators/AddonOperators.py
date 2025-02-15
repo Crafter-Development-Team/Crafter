@@ -287,9 +287,9 @@ class VIEW3D_OT_CrafterImportWorld(bpy.types.Operator):#导入世界
     def execute(self, context: bpy.types.Context):
         addon_prefs = context.preferences.addons[__addon_name__].preferences
         if addon_prefs.Point_Cloud_Mode:
-            status = 1
-        else:
             status = 2
+        else:
+            status = 3
         worldconfig = {
             "worldPath": addon_prefs.World_Path,
             "biomeMappingFile": "config\\mappings\\biomes_mapping.json",
