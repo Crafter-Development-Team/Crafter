@@ -1,0 +1,32 @@
+{
+    "solid_blocks": [
+        "minecraft:stone",
+        "minecraft:deepslate",
+        "minecraft:gravel",
+        "minecraft:granite",
+        "minecraft:diorite",
+        "minecraft:andesite",
+        "minecraft:polished_andesite",
+        "minecraft:calcite",
+        "minecraft:white_wool",
+        "minecraft:grass_block",
+        "minecraft:dirt",
+        "minecraft:coarse_dirt",
+        "minecraft:bedrock",
+        "minecraft:sand",
+        "minecraft:dark_oak_log",
+        "minecraft:oak_log",
+        "minecraft:spruce_log",
+        "minecraft:moss_block",
+        "minecraft:clay",
+        "minecraft:blackstone",
+        "minecraft:tuff",
+        "minecraft:coal_ore",
+        "minecraft:iron_ore",
+        "minecraft:gold_ore",
+        "minecraft:cobblestone",
+        "minecraft:mossy_cobblestone",
+        "minecraft:dark_oak_planks",
+        "minecraft:mangrove_planks"
+    ]
+}
