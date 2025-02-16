@@ -8,7 +8,7 @@ import json
 import zipfile
 
 from ..config import __addon_name__
-from ..__init__ import dir_resourcepacks_plans, dir_materials, dir_classification_basis, dir_blend_append
+from ..__init__ import dir_cafter_data, dir_resourcepacks_plans, dir_materials, dir_classification_basis, dir_blend_append
 
 # crafter_resources_icons = bpy.utils.previews.new()
 #==========通用操作==========
@@ -274,6 +274,70 @@ class VIEW3D_OT_CrafterReloadAll(bpy.types.Operator):#刷新全部
         return {'FINISHED'}
 
 #==========导入世界操作==========
+class VIEW3D_UL_CrafterHistoryWorldsList(bpy.types.UIList):
+     def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
+        layout.label(text=item.name)
+
+class VIEW3D_OT_CrafterHistoryWorldsPanel(bpy.types.Operator):#呼出历史世界面板
+    bl_label = "History Worlds"
+    bl_idname = "crafter.history_worlds_panel"
+    bl_description = "To use the history world settings"
+
+    @classmethod
+    def poll(cls, context: bpy.types.Context):
+        return True
+    def execute(self, context):
+            return {'FINISHED'}
+
+    def invoke(self, context, event):
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
+
+        addon_prefs.History_Worlds_List.clear()
+        addon_prefs.History_Worlds_List_index = -1
+
+        dir_json_history_worlds = os.path.join(dir_cafter_data, "history_worlds.json")
+        if os.path.exists(dir_json_history_worlds):
+            with open(dir_json_history_worlds, 'r', encoding='utf-8') as file:
+                json_history_worlds = json.load(file)
+            for history_world in json_history_worlds:
+                if history_world != None:
+                    history_world_name = addon_prefs.History_Worlds_List.add()
+                    history_world_name.name = history_world[0]+" "+str(history_world[1][0])+" "+str(history_world[1][1])+" "+str(history_world[1][2])+" | "+str(history_world[2][0])+" "+str(history_world[2][1])+" "+str(history_world[2][2])
+        return context.window_manager.invoke_props_dialog(self)
+
+    def draw(self, context):
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
+        layout = self.layout
+
+        layout.template_list("VIEW3D_UL_CrafterHistoryWorldsList", "", addon_prefs, "History_Worlds_List", addon_prefs, "History_Worlds_List_index", rows=20)
+        
+class VIEW3D_OT_CrafterUseHistoryWorlds(bpy.types.Operator):#使用历史世界
+    bl_label = "Use History Worlds"
+    bl_idname = "crafter.use_history_world"
+    bl_description = "To use the history world settings"
+    bl_options = {'REGISTER', 'UNDO'}
+    
+    @classmethod
+    def poll(cls, context: bpy.types.Context):
+        return True
+    
+    def execute(self, context):
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
+
+        if addon_prefs.History_Worlds_List_index != -1:
+            try:
+                dir_json_history_worlds = os.path.join(dir_cafter_data, "history_worlds.json")
+                if os.path.exists(dir_json_history_worlds):
+                    with open(dir_json_history_worlds, 'r', encoding='utf-8') as file:
+                        json_history_worlds = json.load(file)
+                history_world = json_history_worlds[addon_prefs.History_Worlds_List_index]
+                addon_prefs.World_Path = history_world[0]
+                addon_prefs.XYZ_1 = history_world[1]
+                addon_prefs.XYZ_2 = history_world[2]
+            except Exception as e:
+                print(e)
+        return {'FINISHED'}
+
 class VIEW3D_OT_CrafterImportWorld(bpy.types.Operator):#导入世界
     bl_label = "Import World"
     bl_idname = "crafter.import_world"
@@ -303,68 +367,81 @@ class VIEW3D_OT_CrafterImportWorld(bpy.types.Operator):#导入世界
             "status": status,
         }
 
-        parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        importer_dir = os.path.join(parent_dir, "importer")
-        config_dir = os.path.join(importer_dir, "config")
-        os.makedirs(config_dir, exist_ok=True)
+        # parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        # importer_dir = os.path.join(parent_dir, "importer")
+        # config_dir = os.path.join(importer_dir, "config")
+        # os.makedirs(config_dir, exist_ok=True)
 
-        config_file_path = os.path.join(config_dir, "config.json")
+        # config_file_path = os.path.join(config_dir, "config.json")
 
-        with open(config_file_path, 'w', encoding='utf-8') as config_file:
-            for key, value in worldconfig.items():
-                config_file.write(f"{key} = {value}\n")
+        # with open(config_file_path, 'w', encoding='utf-8') as config_file:
+        #     for key, value in worldconfig.items():
+        #         config_file.write(f"{key} = {value}\n")
 
-        self.report({'INFO'}, f"World config saved to {config_file_path}")
+        # self.report({'INFO'}, f"World config saved to {config_file_path}")
 
-        importer_exe = os.path.join(importer_dir, "WorldImporter.exe")
+        # importer_exe = os.path.join(importer_dir, "WorldImporter.exe")
         
-        if os.path.exists(importer_exe):
-            try:
-                # 在新的进程中运行WorldImporter.exe
-                CREATE_NEW_PROCESS_GROUP = 0x00000200
-                DETACHED_PROCESS = 0x00000008
-                subprocess.Popen(
-                    [importer_exe],
-                    cwd=importer_dir,
-                    creationflags=CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS
-                )
-                self.report({'INFO'}, f"WorldImporter.exe started in a new process")
+        # if os.path.exists(importer_exe):
+        #     try:
+        #         # 在新的进程中运行WorldImporter.exe
+        #         CREATE_NEW_PROCESS_GROUP = 0x00000200
+        #         DETACHED_PROCESS = 0x00000008
+        #         subprocess.Popen(
+        #             [importer_exe],
+        #             cwd=importer_dir,
+        #             creationflags=CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS
+        #         )
+        #         self.report({'INFO'}, f"WorldImporter.exe started in a new process")
 
-                # 使用线程监控状态
-                threading.Thread(target=self.monitor_status, args=(config_file_path,), daemon=True).start()
+        #         # 使用线程监控状态
+        #         threading.Thread(target=self.monitor_status, args=(config_file_path,), daemon=True).start()
 
-            except Exception as e:
-                self.report({'ERROR'}, f"Error: {e}")
+        #     except Exception as e:
+        #         self.report({'ERROR'}, f"Error: {e}")
+        # else:
+        #     self.report({'ERROR'}, f"WorldImporter.exe not found at {importer_exe}")
+
+        dir_json_history_worlds = os.path.join(dir_cafter_data, "history_worlds.json")
+        if os.path.exists(dir_json_history_worlds):
+            with open(dir_json_history_worlds, 'r', encoding='utf-8') as file:
+                json_old_history_worlds = json.load(file)
         else:
-            self.report({'ERROR'}, f"WorldImporter.exe not found at {importer_exe}")
-
+            json_old_history_worlds = [None] *20
+        json_history_worlds = [None] *20
+        json_history_worlds[0] = [addon_prefs.World_Path, list(addon_prefs.XYZ_1), list(addon_prefs.XYZ_2)]
+        for i in range(19):
+            json_history_worlds[i+1] = json_old_history_worlds[i]
+        with open(dir_json_history_worlds, 'w', encoding='utf-8') as file:
+            json.dump(json_history_worlds, file, indent=4)
+        
         return {'FINISHED'}
 
-    def monitor_status(self, config_file_path):
-        while True:
-            time.sleep(0.2)  # 每秒检查一次
-            try:
-                with open(config_file_path, 'r', encoding='utf-8') as config_file:
-                    content = config_file.read()
-                    if "status = 3" in content:
-                        content = content.replace("status = 3", "status = 0")
-                        with open(config_file_path, 'w', encoding='utf-8') as config_file:
-                            config_file.write(content)
-                        bpy.app.timers.register(self.import_output)
-                        break
-            except Exception as e:
-                print(f"Error reading config file: {e}")
-                continue
+    # def monitor_status(self, config_file_path):
+    #     while True:
+    #         time.sleep(0.2)  # 每秒检查一次
+    #         try:
+    #             with open(config_file_path, 'r', encoding='utf-8') as config_file:
+    #                 content = config_file.read()
+    #                 if "status = 3" in content:
+    #                     content = content.replace("status = 3", "status = 0")
+    #                     with open(config_file_path, 'w', encoding='utf-8') as config_file:
+    #                         config_file.write(content)
+    #                     bpy.app.timers.register(self.import_output)
+    #                     break
+    #         except Exception as e:
+    #             print(f"Error reading config file: {e}")
+    #             continue
 
-    def import_output(self):
-        parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        importer_dir = os.path.join(parent_dir, "importer")
-        output_obj = os.path.join(importer_dir, "output.obj")
-        if os.path.exists(output_obj):
-            bpy.ops.wm.obj_import(filepath=output_obj)
-            self.report({'INFO'}, f"Imported {output_obj}")
-        else:
-            self.report({'WARNING'}, f"output.obj not found at {output_obj}")
+    # def import_output(self):
+    #     parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    #     importer_dir = os.path.join(parent_dir, "importer")
+    #     output_obj = os.path.join(importer_dir, "output.obj")
+    #     if os.path.exists(output_obj):
+    #         bpy.ops.wm.obj_import(filepath=output_obj)
+    #         self.report({'INFO'}, f"Imported {output_obj}")
+    #     else:
+    #         self.report({'WARNING'}, f"output.obj not found at {output_obj}")
 
 class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世界
     bl_label = "Import Surface World"

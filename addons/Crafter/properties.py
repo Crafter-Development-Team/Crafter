@@ -1,6 +1,11 @@
 import bpy
 from bpy.props import StringProperty
 
+#==========导入世界属性==========
+class HistoryWorld(bpy.types.PropertyGroup):
+    History_World: StringProperty(name="History World",
+                                    # subtype="DIR_PATH"
+                                    )# type: ignore
 #==========导入资源属性==========
 class ResourcePlan(bpy.types.PropertyGroup):
     Resources_Plan: StringProperty(name="Resources Plan",

@@ -70,6 +70,7 @@ class VIEW3D_PT_CrafterImportWorld(bpy.types.Panel):
         
         row_setting = layout.row()
         row_setting.prop(addon_prefs, "Point_Cloud_Mode")
+        row_setting.operator("crafter.history_worlds_panel",icon="TIME",text="")
         
         row_ImportWorld = layout.row()
         row_ImportWorld.operator("crafter.import_surface_world",text="Import World")
