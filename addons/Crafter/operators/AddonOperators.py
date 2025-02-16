@@ -292,7 +292,7 @@ class VIEW3D_OT_CrafterImportWorld(bpy.types.Operator):#导入世界
             status = 3
         worldconfig = {
             "worldPath": addon_prefs.World_Path,
-            "biomeMappingFile": "config\\mappings\\biomes_mapping.json",
+            "biomeMappingFile": "config\\jsons\\biomes.json",
             "solid": addon_prefs.solid,
             "minX": min(addon_prefs.XYZ_1[0], addon_prefs.XYZ_2[0]),
             "maxX": max(addon_prefs.XYZ_1[0], addon_prefs.XYZ_2[0]),
