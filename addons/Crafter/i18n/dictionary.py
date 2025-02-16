@@ -12,6 +12,8 @@ dictionary = {
         "XYZ-1":"坐标1",
         "XYZ-2":"坐标2",
         "Point Cloud Mode":"点云模式",
+        "History Worlds":"历史世界",
+        "To use the history world settings":"使用历史世界设置",
             #==========导入资源包==========
         "Import Resources":"导入资源包",
         "Resources":"资源包预设",

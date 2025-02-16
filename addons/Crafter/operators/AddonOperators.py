@@ -302,7 +302,9 @@ class VIEW3D_OT_CrafterHistoryWorldsPanel(bpy.types.Operator):#呼出历史世�
             for history_world in json_history_worlds:
                 if history_world != None:
                     history_world_name = addon_prefs.History_Worlds_List.add()
-                    history_world_name.name = history_world[0]+" "+str(history_world[1][0])+" "+str(history_world[1][1])+" "+str(history_world[1][2])+" | "+str(history_world[2][0])+" "+str(history_world[2][1])+" "+str(history_world[2][2])
+                    normalized_path = os.path.normpath(history_world[0])
+                    dir_name = os.path.basename(normalized_path)
+                    history_world_name.name = dir_name+" | "+str(history_world[1][0])+" "+str(history_world[1][1])+" "+str(history_world[1][2])+" | "+str(history_world[2][0])+" "+str(history_world[2][1])+" "+str(history_world[2][2])
         return context.window_manager.invoke_props_dialog(self)
 
     def draw(self, context):
