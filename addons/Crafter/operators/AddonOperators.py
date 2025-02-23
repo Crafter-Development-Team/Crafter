@@ -8,7 +8,7 @@ import json
 import zipfile
 
 from ..config import __addon_name__
-from ..__init__ import dir_cafter_data, dir_resourcepacks_plans, dir_materials, dir_classification_basis, dir_blend_append
+from ..__init__ import dir_cafter_data, dir_resourcepacks_plans, dir_materials, dir_classification_basis, dir_blend_append, dir_init_main
 
 # crafter_resources_icons = bpy.utils.previews.new()
 #==========通用操作==========
@@ -351,15 +351,24 @@ class VIEW3D_OT_CrafterImportWorld(bpy.types.Operator):#导入世界
         return True
 
     def execute(self, context: bpy.types.Context):
+    #     return {'FINISHED'}
+    # def invoke(self, context, event):
         addon_prefs = context.preferences.addons[__addon_name__].preferences
+
+        worldPath = os.path.normpath(addon_prefs.World_Path)
+        packagePath = os.path.dirname(os.path.dirname(worldPath))
+        selectedGameVersion = os.path.basename(packagePath)
+
         if addon_prefs.Point_Cloud_Mode:
-            status = 2
+            status = 1
         else:
-            status = 3
+            status = 2
+        
         worldconfig = {
-            "worldPath": addon_prefs.World_Path,
+            "worldPath": worldPath,
+            "packagePath": packagePath,
+            "selectedGameVersion":selectedGameVersion,
             "biomeMappingFile": "config\\jsons\\biomes.json",
-            "solid": addon_prefs.solid,
             "minX": min(addon_prefs.XYZ_1[0], addon_prefs.XYZ_2[0]),
             "maxX": max(addon_prefs.XYZ_1[0], addon_prefs.XYZ_2[0]),
             "minY": min(addon_prefs.XYZ_1[1], addon_prefs.XYZ_2[1]),
@@ -367,18 +376,17 @@ class VIEW3D_OT_CrafterImportWorld(bpy.types.Operator):#导入世界
             "minZ": min(addon_prefs.XYZ_1[2], addon_prefs.XYZ_2[2]),
             "maxZ": max(addon_prefs.XYZ_1[2], addon_prefs.XYZ_2[2]),
             "status": status,
+            "solid": addon_prefs.solid,
         }
 
-        # parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        # importer_dir = os.path.join(parent_dir, "importer")
-        # config_dir = os.path.join(importer_dir, "config")
-        # os.makedirs(config_dir, exist_ok=True)
-
-        # config_file_path = os.path.join(config_dir, "config.json")
-
-        # with open(config_file_path, 'w', encoding='utf-8') as config_file:
-        #     for key, value in worldconfig.items():
-        #         config_file.write(f"{key} = {value}\n")
+        dir_importer = os.path.join(dir_init_main, "importer")
+        dir_config = os.path.join(dir_importer, "config")
+        os.makedirs(dir_config, exist_ok=True)
+        dir_json_config = os.path.join(dir_config, "config.json")
+        print(dir_json_config)
+        with open(dir_json_config, 'w', encoding='utf-8') as config_file:
+            for key, value in worldconfig.items():
+                config_file.write(f"{key} = {value}\n")
 
         # self.report({'INFO'}, f"World config saved to {config_file_path}")
 
@@ -419,31 +427,28 @@ class VIEW3D_OT_CrafterImportWorld(bpy.types.Operator):#导入世界
         
         return {'FINISHED'}
 
-    # def monitor_status(self, config_file_path):
-    #     while True:
-    #         time.sleep(0.2)  # 每秒检查一次
-    #         try:
-    #             with open(config_file_path, 'r', encoding='utf-8') as config_file:
-    #                 content = config_file.read()
-    #                 if "status = 3" in content:
-    #                     content = content.replace("status = 3", "status = 0")
-    #                     with open(config_file_path, 'w', encoding='utf-8') as config_file:
-    #                         config_file.write(content)
-    #                     bpy.app.timers.register(self.import_output)
-    #                     break
-    #         except Exception as e:
-    #             print(f"Error reading config file: {e}")
-    #             continue
+    def monitor_status(self, config_file_path):
+        while True:
+            time.sleep(0.2)
+            try:
+                with open(config_file_path, 'r', encoding='utf-8') as config_file:
+                    content = config_file.read()
+                    if "status = 0" in content:
+                        bpy.app.timers.register(self.import_output)
+                        break
+            except Exception as e:
+                print(f"Error reading config file: {e}")
+                continue
 
-    # def import_output(self):
-    #     parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    #     importer_dir = os.path.join(parent_dir, "importer")
-    #     output_obj = os.path.join(importer_dir, "output.obj")
-    #     if os.path.exists(output_obj):
-    #         bpy.ops.wm.obj_import(filepath=output_obj)
-    #         self.report({'INFO'}, f"Imported {output_obj}")
-    #     else:
-    #         self.report({'WARNING'}, f"output.obj not found at {output_obj}")
+    def import_output(self):
+        parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        importer_dir = os.path.join(parent_dir, "importer")
+        output_obj = os.path.join(importer_dir, "output.obj")
+        if os.path.exists(output_obj):
+            bpy.ops.wm.obj_import(filepath=output_obj)
+            self.report({'INFO'}, f"Imported {output_obj}")
+        else:
+            self.report({'WARNING'}, f"output.obj not found at {output_obj}")
 
 class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世界
     bl_label = "Import Surface World"

@@ -56,10 +56,11 @@ _addon_properties = {
 #==========初始化cafter_data地址==========
 dir_extension = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 dir_extensions = os.path.dirname(dir_extension)
-dir_defaults = os.path.join(os.path.dirname(os.path.abspath(__file__)), "defaults")
+dir_init_main = os.path.dirname(os.path.abspath(__file__))
+dir_defaults = os.path.join(dir_init_main, "defaults")
 dir_defaults_materials = os.path.join(dir_defaults, "materials")
 dir_defaults_classification_basis = os.path.join(dir_defaults, "classification basis")
-dir_blend_append = os.path.join(os.path.join(dir_defaults,"append.blend"))
+dir_blend_append = os.path.join(dir_defaults,"append.blend")
 
 dir_cafter_data = os.path.join(dir_extensions, "cafter_data")
 dir_resourcepacks_plans = os.path.join(dir_cafter_data, "resourcepacks")
