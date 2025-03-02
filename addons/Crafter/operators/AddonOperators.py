@@ -359,10 +359,11 @@ class VIEW3D_OT_CrafterImportWorld(bpy.types.Operator):#导入世界
         packagePath = os.path.dirname(os.path.dirname(worldPath))
         selectedGameVersion = os.path.basename(packagePath)
 
+        print(addon_prefs.Point_Cloud_Mode)
         if addon_prefs.Point_Cloud_Mode:
-            status = 1
-        else:
             status = 2
+        else:
+            status = 1
         
         worldconfig = {
             "worldPath": worldPath,
