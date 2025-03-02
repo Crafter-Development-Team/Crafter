@@ -358,9 +358,9 @@ class VIEW3D_OT_CrafterImportWorld(bpy.types.Operator):#导入世界
         worldPath = os.path.normpath(addon_prefs.World_Path)
         packagePath = os.path.dirname(os.path.dirname(worldPath))
         selectedGameVersion = os.path.basename(packagePath)
+        point_cloud_mode = addon_prefs.Point_Cloud_Mode
 
-        print(addon_prefs.Point_Cloud_Mode)
-        if addon_prefs.Point_Cloud_Mode:
+        if point_cloud_mode:
             status = 2
         else:
             status = 1
@@ -382,37 +382,36 @@ class VIEW3D_OT_CrafterImportWorld(bpy.types.Operator):#导入世界
 
         dir_importer = os.path.join(dir_init_main, "importer")
         dir_config = os.path.join(dir_importer, "config")
-        os.makedirs(dir_config, exist_ok=True)
+        dir_exe_importer = os.path.join(dir_importer, "WorldImporter.exe")
         dir_json_config = os.path.join(dir_config, "config.json")
-        print(dir_json_config)
-        with open(dir_json_config, 'w', encoding='utf-8') as config_file:
+        with open(dir_json_config, 'w', encoding='utf-8') as config:
             for key, value in worldconfig.items():
-                config_file.write(f"{key} = {value}\n")
+                config.write(f"{key} = {value}\n")
 
-        # self.report({'INFO'}, f"World config saved to {config_file_path}")
+        self.report({'INFO'}, f"World config saved to {dir_config}")
 
-        # importer_exe = os.path.join(importer_dir, "WorldImporter.exe")
-        
-        # if os.path.exists(importer_exe):
-        #     try:
-        #         # 在新的进程中运行WorldImporter.exe
-        #         CREATE_NEW_PROCESS_GROUP = 0x00000200
-        #         DETACHED_PROCESS = 0x00000008
-        #         subprocess.Popen(
-        #             [importer_exe],
-        #             cwd=importer_dir,
-        #             creationflags=CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS
-        #         )
-        #         self.report({'INFO'}, f"WorldImporter.exe started in a new process")
+        if os.path.exists(dir_exe_importer):
+            try:
+                # 在新的进程中运行WorldImporter.exe
+                CREATE_NEW_PROCESS_GROUP = 0x00000200
+                DETACHED_PROCESS = 0x00000008
+                process = subprocess.Popen(
+                    [dir_exe_importer],
+                    cwd=dir_importer,
+                    creationflags=CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS,
+                    shell=True
+                )
+                self.report({'INFO'}, f"WorldImporter.exe started in a new process")
+                #等待进程结束
+                process.wait()
+                dir_obj_world = os.path.join(dir_importer, "region_models.obj")
+                bpy.ops.wm.obj_import(filepath=dir_obj_world)
 
-        #         # 使用线程监控状态
-        #         threading.Thread(target=self.monitor_status, args=(config_file_path,), daemon=True).start()
-
-        #     except Exception as e:
-        #         self.report({'ERROR'}, f"Error: {e}")
-        # else:
-        #     self.report({'ERROR'}, f"WorldImporter.exe not found at {importer_exe}")
-
+            except Exception as e:
+                self.report({'ERROR'}, f"Error: {e}")
+        else:
+            self.report({'ERROR'}, f"WorldImporter.exe not found at {dir_exe_importer}")
+        # 保存历史世界
         dir_json_history_worlds = os.path.join(dir_cafter_data, "history_worlds.json")
         if os.path.exists(dir_json_history_worlds):
             with open(dir_json_history_worlds, 'r', encoding='utf-8') as file:
@@ -427,29 +426,6 @@ class VIEW3D_OT_CrafterImportWorld(bpy.types.Operator):#导入世界
             json.dump(json_history_worlds, file, indent=4)
         
         return {'FINISHED'}
-
-    def monitor_status(self, config_file_path):
-        while True:
-            time.sleep(0.2)
-            try:
-                with open(config_file_path, 'r', encoding='utf-8') as config_file:
-                    content = config_file.read()
-                    if "status = 0" in content:
-                        bpy.app.timers.register(self.import_output)
-                        break
-            except Exception as e:
-                print(f"Error reading config file: {e}")
-                continue
-
-    def import_output(self):
-        parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        importer_dir = os.path.join(parent_dir, "importer")
-        output_obj = os.path.join(importer_dir, "output.obj")
-        if os.path.exists(output_obj):
-            bpy.ops.wm.obj_import(filepath=output_obj)
-            self.report({'INFO'}, f"Imported {output_obj}")
-        else:
-            self.report({'WARNING'}, f"output.obj not found at {output_obj}")
 
 class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世界
     bl_label = "Import Surface World"
