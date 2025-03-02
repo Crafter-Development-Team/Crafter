@@ -402,8 +402,12 @@ class VIEW3D_OT_CrafterImportWorld(bpy.types.Operator):#导入世界
                 self.report({'INFO'}, f"WorldImporter.exe started in a new process")
                 #等待进程结束
                 process.wait()
-                dir_obj_world = os.path.join(dir_importer, "region_models.obj")
-                bpy.ops.wm.obj_import(filepath=dir_obj_world)
+                if point_cloud_mode:
+                    dir_obj_output = os.path.join(dir_importer, "output.obj")
+                    bpy.ops.wm.obj_import(filepath=dir_obj_output)
+                else:
+                    dir_obj_region_models = os.path.join(dir_importer, "region_models.obj")
+                    bpy.ops.wm.obj_import(filepath=dir_obj_region_models)
 
             except Exception as e:
                 self.report({'ERROR'}, f"Error: {e}")

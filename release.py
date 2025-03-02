@@ -34,7 +34,15 @@ if __name__ == '__main__':
     release_addon(target_init_file=get_init_file_path(args.addon),
                   addon_name=args.addon,
                   need_zip=not args.disable_zip,
-                  is_extension=args.is_extension,
+                  is_extension=True,
                   with_timestamp=args.with_timestamp,
                   with_version=args.with_version,
                   )
+    release_addon(target_init_file=get_init_file_path(args.addon),
+                  addon_name=args.addon,
+                  need_zip=not args.disable_zip,
+                  is_extension=False,
+                  with_timestamp=args.with_timestamp,
+                  with_version=args.with_version,
+                  )
+
