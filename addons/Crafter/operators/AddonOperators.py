@@ -351,8 +351,6 @@ class VIEW3D_OT_CrafterImportWorld(bpy.types.Operator):#导入世界
         return True
 
     def execute(self, context: bpy.types.Context):
-    #     return {'FINISHED'}
-    # def invoke(self, context, event):
         addon_prefs = context.preferences.addons[__addon_name__].preferences
 
         worldPath = os.path.normpath(addon_prefs.World_Path)
@@ -387,9 +385,9 @@ class VIEW3D_OT_CrafterImportWorld(bpy.types.Operator):#导入世界
         with open(dir_json_config, 'w', encoding='utf-8') as config:
             for key, value in worldconfig.items():
                 config.write(f"{key} = {value}\n")
+            # json.dump(worldconfig, config, indent=4)
 
         self.report({'INFO'}, f"World config saved to {dir_config}")
-
         if os.path.exists(dir_exe_importer):
             try:
                 # 在新的进程中运行WorldImporter.exe
