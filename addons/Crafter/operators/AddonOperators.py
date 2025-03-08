@@ -802,6 +802,8 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
                                 if name_image.endswith("_n.png") or name_image.endswith("_s.png") or name_image.endswith("_a.png"):
                                     bpy.data.images.remove(node.image)
                                     nodes.remove(node)
+                                elif node_tex_base != None:
+                                    nodes.remove(node)
                                 elif name_image.endswith(".png"):
                                     node.interpolation = "Closest"
                                     node_tex_base = node
