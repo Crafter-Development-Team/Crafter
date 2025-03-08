@@ -52,7 +52,7 @@ def unzip(zip_path, extract_to):
     with zipfile.ZipFile(zip_path, 'r') as zip_ref:
         zip_ref.extractall(extract_to)
 
-def add_node_moving_texture(node_tex, nodes, links):
+def add_node_moving_texture_without_list(node_tex, nodes, links):
     '''
     为基础色节点添加动态纹理节点并连接
     node_tex_base: 基础纹理节点
@@ -60,13 +60,13 @@ def add_node_moving_texture(node_tex, nodes, links):
     links:目标材质连接组
     return:动态纹理节点
     '''
-    if node_tex.image.size[0] != node_tex.image.size[1]:
-        dir_image = os.path.dirname(node_tex.image.filepath)
+    dir_image = os.path.dirname(node_tex.image.filepath)
+    dir_mcmeta = os.path.join(bpy.path.abspath(dir_image), node_tex.image.name + ".mcmeta")
+    if os.path.exists(dir_mcmeta):
         node_Moving_texture = nodes.new(type="ShaderNodeGroup")
         node_Moving_texture.location = (node_tex.location.x - 200, node_tex.location.y)
         node_Moving_texture.node_tree = bpy.data.node_groups["C-Moving_texture"]
         try:
-            dir_mcmeta = os.path.join(bpy.path.abspath(dir_image), node_tex.image.name + ".mcmeta")
             with open(dir_mcmeta, 'r', encoding='utf-8') as file:
                 mcmeta = json.load(file)
                 frametime = mcmeta["animation"]["frametime"]
@@ -93,7 +93,7 @@ def import_normal_and_PBR_and_link_all(node_tex_base, group_COn, nodes, links):
     dir_n = os.path.join(dir_image,name_block + "_n.png")
     dir_s = os.path.join(dir_image,name_block + "_s.png")
     dir_a = os.path.join(dir_image,name_block + "_a.png")
-    add_node_moving_texture(node_tex_base, nodes, links)
+    add_node_moving_texture_without_list(node_tex_base, nodes, links)
     if os.path.exists(bpy.path.abspath(dir_n)):
         node_tex = nodes.new(type="ShaderNodeTexImage")
         node_tex.location = (node_tex_base.location.x, node_tex_base.location.y - 300)
@@ -102,7 +102,7 @@ def import_normal_and_PBR_and_link_all(node_tex_base, group_COn, nodes, links):
         bpy.data.images[node_tex.image.name].colorspace_settings.name = "Non-Color"
         links.new(node_tex.outputs["Color"], group_COn.inputs["Normal"])
         links.new(node_tex.outputs["Alpha"], group_COn.inputs["Normal Alpha"])
-        add_node_moving_texture(node_tex, nodes, links)
+        add_node_moving_texture_without_list(node_tex, nodes, links)
     if os.path.exists(bpy.path.abspath(dir_s)):
         node_tex = nodes.new(type="ShaderNodeTexImage")
         node_tex.location = (node_tex_base.location.x, node_tex_base.location.y - 600)
@@ -111,7 +111,7 @@ def import_normal_and_PBR_and_link_all(node_tex_base, group_COn, nodes, links):
         bpy.data.images[node_tex.image.name].colorspace_settings.name = "Non-Color"
         links.new(node_tex.outputs["Color"], group_COn.inputs["PBR"])
         links.new(node_tex.outputs["Alpha"], group_COn.inputs["PBR Alpha"])
-        add_node_moving_texture(node_tex, nodes, links)
+        add_node_moving_texture_without_list(node_tex, nodes, links)
     elif os.path.exists(bpy.path.abspath(dir_a)):
         node_tex = nodes.new(type="ShaderNodeTexImage")
         node_tex.location = (node_tex_base.location.x, node_tex_base.location.y - 600)
@@ -120,7 +120,7 @@ def import_normal_and_PBR_and_link_all(node_tex_base, group_COn, nodes, links):
         bpy.data.images[node_tex.image.name].colorspace_settings.name = "Non-Color"
         links.new(node_tex.outputs["Color"], group_COn.inputs["PBR"])
         links.new(node_tex.outputs["Alpha"], group_COn.inputs["PBR Alpha"])
-        add_node_moving_texture(node_tex, nodes, links)
+        add_node_moving_texture_without_list(node_tex, nodes, links)
 
 def fuq_bl_dot_number(name: str):
     '''
@@ -278,16 +278,30 @@ class VIEW3D_UL_CrafterHistoryWorldsList(bpy.types.UIList):
      def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
         layout.label(text=item.name)
 
-class VIEW3D_OT_CrafterHistoryWorldsPanel(bpy.types.Operator):#呼出历史世界面板
+class VIEW3D_OT_UseCrafterHistoryWorlds(bpy.types.Operator):#使用历史世界
     bl_label = "History Worlds"
-    bl_idname = "crafter.history_worlds_panel"
+    bl_idname = "crafter.use_history_worlds"
     bl_description = "To use the history world settings"
 
     @classmethod
     def poll(cls, context: bpy.types.Context):
         return True
     def execute(self, context):
-            return {'FINISHED'}
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
+
+        if addon_prefs.History_Worlds_List_index != -1:
+            try:
+                dir_json_history_worlds = os.path.join(dir_cafter_data, "history_worlds.json")
+                if os.path.exists(dir_json_history_worlds):
+                    with open(dir_json_history_worlds, 'r', encoding='utf-8') as file:
+                        json_history_worlds = json.load(file)
+                history_world = json_history_worlds[addon_prefs.History_Worlds_List_index]
+                addon_prefs.World_Path = history_world[0]
+                addon_prefs.XYZ_1 = history_world[1]
+                addon_prefs.XYZ_2 = history_world[2]
+            except Exception as e:
+                print(e)
+        return {'FINISHED'}
 
     def invoke(self, context, event):
         addon_prefs = context.preferences.addons[__addon_name__].preferences
@@ -312,33 +326,6 @@ class VIEW3D_OT_CrafterHistoryWorldsPanel(bpy.types.Operator):#呼出历史世�
         layout = self.layout
 
         layout.template_list("VIEW3D_UL_CrafterHistoryWorldsList", "", addon_prefs, "History_Worlds_List", addon_prefs, "History_Worlds_List_index", rows=20)
-        
-class VIEW3D_OT_CrafterUseHistoryWorlds(bpy.types.Operator):#使用历史世界
-    bl_label = "Use History Worlds"
-    bl_idname = "crafter.use_history_world"
-    bl_description = "To use the history world settings"
-    bl_options = {'REGISTER', 'UNDO'}
-    
-    @classmethod
-    def poll(cls, context: bpy.types.Context):
-        return True
-    
-    def execute(self, context):
-        addon_prefs = context.preferences.addons[__addon_name__].preferences
-
-        if addon_prefs.History_Worlds_List_index != -1:
-            try:
-                dir_json_history_worlds = os.path.join(dir_cafter_data, "history_worlds.json")
-                if os.path.exists(dir_json_history_worlds):
-                    with open(dir_json_history_worlds, 'r', encoding='utf-8') as file:
-                        json_history_worlds = json.load(file)
-                history_world = json_history_worlds[addon_prefs.History_Worlds_List_index]
-                addon_prefs.World_Path = history_world[0]
-                addon_prefs.XYZ_1 = history_world[1]
-                addon_prefs.XYZ_2 = history_world[2]
-            except Exception as e:
-                print(e)
-        return {'FINISHED'}
 
 class VIEW3D_OT_CrafterImportWorld(bpy.types.Operator):#导入世界
     bl_label = "Import World"
@@ -421,11 +408,13 @@ class VIEW3D_OT_CrafterImportWorld(bpy.types.Operator):#导入世界
         else:
             json_old_history_worlds = [None] *20
         json_history_worlds = [None] *20
-        json_history_worlds[0] = [addon_prefs.World_Path, list(addon_prefs.XYZ_1), list(addon_prefs.XYZ_2)]
-        for i in range(19):
-            json_history_worlds[i+1] = json_old_history_worlds[i]
-        with open(dir_json_history_worlds, 'w', encoding='utf-8') as file:
-            json.dump(json_history_worlds, file, indent=4)
+        world_now = [addon_prefs.World_Path, list(addon_prefs.XYZ_1), list(addon_prefs.XYZ_2)]
+        if not json_old_history_worlds[0] == world_now:
+            json_history_worlds[0] = world_now
+            for i in range(19):
+                json_history_worlds[i+1] = json_old_history_worlds[i]
+            with open(dir_json_history_worlds, 'w', encoding='utf-8') as file:
+                json.dump(json_history_worlds, file, indent=4)
         
         return {'FINISHED'}
 
@@ -900,21 +889,6 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
                             break
                     if not found:
                         group_COn.node_tree = bpy.data.node_groups["CO-"]
-                    # 提供Rain_value节点
-                    CO_Crafter_Rain_value = nodes.new(type="ShaderNodeValue")
-                    CO_Crafter_Rain_value.location = (group_COn.location.x - 200, group_COn.location.y)
-                    CO_Crafter_Rain_value.bl_label = "Value"
-                    CO_Crafter_Rain_value.name = "Rain_value"
-                    fcurve = CO_Crafter_Rain_value.outputs["Value"].driver_add("default_value")
-                    driver = fcurve.driver
-                    var = driver.variables.new()
-                    var.name = "Crafter_rain_var"
-                    var.type = 'SINGLE_PROP'
-                    var.targets[0].id_type = 'SCENE'
-                    var.targets[0].id = bpy.context.scene
-                    var.targets[0].data_path = '["Crafter_rain"]'
-                    driver.expression = "Crafter_rain_var"
-                    links.new(CO_Crafter_Rain_value.outputs["Value"], group_COn.inputs["Rain"])
                     # 连接CO节点
                     for output in group_COn.outputs:
                         links.new(output, node_output.inputs[output.name])

@@ -28,12 +28,12 @@ bl_info = {
 
 _addon_properties = {
     bpy.types.Scene: {
-        "Crafter_rain":FloatProperty(name="Rain",
-                                   description="rain",
-                                   subtype="FACTOR",
-                                   min=0,
-                                   max=1,
-                                   default=0),
+        # "Crafter_rain":FloatProperty(name="Rain",
+        #                            description="rain",
+        #                            subtype="FACTOR",
+        #                            min=0,
+        #                            max=1,
+        #                            default=0),
     },
     bpy.types.Object:{
         "Crafter_import_by": BoolProperty(name="import by Crafter",

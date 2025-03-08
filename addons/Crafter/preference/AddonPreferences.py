@@ -35,12 +35,11 @@ class CrafterAddonPreferences(AddonPreferences):
                              default=(0,0,0),
                              description="Ending coordinates")# type: ignore
     Point_Cloud_Mode: BoolProperty(name="Point Cloud Mode",
-                                   default=True,)# type: ignore
+                                   default=False,)# type: ignore
     History_Worlds_List: CollectionProperty(name="History Worlds",
                                             type=HistoryWorld)#type: ignore
     History_Worlds_List_index: IntProperty(name="History Worlds",
-                                           default=0,
-                                           update=lambda self, context: self.update_history_worlds_list_index(context))# type: ignore
+                                           default=0)# type: ignore
     solid: IntProperty(name="Solid",
                        default=0,)# type: ignore
 #==========导入资源包属性==========
@@ -95,8 +94,4 @@ class CrafterAddonPreferences(AddonPreferences):
     
     def update_PBR_Parser(self, context):
         bpy.ops.crafter.set_pbr_parser()
-        return None
-    
-    def update_history_worlds_list_index(self, context):
-        bpy.ops.crafter.use_history_world()
         return None
