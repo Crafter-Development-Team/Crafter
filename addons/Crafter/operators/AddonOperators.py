@@ -77,7 +77,7 @@ def add_node_moving_texture_without_list(node_tex, nodes, links):
         links.new(node_Moving_texture.outputs["Vector"], node_tex.inputs["Vector"])
         return node_Moving_texture
 
-def import_normal_and_PBR_and_link_all(node_tex_base, group_COn, nodes, links):
+def load_normal_and_PBR_and_link_all(node_tex_base, group_COn, nodes, links):
     '''
     以基础色节点添加法向贴图节点和PBR贴图节点、连接并添加动态纹理节点
     node_tex_base: 基础色节点
@@ -472,7 +472,7 @@ class VIEW3D_OT_CrafterImportSolidArea(bpy.types.Operator):#导入可编辑区�
         bpy.ops.crafter.improt_world()
         return {'FINISHED'}
 
-#==========导入资源包操作==========
+#==========加载资源包操作==========
 class VIEW3D_OT_CrafterOpenResourcesPlans(bpy.types.Operator):#打开资源包列表文件夹
     bl_label = "Open Resources Plans"
     bl_idname = "crafter.open_resources_plans"
@@ -550,14 +550,43 @@ class VIEW3D_OT_CrafterDownResource(bpy.types.Operator):#降低资源包优先�
 
         return {'FINISHED'}
 
-class VIEW3D_OT_CrafterImportResources(bpy.types.Operator):#导入资源包
-    bl_label = "Import Resources"
-    bl_idname = "crafter.import_resources"
-    bl_description = "Import resources"
+class VIEW3D_UL_CrafterResources(bpy.types.UIList):
+     def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
+        if self.layout_type in {"DEFAULT","COMPACT"}:
+            layout.label(text=item.name)
+
+class VIEW3D_UL_CrafterResourcesInfo(bpy.types.UIList):
+     def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
+        dir_resourcepacks = os.path.join(dir_resourcepacks_plans, addon_prefs.Resources_Plans_List[addon_prefs.Resources_Plans_List_index].name)
+        dir_resourcepack = os.path.join(dir_resourcepacks, item.name)
+        
+        if self.layout_type in {"DEFAULT","COMPACT"}:
+            item_name = ""
+            i = 0
+            while i < len(item.name):
+                if item.name[i] == "§":
+                    i+=1
+                elif item.name[i] == ".":
+                    break
+                elif item.name[i] != "!":
+                    item_name += item.name[i]
+                i+=1
+            # if "pack.png" in os.listdir(dir_resourcepack):
+            #     layout.label(text=item_name,icon="crafter_resources" + item.name)
+            # else:
+            #     layout.label(text=item_name)
+            layout.label(text=item_name)
+
+class VIEW3D_OT_CrafterLoadResources(bpy.types.Operator):#加载资源包
+    bl_label = "Load Resources"
+    bl_idname = "crafter.load_resources"
+    bl_description = "Load resources"
     bl_options = {"REGISTER", "UNDO"}
 
     @classmethod
     def poll(cls, context: bpy.types.Context):
+        return True
         return any(obj.type == "MESH" for obj in context.selected_objects)
 
     def execute(self, context: bpy.types.Context):
@@ -622,9 +651,32 @@ class VIEW3D_OT_CrafterImportResources(bpy.types.Operator):#导入资源包
                                     is_materialed = True
                                     group_COn = node
                     if is_materialed and (not is_original):
-                        import_normal_and_PBR_and_link_all(node_tex_base=node_tex_base, group_COn=group_COn, nodes=nodes, links=links)
+                        load_normal_and_PBR_and_link_all(node_tex_base=node_tex_base, group_COn=group_COn, nodes=nodes, links=links)
 
         return {'FINISHED'}
+    def invoke(self, context, event):
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
+
+        bpy.ops.crafter.reload_all()
+        return context.window_manager.invoke_props_dialog(self)
+
+    def draw(self, context):
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
+        layout = self.layout
+
+        row_Plans_List = layout.row()
+        row_Plans_List.template_list("VIEW3D_UL_CrafterResources", "", addon_prefs, "Resources_Plans_List", addon_prefs, "Resources_Plans_List_index", rows=1)
+        col_Plans_List_ops = row_Plans_List.column()
+        col_Plans_List_ops.operator("crafter.open_resources_plans",icon="FILE_FOLDER",text="")
+        col_Plans_List_ops.operator("crafter.reload_all",icon="FILE_REFRESH",text="")
+
+        if len(addon_prefs.Resources_List) > 0:
+            row_Resources_List = layout.row()
+            row_Resources_List.template_list("VIEW3D_UL_CrafterResourcesInfo", "", addon_prefs, "Resources_List", addon_prefs, "Resources_List_index", rows=1)
+            if len(addon_prefs.Resources_List) > 1:
+                col_Resources_List_ops = row_Resources_List.column(align=True)
+                col_Resources_List_ops.operator("crafter.up_resource",icon="TRIA_UP",text="")
+                col_Resources_List_ops.operator("crafter.down_resource",icon="TRIA_DOWN",text="")
 
 class VIEW3D_OT_CrafterSetTextureInterpolation(bpy.types.Operator):#设置纹理插值
     bl_label = "Set Texture Interpolation"    
@@ -727,6 +779,16 @@ class VIEW3D_OT_CrafterOpenMaterials(bpy.types.Operator):#打开材质列表文�
 
         return {'FINISHED'}
 
+class VIEW3D_UL_CrafterMaterials(bpy.types.UIList):
+    def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
+        if self.layout_type in {"DEFAULT","COMPACT"}:
+            layout.label(text=item.name)
+
+class VIEW3D_UL_CrafterClassificationBasis(bpy.types.UIList):
+     def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
+        if self.layout_type in {"DEFAULT","COMPACT"}:
+            layout.label(text=item.name)
+
 class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
     bl_label = "Load Material"
     bl_idname = "crafter.load_material"
@@ -735,6 +797,7 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
 
     @classmethod
     def poll(cls, context: bpy.types.Context):
+        return True
         return any(obj.type == "MESH" for obj in context.selected_objects)
 
     def execute(self, context: bpy.types.Context):
@@ -917,7 +980,7 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
                         links.new(output, node_output.inputs[output.name])
                     if node_tex_base == None:
                         continue
-                    import_normal_and_PBR_and_link_all(node_tex_base=node_tex_base, group_COn=group_COn, nodes=nodes, links=links)
+                    load_normal_and_PBR_and_link_all(node_tex_base=node_tex_base, group_COn=group_COn, nodes=nodes, links=links)
         #连接startswith(CO-)、startswith(CI-)节点组
         for aCO in COs:
             group_CO = bpy.data.node_groups[aCO]
@@ -981,6 +1044,31 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
                                     pass
         return {'FINISHED'}
 
+    def invoke(self, context, event):
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
+
+        bpy.ops.crafter.reload_all()
+        return context.window_manager.invoke_props_dialog(self)
+
+    def draw(self, context):
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
+        layout = self.layout
+
+        row_PBR_Parser = layout.row()
+        row_PBR_Parser.prop(addon_prefs, "PBR_Parser")
+
+        row_Materials_List = layout.row()
+        row_Materials_List.template_list("VIEW3D_UL_CrafterMaterials", "", addon_prefs, "Materials_List", addon_prefs, "Materials_List_index", rows=1)
+        col_Materials_List_ops = row_Materials_List.column()
+        col_Materials_List_ops.operator("crafter.open_materials",icon="FILE_FOLDER",text="")
+        col_Materials_List_ops.operator("crafter.reload_all",icon="FILE_REFRESH",text="")
+
+        row_Classification_Basis = layout.row()
+        row_Classification_Basis.template_list("VIEW3D_UL_CrafterClassificationBasis", "", addon_prefs, "Classification_Basis_List", addon_prefs, "Classification_Basis_List_index", rows=1)
+        row_Classification_Basis_ops = row_Classification_Basis.column()
+        row_Classification_Basis_ops.operator("crafter.open_classification_basis",icon="FILE_FOLDER",text="")
+        row_Classification_Basis_ops.operator("crafter.reload_all",icon="FILE_REFRESH",text="")
+
 class VIEW3D_OT_CrafterOpenClassificationBasis(bpy.types.Operator):#打开分类依据文件夹
     bl_label = "Open Classification Basis"
     bl_idname = "crafter.open_classification_basis"
@@ -997,7 +1085,7 @@ class VIEW3D_OT_CrafterOpenClassificationBasis(bpy.types.Operator):#打开分类
 
         return {'FINISHED'}
 
-#==========导入背景操作==========
+#==========加载背景操作==========
 
 class VIEW3D_OT_CrafterOpenBackgrounds(bpy.types.Operator):#打开背景列表文件夹
     bl_label = "Open Backgrounds"
@@ -1018,7 +1106,7 @@ class VIEW3D_UL_CrafterBackgroundsList(bpy.types.UIList):
      def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
         layout.label(text=item.name)
 
-class VIEW3D_OT_CrafterLoadBackground(bpy.types.Operator):#加载材质
+class VIEW3D_OT_CrafterLoadBackground(bpy.types.Operator):#加载背景
     bl_label = "Load Background"
     bl_idname = "crafter.load_background"
     bl_description = "Load Background"

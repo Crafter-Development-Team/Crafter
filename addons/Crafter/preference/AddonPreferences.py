@@ -20,7 +20,7 @@ class CrafterAddonPreferences(AddonPreferences):
                         default=True,)# type: ignore
     Import_World: BoolProperty(name="Import World",
                                default=True,)# type: ignore
-    Import_Resources: BoolProperty(name="Import Resources",
+    Load_Resources: BoolProperty(name="Load Resources",
                                    default=True,)# type: ignore
     Load_Materials: BoolProperty(name="Load Materials",
                                  default=True,)# type: ignore
@@ -42,7 +42,7 @@ class CrafterAddonPreferences(AddonPreferences):
                                            default=0)# type: ignore
     solid: IntProperty(name="Solid",
                        default=0,)# type: ignore
-#==========导入资源包属性==========
+#==========加载资源包属性==========
     Resources_Plans_List: CollectionProperty(name="Resources Plans",type=ResourcePlan)#type: ignore
     Resources_Plans_List_index: IntProperty(name="Resources",
                                             default=0,
@@ -73,7 +73,7 @@ class CrafterAddonPreferences(AddonPreferences):
     Classification_Basis_List: CollectionProperty(name="Classification Basis",type=ClassificationBasisl)# type: ignore
     Classification_Basis_List_index: IntProperty(name="Classification Basis",default=0)# type: ignore
 
-#==========导入背景属性==========
+#==========加载背景属性==========
     Backgrounds_List: CollectionProperty(name="Backgrounds",type=Background)# type: ignore
     Backgrounds_List_index: IntProperty(name="Background",
                                       default=0,
@@ -83,7 +83,7 @@ class CrafterAddonPreferences(AddonPreferences):
         layout = self.layout
         layout.prop(self, "Plans")
         layout.prop(self, "Import_World")
-        layout.prop(self, "Import_Resources")
+        layout.prop(self, "Load_Resources")
         layout.prop(self, "Load_Materials")
 #==========修改变量操作==========
     def update_texture_interpolation(self, context):

@@ -5,8 +5,8 @@ dictionary = {
         "Crafter": "Crafter",
         "Plans":"方案",
         #==========面板==========
-            #==========导入==========
-                #==========导入背景==========
+            #==========加载==========
+                #==========加载背景==========
         "Background":"背景",
         "Load Background":"加载背景",
             #==========导入世界==========
@@ -18,8 +18,8 @@ dictionary = {
         "Point Cloud Mode":"点云模式",
         "History Worlds":"历史世界",
         "To use the history world settings":"使用历史世界设置",
-            #==========导入资源包==========
-        "Import Resources":"导入资源包",
+            #==========加载资源包==========
+        "Load Resources":"加载资源包",
         "Resources":"资源包预设",
         "original":"原版",
         "Open Resources Plans":"打开资源包预设列表文件夹",
@@ -32,7 +32,7 @@ dictionary = {
         "Set Texture Interpolation":"设置纹理插值",
             #==========加载材质==========
         "Load Materials":"加载材质",
-        "Rain":"雨",
+        "Materials":"材质",
         "PBR Parser":"PBR解析器",
         "Mix Parser":"混合解析器",
         "Materials index":"材质索引",
@@ -50,8 +50,8 @@ dictionary = {
         "Import the solid area":"导入实心区域",
         "Starting coordinates":"起始坐标",
         "Ending coordinates":"结束坐标",
-            #==========导入资源包==========
-        "Import resources":"导入资源包",
+            #==========加载资源包==========
+        "Load resources":"加载资源包",
         "Set texture interpolation":"设置纹理插值",
             #==========加载材质==========
         "How to parse PBR texture(and normal texture)":"如何解析PBR贴图(以及法线贴图)",
