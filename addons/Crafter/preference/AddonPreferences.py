@@ -4,7 +4,7 @@ import bpy
 from bpy.props import StringProperty, IntProperty, BoolProperty, IntVectorProperty, EnumProperty, CollectionProperty
 from bpy.types import AddonPreferences
 from ..config import __addon_name__
-from ..properties import ResourcePlan, ResourcePlansInfo, Material, ClassificationBasisl,HistoryWorld
+from ..properties import ResourcePlan, ResourcePlansInfo, Material, ClassificationBasisl,HistoryWorld,Background
 
 
 class CrafterAddonPreferences(AddonPreferences):
@@ -46,11 +46,11 @@ class CrafterAddonPreferences(AddonPreferences):
     Resources_Plans_List: CollectionProperty(name="Resources Plans",type=ResourcePlan)#type: ignore
     Resources_Plans_List_index: IntProperty(name="Resources",
                                             default=0,
-                                            update=lambda self, context: self.update_resources_plans_list_index(context))# type: ignore
+                                            update=lambda self, context: self.reload_all(context))# type: ignore
     Resources_List: CollectionProperty(name="Resources",type=ResourcePlansInfo)# type: ignore
     Resources_List_index: IntProperty(name="Resource",
                                       default=0,
-                                      update=lambda self, context: self.update_resources_list_index(context))# type: ignore
+                                      update=lambda self, context: self.reload_all(context))# type: ignore
     Texture_Interpolation: EnumProperty(name="Texture Interpolation",
                                         items=[("Linear","Linear","Linear interpolation"),
                                                ("Closest","Closest","No interpolation (sample closest texel)"),
@@ -72,6 +72,12 @@ class CrafterAddonPreferences(AddonPreferences):
     Materials_List_index: IntProperty(name="Material",default=0)# type: ignore
     Classification_Basis_List: CollectionProperty(name="Classification Basis",type=ClassificationBasisl)# type: ignore
     Classification_Basis_List_index: IntProperty(name="Classification Basis",default=0)# type: ignore
+
+#==========导入背景属性==========
+    Backgrounds_List: CollectionProperty(name="Backgrounds",type=Background)# type: ignore
+    Backgrounds_List_index: IntProperty(name="Background",
+                                      default=0,
+                                      update=lambda self, context: self.reload_all(context))# type: ignore
 #==========偏好设置面板==========
     def draw(self, context: bpy.types.Context):
         layout = self.layout
@@ -84,11 +90,7 @@ class CrafterAddonPreferences(AddonPreferences):
         bpy.ops.crafter.set_texture_interpolation()
         return None
     
-    def update_resources_plans_list_index(self, context):
-        bpy.ops.crafter.reload_all()
-        return None
-    
-    def update_resources_list_index(self, context):
+    def reload_all(self, context):
         bpy.ops.crafter.reload_all()
         return None
     

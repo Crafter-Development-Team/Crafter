@@ -81,6 +81,29 @@ class VIEW3D_PT_CrafterImportWorld(bpy.types.Panel):
     def poll(cls, context: bpy.types.Context):
             return context.preferences.addons[__addon_name__].preferences.Import_World
 
+
+@reg_order(2)#==========导入面板==========
+class VIEW3D_PT_CrafterImport(bpy.types.Panel):
+    bl_label = "Import"
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_category = "Crafter"
+    
+    def draw(self, context: bpy.types.Context):
+        
+        layout = self.layout
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
+
+        row_Backgrounds = layout.row()
+        if -1 < addon_prefs.Backgrounds_List_index and addon_prefs.Backgrounds_List_index < len(addon_prefs.Backgrounds_List):
+            background = addon_prefs.Backgrounds_List[addon_prefs.Backgrounds_List_index].name
+        else:
+            background = ""
+        row_Backgrounds.label(text=i18n("Background") + ":" + background)
+        row_Backgrounds.operator("crafter.load_background",text="Load")
+    @classmethod
+    def poll(cls, context: bpy.types.Context):
+        return context.preferences.addons[__addon_name__].preferences.Import_Resources
 #==========导入资源包列表==========
 class VIEW3D_UL_CrafterResources(bpy.types.UIList):
      def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
@@ -110,7 +133,7 @@ class VIEW3D_UL_CrafterResourcesInfo(bpy.types.UIList):
             #     layout.label(text=item_name)
             layout.label(text=item_name)
 
-@reg_order(2)#==========导入资源包面板==========
+@reg_order(3)#==========导入资源包面板==========
 class VIEW3D_PT_CrafterImportResources(bpy.types.Panel):
     bl_label = "Import Resources"
     bl_space_type = "VIEW_3D"
@@ -157,7 +180,7 @@ class VIEW3D_UL_CrafterClassificationBasis(bpy.types.UIList):
         if self.layout_type in {"DEFAULT","COMPACT"}:
             layout.label(text=item.name)
 
-@reg_order(3)#==========加载材质面板==========
+@reg_order(4)#==========加载材质面板==========
 class VIEW3D_PT_Materials(bpy.types.Panel):
     bl_label = "Load Materials"
     bl_space_type = "VIEW_3D"

@@ -5,6 +5,10 @@ dictionary = {
         "Crafter": "Crafter",
         "Plans":"方案",
         #==========面板==========
+            #==========导入==========
+                #==========导入背景==========
+        "Background":"背景",
+        "Load Background":"加载背景",
             #==========导入世界==========
         "Import World":"导入世界",
         "Import Editable Area":"导入可编辑区域",
@@ -61,6 +65,8 @@ dictionary = {
         "Normal Alpha":"法向Alpha",
         "Parsed Normal":"已解析法向",
         "Porosity":"孔隙率",
+        #==========报错==========
+        "No Selected Background":"无选中背景"
     }
 }
 
