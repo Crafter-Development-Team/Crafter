@@ -9,7 +9,7 @@ from ...common.class_loader.auto_load import add_properties, remove_properties
 from ...common.i18n.dictionary import common_dictionary
 from ...common.i18n.i18n import load_dictionary
 from bpy.props import StringProperty, IntProperty, BoolProperty, IntVectorProperty, EnumProperty, CollectionProperty, FloatProperty
-from .properties import ResourcePlan, ResourcePlansInfo, Material
+from .properties import ResourcePlan, ResourcePlansInfo, Material ,McMt
 
 
 # Add-on info
@@ -28,6 +28,7 @@ bl_info = {
 
 _addon_properties = {
     bpy.types.Scene: {
+        "Crafter_mcmts": CollectionProperty(type=McMt, name="McMt")
         # "Crafter_rain":FloatProperty(name="Rain",
         #                            description="rain",
         #                            subtype="FACTOR",

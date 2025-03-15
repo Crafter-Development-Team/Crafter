@@ -134,6 +134,26 @@ def fuq_bl_dot_number(name: str):
             name = name[:last_dot_index]
     return name
 
+def add_to_mcmts_collection(object,context):
+    '''
+    object: 目标对象
+    context: 目标上下文
+    '''
+    list_name_context_material = []
+    for context_material in bpy.data.materials:
+        list_name_context_material.append(context_material.name)
+    list_name_object_material = []
+    for object_material in object.data.materials:
+        list_name_object_material.append(object_material.name)
+    if object.name != "CrafterIn" and object.type == "MESH" and object.data.materials:
+        for name_material in list_name_object_material:
+            if (name_material not in context.scene.Crafter_mcmts) and (name_material != "CrafterIn"):
+                new_mcmt = context.scene.Crafter_mcmts.add()
+                new_mcmt.name = name_material
+    for i in range(len(context.scene.Crafter_mcmts)-1,-1,-1):
+        if context.scene.Crafter_mcmts[i].name not in list_name_context_material:
+            context.scene.Crafter_mcmts.remove(i)
+
 class VIEW3D_OT_CrafterReloadResourcesPlans(bpy.types.Operator):#刷新资源包预设列表
     bl_label = "Reload Resources Plans"
     bl_idname = "crafter.reload_resources_plans"
@@ -258,7 +278,7 @@ class VIEW3D_OT_CrafterReloadClassificationBasis(bpy.types.Operator):#刷新分�
 
         return {'FINISHED'}
 
-class VIEW3D_OT_CrafterReloadBackgrounds(bpy.types.Operator):#刷新材质列表
+class VIEW3D_OT_CrafterReloadBackgrounds(bpy.types.Operator):#刷新背景列表
     bl_label = "Reload Backgrounds"
     bl_idname = "crafter.reload_background"
     bl_description = " "
@@ -870,117 +890,131 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
                 COs.append("CO-" + group_name)
         # 删去原有着色器 并 重新添加startswith(CO-)节点组
         for object in context.selected_objects:
-            if object.name == "CrafterIn":
+            add_to_mcmts_collection(object=object,context=context)
+        for name_material in context.scene.Crafter_mcmts:
+            material = bpy.data.materials[name_material.name]
+            node_tree_material = material.node_tree
+            if node_tree_material == None:
                 continue
-            if object.type == "MESH":
-                for material in object.data.materials:
-                    node_tree_material = material.node_tree
-                    nodes = node_tree_material.nodes
-                    links = node_tree_material.links
-                    
-                    node_tex_base = None
-                    for node in nodes:
-                        if node.type == "TEX_IMAGE":
-                            if node.image != None:
-                                name_image = fuq_bl_dot_number(node.image.name)
-                                if name_image.endswith("_n.png") or name_image.endswith("_s.png") or name_image.endswith("_a.png"):
-                                    bpy.data.images.remove(node.image)
-                                    nodes.remove(node)
-                                elif node_tex_base != None:
-                                    nodes.remove(node)
-                                elif name_image.endswith(".png"):
-                                    node.interpolation = "Closest"
-                                    node_tex_base = node
-                                    block_name = fuq_bl_dot_number(node_tex_base.image.name)
-                                    real_block_name = block_name[:-4]
-                    # 注释部分为旧的通过材质名获得mod_name和type_name的方式，暂作保留
+            nodes = node_tree_material.nodes
+            links = node_tree_material.links
+            
+            node_tex_base = None
+            #处理lod材质
+            if material.name.startswith("color#"):
+                material.displacement_method = "DISPLACEMENT"
+                for node in nodes:
+                    if node.type == "OUTPUT_MATERIAL" and node.is_active_output:
+                        node_output = node
+                    if node.type == "BSDF_PRINCIPLED":
+                        nodes.remove(node)
+                group_CO = nodes.new(type="ShaderNodeGroup")
+                group_CO.location = (node_output.location.x - 200, node_output.location.y)
+                group_CO.node_tree = bpy.data.node_groups["CO-"]
+                group_CO.inputs["Base Color"].default_value = [float(material.name[6:11]),float(material.name[12:17]),float(material.name[18:23]),1]
+                for output in group_CO.outputs:
+                    links.new(output, node_output.inputs[output.name])
+                continue
+            #获取基础贴图节点
+            for node in nodes:
+                if node.type == "TEX_IMAGE" and node.image != None:
+                    name_image = fuq_bl_dot_number(node.image.name)
+                    if name_image.endswith("_n.png") or name_image.endswith("_s.png") or name_image.endswith("_a.png"):
+                        bpy.data.images.remove(node.image)
+                        nodes.remove(node)
+                    elif node_tex_base != None:
+                        nodes.remove(node)
+                    elif name_image.endswith(".png"):
+                        node.interpolation = "Closest"
+                        node_tex_base = node
+                        block_name = fuq_bl_dot_number(node_tex_base.image.name)
+                        real_block_name = block_name[:-4]
+            # 注释部分为旧的通过材质名获得mod_name和type_name的方式，暂作保留
 
-                    # real_block_name = material.name
-                    # real_block_name = fuq_bl_dot_number(real_block_name)
-                    # mod_name = "minecraft"
-                    # type_name = "block"
-                    # 获得real_material_name(如果有mod_name,type_name,获得之,但目前好像没用...)
-                    # last_hen_index = real_material_name.rfind('-')
-                    # if not last_hen_index == -1:
-                    #     mod_and_type = real_material_name[:last_hen_index]
-                    #     real_material_name = real_material_name[last_hen_index+1:]
-                    #     last____index = mod_and_type.rfind('_')
-                    #     mod_name = real_material_name[:last____index]
-                    #     type_name = real_material_name[last____index+1:last_hen_index]
-                    # 如果在banlist里直接跳过
-                    ban = False
-                    for ban_key in banlist_key_words:
-                        if real_block_name in ban_key:
-                            ban = True
-                            break
-                    if ban or real_block_name in banlist:
+            # real_block_name = material.name
+            # real_block_name = fuq_bl_dot_number(real_block_name)
+            # mod_name = "minecraft"
+            # type_name = "block"
+            # 获得real_material_name(如果有mod_name,type_name,获得之,但目前好像没用...)
+            # last_hen_index = real_material_name.rfind('-')
+            # if not last_hen_index == -1:
+            #     mod_and_type = real_material_name[:last_hen_index]
+            #     real_material_name = real_material_name[last_hen_index+1:]
+            #     last____index = mod_and_type.rfind('_')
+            #     mod_name = real_material_name[:last____index]
+            #     type_name = real_material_name[last____index+1:last_hen_index]
+            # 如果在banlist里直接跳过
+            ban = False
+            for ban_key in banlist_key_words:
+                if real_block_name in ban_key:
+                    ban = True
+                    break
+            if ban or real_block_name in banlist:
+                continue
+            # 设置材质置换方式为仅置换
+            material.displacement_method = "DISPLACEMENT"
+            #获得node_output 并 删去无内容节点组 并 删去Rain_value
+            for node in nodes:
+                if node.type == "OUTPUT_MATERIAL" and node.is_active_output:
+                    node_output = node
+                if node.type == "GROUP" and node.node_tree == None:
+                    node_tree_material.nodes.remove(node)
+            # 删去原有着色器
+            try:
+                from_node = node_output.inputs[0].links[0].from_node
+                if from_node.type == "BSDF_PRINCIPLED" and material.name != "CrafterIn":
+                    node_tree_material.nodes.remove(from_node)
+            except:
+                pass
+            # 重新添加startswith(CO-)节点组
+            group_COn = nodes.new(type="ShaderNodeGroup")
+            group_COn.location = (node_output.location.x - 200, node_output.location.y)
+            found = False
+            for type_name in classification_list:
+                if type_name == "banlist" or type_name == "banlist_key_words":
+                    continue
+                for group_name in classification_list[type_name]:
+                    banout = False
+                    if "banlist_key_words" in classification_list[type_name][group_name]:
+                        for item in classification_list[type_name][group_name]["banlist"]:
+                            if item in real_block_name:
+                                banout = True
+                                break
+                    if banout:
                         continue
-                    # 设置材质置换方式为仅置换
-                    material.displacement_method = "DISPLACEMENT"
-                    #获得node_output 并 删去无内容节点组 并 删去Rain_value
-                    for node in nodes:
-                        if node.type == "OUTPUT_MATERIAL" and node.is_active_output:
-                            node_output = node
-                        if (node.type == "GROUP" and node.node_tree == None) or (node.type == "VALUE" and node.name.startswith("Rain_value")):
-                            node_tree_material.nodes.remove(node)
-                    # 删去原有着色器
-                    try:
-                        from_node = node_output.inputs[0].links[0].from_node
-                        if from_node.type == "BSDF_PRINCIPLED" and material.name != "CrafterIn":
-                            node_tree_material.nodes.remove(from_node)
-                    except:
-                        pass
-                    # 重新添加startswith(CO-)节点组
-                    group_COn = nodes.new(type="ShaderNodeGroup")
-                    group_COn.location = (node_output.location.x - 200, node_output.location.y)
-                    found = False
-                    for type_name in classification_list:
-                        if type_name == "banlist" or type_name == "banlist_key_words":
-                            continue
-                        for group_name in classification_list[type_name]:
-                            banout = False
-                            if "banlist_key_words" in classification_list[type_name][group_name]:
-                                for item in classification_list[type_name][group_name]["banlist"]:
-                                    if item in real_block_name:
-                                        banout = True
-                                        print("in ban",item)
-                                        break
-                            if banout:
+                    if "banlist" in classification_list[type_name][group_name]:
+                        for item in classification_list[type_name][group_name]["banlist"]:
+                            if item == real_block_name:
+                                banout = True
                                 break
-                            if "banlist" in classification_list[type_name][group_name]:
-                                for item in classification_list[type_name][group_name]["banlist"]:
-                                    if item == real_block_name:
-                                        print("= Ban", item)
-                                        banout = True
-                                        break
-                            if banout:
-                                break
-                            if "key_words" in classification_list[type_name][group_name]:
-                                for item in classification_list[type_name][group_name]["key_words"]:
-                                    if item in real_block_name:
-                                        group_COn.node_tree = bpy.data.node_groups["CO-" + group_name]
-                                        found = True
-                                        break
-                            if found:
-                                break
-                            if "full_name" in classification_list[type_name][group_name]:
-                                for item in classification_list[type_name][group_name]["full_name"]:
-                                    if item == real_block_name:
-                                        group_COn.node_tree = bpy.data.node_groups["CO-" + group_name]
-                                        found = True
-                                        break
-                            if found:
-                                break
-                        if found:
-                            break
-                    if not found:
-                        group_COn.node_tree = bpy.data.node_groups["CO-"]
-                    # 连接CO节点
-                    for output in group_COn.outputs:
-                        links.new(output, node_output.inputs[output.name])
-                    if node_tex_base == None:
+                    if banout:
                         continue
-                    load_normal_and_PBR_and_link_all(node_tex_base=node_tex_base, group_COn=group_COn, nodes=nodes, links=links)
+                    if "key_words" in classification_list[type_name][group_name]:
+                        for item in classification_list[type_name][group_name]["key_words"]:
+                            if item in real_block_name:
+                                group_COn.node_tree = bpy.data.node_groups["CO-" + group_name]
+                                found = True
+                                break
+                    if found:
+                        break
+                    if "full_name" in classification_list[type_name][group_name]:
+                        for item in classification_list[type_name][group_name]["full_name"]:
+                            if item == real_block_name:
+                                group_COn.node_tree = bpy.data.node_groups["CO-" + group_name]
+                                found = True
+                                break
+                    if found:
+                        break
+                if found:
+                    break
+            if not found:
+                group_COn.node_tree = bpy.data.node_groups["CO-"]
+            # 连接CO节点
+            for output in group_COn.outputs:
+                links.new(output, node_output.inputs[output.name])
+            if node_tex_base == None:
+                continue
+            load_normal_and_PBR_and_link_all(node_tex_base=node_tex_base, group_COn=group_COn, nodes=nodes, links=links)
         #连接startswith(CO-)、startswith(CI-)节点组
         for aCO in COs:
             group_CO = bpy.data.node_groups[aCO]
@@ -1036,7 +1070,7 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
             if material.node_tree != None:
                 for node in material.node_tree.nodes:
                     if node.type == "GROUP":
-                        if node.node_tree.name != None:
+                        if node.node_tree != None:
                             if node.node_tree.name.startswith("CO-"):
                                 try:
                                     node.inputs["PBR"].default_value = PBR_value

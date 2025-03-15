@@ -1,5 +1,5 @@
 import bpy
-from bpy.props import StringProperty
+from bpy.props import StringProperty, PointerProperty
 
 #==========导入世界属性==========
 class HistoryWorld(bpy.types.PropertyGroup):
@@ -10,6 +10,8 @@ class ResourcePlan(bpy.types.PropertyGroup):
 class ResourcePlansInfo(bpy.types.PropertyGroup):
     Resource: StringProperty(name="Resource",)# type: ignore
 #==========加载材质属性==========
+class McMt(bpy.types.PropertyGroup):
+    mcmt: StringProperty(name="mcmt",)# type: ignore
 class Material(bpy.types.PropertyGroup):
     Material: StringProperty(name="Material",)# type: ignore
 class ClassificationBasisl(bpy.types.PropertyGroup):
