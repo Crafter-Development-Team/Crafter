@@ -2,8 +2,14 @@ import bpy
 from bpy.props import StringProperty, PointerProperty
 
 #==========导入世界属性==========
-class HistoryWorld(bpy.types.PropertyGroup):
-    History_World: StringProperty(name="History World",)# type: ignore
+class HistoryWorldRoot(bpy.types.PropertyGroup):
+    History_World_Root: StringProperty(name="History World Root",)# type: ignore
+class HistoryWorldVersion(bpy.types.PropertyGroup):
+    History_World_Version: StringProperty(name="History World Version",)# type: ignore
+class HistoryWorldSave(bpy.types.PropertyGroup):
+    History_World_Save: StringProperty(name="History World Save",)# type: ignore
+class HistoryWorldSetting(bpy.types.PropertyGroup):
+    History_World_Setting: StringProperty(name="History World Setting",)# type: ignore
 #==========加载资源属性==========
 class ResourcePlan(bpy.types.PropertyGroup):
     Resources_Plan: StringProperty(name="Resources Plan",)# type: ignore

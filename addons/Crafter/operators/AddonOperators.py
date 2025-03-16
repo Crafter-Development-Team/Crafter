@@ -8,6 +8,7 @@ import json
 import zipfile
 
 from ..config import __addon_name__
+from ....common.i18n.i18n import i18n
 from ..__init__ import dir_cafter_data, dir_resourcepacks_plans, dir_materials, dir_classification_basis, dir_blend_append, dir_init_main, dir_backgrounds
 
 # crafter_resources_icons = bpy.utils.previews.new()
@@ -315,9 +316,65 @@ class VIEW3D_OT_CrafterReloadAll(bpy.types.Operator):#刷新全部
         return {'FINISHED'}
 
 #==========导入世界操作==========
-class VIEW3D_UL_CrafterHistoryWorldsList(bpy.types.UIList):
+class VIEW3D_UL_CrafterHistoryWorldRootsList(bpy.types.UIList):
      def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
         layout.label(text=item.name)
+
+class VIEW3D_UL_CrafterHistoryWorldVersionsList(bpy.types.UIList):
+     def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
+        layout.label(text=item.name)
+
+class VIEW3D_UL_CrafterHistoryWorldSavesList(bpy.types.UIList):
+     def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
+        layout.label(text=item.name)
+
+class VIEW3D_UL_CrafterHistoryWorldSettingsList(bpy.types.UIList):
+     def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
+        settings=item.name.split(" ")
+        layout.label(text=f"{settings[0]}     {settings[1]}     {settings[2]}   |   {settings[3]}     {settings[4]}     {settings[5]}")
+
+class VIEW3D_OT_CrafterReloadBackgrounds(bpy.types.Operator):#刷新历史世界列表
+    bl_label = "Reload History Worlds List"
+    bl_idname = "crafter.reload_history_worlds_list"
+    bl_description = " "
+    
+    @classmethod
+    def poll(cls, context: bpy.types.Context):
+        return True
+
+    def execute(self, context: bpy.types.Context):
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
+
+        dir_json_history_worlds = os.path.join(dir_cafter_data, "history_worlds.json")
+        with open(dir_json_history_worlds, 'r', encoding='utf-8') as file:
+            json_history_worlds = json.load(file)
+        
+        addon_prefs.History_World_Roots_List.clear()
+        addon_prefs.History_World_Versions_List.clear()
+        addon_prefs.History_World_Saves_List.clear()
+        addon_prefs.History_World_Settings_List.clear()
+        for root in json_history_worlds:
+            history_world_root = addon_prefs.History_World_Roots_List.add()
+            history_world_root.name = root
+        if len(addon_prefs.History_World_Roots_List) > 0:
+            if addon_prefs.History_World_Roots_List_index <0 or addon_prefs.History_World_Roots_List_index >= len(addon_prefs.History_World_Roots_List):
+                addon_prefs.History_World_Roots_List_index = 0
+            for version in json_history_worlds[addon_prefs.History_World_Roots_List[addon_prefs.History_World_Roots_List_index].name]:
+                history_world_version = addon_prefs.History_World_Versions_List.add()
+                history_world_version.name = version
+            if len(addon_prefs.History_World_Versions_List) > 0:
+                if addon_prefs.History_World_Versions_List_index <0 or addon_prefs.History_World_Versions_List_index >= len(addon_prefs.History_World_Versions_List):
+                    addon_prefs.History_World_Versions_List_index = 0
+                for save in json_history_worlds[addon_prefs.History_World_Roots_List[addon_prefs.History_World_Roots_List_index].name][addon_prefs.History_World_Versions_List[addon_prefs.History_World_Versions_List_index].name]:
+                    history_world_save = addon_prefs.History_World_Saves_List.add()
+                    history_world_save.name = save
+                if len(addon_prefs.History_World_Saves_List) > 0:
+                    if addon_prefs.History_World_Saves_List_index <0 or addon_prefs.History_World_Saves_List_index >= len(addon_prefs.History_World_Saves_List):
+                        addon_prefs.History_World_Saves_List_index = 0
+                    for settings in json_history_worlds[addon_prefs.History_World_Roots_List[addon_prefs.History_World_Roots_List_index].name][addon_prefs.History_World_Versions_List[addon_prefs.History_World_Versions_List_index].name][addon_prefs.History_World_Saves_List[addon_prefs.History_World_Saves_List_index].name]:
+                        history_world_setting = addon_prefs.History_World_Settings_List.add()
+                        history_world_setting.name = f"{settings[0][0]} {settings[0][1]} {settings[0][2]} {settings[1][0]} {settings[1][1]} {settings[1][2]}" 
+        return {'FINISHED'}
 
 class VIEW3D_OT_UseCrafterHistoryWorlds(bpy.types.Operator):#使用历史世界
     bl_label = "History Worlds"
@@ -330,50 +387,85 @@ class VIEW3D_OT_UseCrafterHistoryWorlds(bpy.types.Operator):#使用历史世界
     def execute(self, context):
         addon_prefs = context.preferences.addons[__addon_name__].preferences
 
-        if addon_prefs.History_Worlds_List_index != -1:
-            try:
-                dir_json_history_worlds = os.path.join(dir_cafter_data, "history_worlds.json")
-                if os.path.exists(dir_json_history_worlds):
-                    with open(dir_json_history_worlds, 'r', encoding='utf-8') as file:
-                        json_history_worlds = json.load(file)
-                history_world = json_history_worlds[addon_prefs.History_Worlds_List_index]
-                addon_prefs.World_Path = history_world[0]
-                addon_prefs.XYZ_1 = history_world[1]
-                addon_prefs.XYZ_2 = history_world[2]
-            except Exception as e:
-                print(e)
+        if len(addon_prefs.History_World_Saves_List) > 0:
+            dir_root = addon_prefs.History_World_Roots_List[addon_prefs.History_World_Roots_List_index].name
+            dir_version = os.path.join(dir_root,"versions",addon_prefs.History_World_Versions_List[addon_prefs.History_World_Versions_List_index].name)
+            dir_save = os.path.join(dir_version,"saves",addon_prefs.History_World_Saves_List[addon_prefs.History_World_Saves_List_index].name)
+            addon_prefs.World_Path = dir_save
+            if len(addon_prefs.History_World_Settings_List) > 0:
+                settings = addon_prefs.History_World_Settings_List[addon_prefs.History_World_Settings_List_index].name
+                setting = settings.split(" ")
+                addon_prefs.XYZ_1 = (int(setting[0]),int(setting[1]),int(setting[2]))
+                addon_prefs.XYZ_2 = (int(setting[3]),int(setting[4]),int(setting[5]))
         return {'FINISHED'}
 
     def invoke(self, context, event):
         addon_prefs = context.preferences.addons[__addon_name__].preferences
 
-        addon_prefs.History_Worlds_List.clear()
-        addon_prefs.History_Worlds_List_index = -1
-
+        #补全history_worlds.json
         dir_json_history_worlds = os.path.join(dir_cafter_data, "history_worlds.json")
-        if os.path.exists(dir_json_history_worlds):
-            with open(dir_json_history_worlds, 'r', encoding='utf-8') as file:
-                json_history_worlds = json.load(file)
-            for history_world in json_history_worlds:
-                if history_world != None:
-                    history_world_name = addon_prefs.History_Worlds_List.add()
-                    normalized_path = os.path.normpath(history_world[0])
-                    dir_name = os.path.basename(normalized_path)
-                    history_world_name.name = dir_name+" | "+str(history_world[1][0])+" "+str(history_world[1][1])+" "+str(history_world[1][2])+" | "+str(history_world[2][0])+" "+str(history_world[2][1])+" "+str(history_world[2][2])
+        if not os.path.exists(dir_json_history_worlds):
+            self.report({ 'ERROR' }, "Haven't history worlds")
+            return {'CANCELLED'}
+        with open(dir_json_history_worlds, 'r', encoding='utf-8') as file:
+            json_history_worlds = json.load(file)
+        for root in reversed(json_history_worlds):
+            #地址不存在则移除该root
+            if not os.path.exists(root):
+                del json_history_worlds[root]
+                continue
+            for version in reversed(json_history_worlds[root]):
+                #版本不存在则移除该version
+                if not os.path.exists(os.path.join(root, "versions", version)):
+                    del json_history_worlds[root][version]
+                    continue
+            dir_versions = os.path.join(root, "versions")
+            for version in os.listdir(dir_versions):
+                if os.path.isdir(os.path.join(dir_versions, version)):
+                    json_history_worlds[root].setdefault(version, {})
+            for version in json_history_worlds[root]:
+                dir_version = os.path.join(root, "versions", version)
+                dir_saves = os.path.join(dir_version, "saves")
+                if not os.path.exists(dir_saves):
+                    continue
+                for save in reversed(json_history_worlds[root][version]):
+                    #存档不存在则移除该save
+                    if not os.path.exists(os.path.join(dir_saves, save)):
+                        del json_history_worlds[root][version][save]
+                        continue
+                for save in os.listdir(dir_saves):
+                    if os.path.isdir(os.path.join(dir_saves, save)):
+                        json_history_worlds[root][version].setdefault(save, [])
+        with open(dir_json_history_worlds, 'w', encoding='utf-8') as file:
+            json.dump(json_history_worlds, file, indent=4)
+                
+        #刷新list
+        bpy.ops.crafter.reload_history_worlds_list()
+                        
         return context.window_manager.invoke_props_dialog(self)
 
     def draw(self, context):
         addon_prefs = context.preferences.addons[__addon_name__].preferences
         layout = self.layout
 
-        layout.template_list("VIEW3D_UL_CrafterHistoryWorldsList", "", addon_prefs, "History_Worlds_List", addon_prefs, "History_Worlds_List_index", rows=20)
+        if len(addon_prefs.History_World_Roots_List) > 0:
+            row_root = min(len(addon_prefs.History_World_Roots_List),4)
+            layout.template_list("VIEW3D_UL_CrafterHistoryWorldRootsList", "", addon_prefs, "History_World_Roots_List", addon_prefs, "History_World_Roots_List_index", rows=row_root)
+        if len(addon_prefs.History_World_Versions_List) > 0:
+            row_version = min(len(addon_prefs.History_World_Versions_List),4)
+            layout.template_list("VIEW3D_UL_CrafterHistoryWorldVersionsList", "", addon_prefs, "History_World_Versions_List", addon_prefs, "History_World_Versions_List_index", rows=row_version)
+        if len(addon_prefs.History_World_Saves_List) > 0:
+            row_save = min(len(addon_prefs.History_World_Saves_List),4)
+            layout.template_list("VIEW3D_UL_CrafterHistoryWorldSavesList", "", addon_prefs, "History_World_Saves_List", addon_prefs, "History_World_Saves_List_index", rows=row_save)
+        if len(addon_prefs.History_World_Settings_List) > 0:
+            layout.template_list("VIEW3D_UL_CrafterHistoryWorldSettingsList", "", addon_prefs, "History_World_Settings_List", addon_prefs, "History_World_Settings_List_index", rows=10)
 
-class VIEW3D_OT_CrafterImportWorld(bpy.types.Operator):#导入世界
-    bl_label = "Import World"
-    bl_idname = "crafter.import_world"
-    bl_description = "Import world"
-    bl_options = {'INTERNAL'}
-
+class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世界
+    bl_label = "Import Surface World"
+    bl_idname = "crafter.import_surface_world"
+    bl_description = "Import the surface world"
+    bl_options = {'REGISTER', 'UNDO'}
+    
     @classmethod
     def poll(cls, context: bpy.types.Context):
         return True
@@ -382,8 +474,18 @@ class VIEW3D_OT_CrafterImportWorld(bpy.types.Operator):#导入世界
         addon_prefs = context.preferences.addons[__addon_name__].preferences
 
         worldPath = os.path.normpath(addon_prefs.World_Path)
-        packagePath = os.path.dirname(os.path.dirname(worldPath))
-        selectedGameVersion = os.path.basename(packagePath)
+        save = os.path.basename(worldPath)
+        versionPath = os.path.dirname(os.path.dirname(worldPath))
+        dir_level_dat = os.path.join(worldPath, "level.dat")
+        if not os.path.exists(dir_level_dat):
+            self.report({'ERROR'}, "It's not a world path!")
+            return {"CANCELLED"}
+        selectedGameVersion = os.path.basename(versionPath)
+        if not os.path.exists(os.path.join(versionPath,selectedGameVersion+".jar")):
+            self.report({'ERROR'}, "Please set the save file into the Minecraft game folder!")
+            return {"CANCELLED"}
+        dot_minecraftPath = os.path.dirname(os.path.dirname(versionPath))
+
         point_cloud_mode = addon_prefs.Point_Cloud_Mode
 
         if point_cloud_mode:
@@ -393,7 +495,7 @@ class VIEW3D_OT_CrafterImportWorld(bpy.types.Operator):#导入世界
         
         worldconfig = {
             "worldPath": worldPath,
-            "packagePath": packagePath,
+            "packagePath": versionPath,
             "selectedGameVersion":selectedGameVersion,
             "biomeMappingFile": "config\\jsons\\biomes.json",
             "minX": min(addon_prefs.XYZ_1[0], addon_prefs.XYZ_2[0]),
@@ -403,7 +505,7 @@ class VIEW3D_OT_CrafterImportWorld(bpy.types.Operator):#导入世界
             "minZ": min(addon_prefs.XYZ_1[2], addon_prefs.XYZ_2[2]),
             "maxZ": max(addon_prefs.XYZ_1[2], addon_prefs.XYZ_2[2]),
             "status": status,
-            "solid": addon_prefs.solid,
+            "solid": 0,
         }
 
         dir_importer = os.path.join(dir_init_main, "importer")
@@ -436,43 +538,36 @@ class VIEW3D_OT_CrafterImportWorld(bpy.types.Operator):#导入世界
                 else:
                     dir_obj_region_models = os.path.join(dir_importer, "region_models.obj")
                     bpy.ops.wm.obj_import(filepath=dir_obj_region_models)
-
             except Exception as e:
                 self.report({'ERROR'}, f"Error: {e}")
-        else:
-            self.report({'ERROR'}, f"WorldImporter.exe not found at {dir_exe_importer}")
+        self.report({'INFO'}, "Importing finished")
+                
         # 保存历史世界
         dir_json_history_worlds = os.path.join(dir_cafter_data, "history_worlds.json")
         if os.path.exists(dir_json_history_worlds):
             with open(dir_json_history_worlds, 'r', encoding='utf-8') as file:
                 json_old_history_worlds = json.load(file)
         else:
-            json_old_history_worlds = [None] *20
-        json_history_worlds = [None] *20
-        world_now = [addon_prefs.World_Path, list(addon_prefs.XYZ_1), list(addon_prefs.XYZ_2)]
-        if not json_old_history_worlds[0] == world_now:
-            json_history_worlds[0] = world_now
-            for i in range(19):
-                json_history_worlds[i+1] = json_old_history_worlds[i]
-            with open(dir_json_history_worlds, 'w', encoding='utf-8') as file:
-                json.dump(json_history_worlds, file, indent=4)
-        
-        return {'FINISHED'}
-
-class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世界
-    bl_label = "Import Surface World"
-    bl_idname = "crafter.import_surface_world"
-    bl_description = "Import the surface world"
-    bl_options = {'REGISTER', 'UNDO'}
-    
-    @classmethod
-    def poll(cls, context: bpy.types.Context):
-        return True
-
-    def execute(self, context: bpy.types.Context):
-        addon_prefs = context.preferences.addons[__addon_name__].preferences
-        addon_prefs.solid = 0
-        bpy.ops.crafter.import_world()
+            json_old_history_worlds = {}
+        json_old_history_worlds.setdefault(dot_minecraftPath, {})
+        json_old_history_worlds[dot_minecraftPath].setdefault(selectedGameVersion, {})
+        json_old_history_worlds[dot_minecraftPath][selectedGameVersion].setdefault(save, [])
+        json_history_settings = json_old_history_worlds[dot_minecraftPath][selectedGameVersion][save]
+        if json_history_settings == None:
+            json_history_settings = []
+        world_settings_now = [list(addon_prefs.XYZ_1), list(addon_prefs.XYZ_2)]
+        if len(json_history_settings) == 0:
+            json_history_settings.append(None)
+            json_history_settings[0] = world_settings_now
+        elif not json_history_settings[0] == world_settings_now:
+            if len(json_history_settings) < 10:
+                json_history_settings.append(None)
+            for i in range (len(json_history_settings) - 1):
+                json_history_settings[i+1] = json_history_settings[i]
+            json_history_settings[0] = world_settings_now
+        with open(dir_json_history_worlds, 'w', encoding='utf-8') as file:
+            json.dump(json_old_history_worlds, file, indent=4)
+        self.report({'INFO'}, f"History world saved")
         return {'FINISHED'}
 
 class VIEW3D_OT_CrafterImportSolidArea(bpy.types.Operator):#导入可编辑区域==========未完善==========
@@ -489,7 +584,6 @@ class VIEW3D_OT_CrafterImportSolidArea(bpy.types.Operator):#导入可编辑区�
         addon_prefs = context.preferences.addons[__addon_name__].preferences
         #这里应该还要删除物体在坐标内的顶点，但时间紧任务重，稍后再写
         addon_prefs.solid = 1
-        bpy.ops.crafter.improt_world()
         return {'FINISHED'}
 
 #==========加载资源包操作==========
@@ -1155,7 +1249,7 @@ class VIEW3D_OT_CrafterLoadBackground(bpy.types.Operator):#加载背景
 
         bpy.ops.crafter.reload_all()
         if not (-1 < addon_prefs.Backgrounds_List_index and addon_prefs.Backgrounds_List_index < len(addon_prefs.Backgrounds_List)):
-            self.report({'ERROR'}, "No Selected Background")
+            self.report({'ERROR'}, "No Selected Background!")
             return {'FINISHED'}
             
         dir_background = os.path.join(dir_backgrounds, addon_prefs.Backgrounds_List[addon_prefs.Backgrounds_List_index].name + ".blend")
