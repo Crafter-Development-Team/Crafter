@@ -601,6 +601,7 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             except:
                 self.report({'ERROR'}, "WorldImporter didn't export obj!")
                 return {"CANCELLED"}
+            bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
             # 计算新增对象
             post_import_objects = set(bpy.data.objects)
             new_objects = post_import_objects - pre_import_objects
@@ -920,10 +921,12 @@ class VIEW3D_OT_CrafterSetPBRParser(bpy.types.Operator):#设置PBR解析器
             for node in nodes:
                 if node.type == "GROUP_INPUT":
                     node_input = node
+                    continue
                 if node.type == "GROUP":
                     if node.node_tree.name != None:
-                        if node.node_tree.name.startswith("C-"):
+                        if (node.node_tree.name.startswith("C-")) and (node.node_tree.name != "C-biomeTex") :
                             node_group_C_Group = node
+                            continue
                         if node.node_tree.name.startswith("CI-"):
                             group_CI = node
             try:
