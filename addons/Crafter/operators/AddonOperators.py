@@ -409,6 +409,8 @@ class VIEW3D_OT_UseCrafterHistoryWorlds(bpy.types.Operator):#使用历史世界
             return {'CANCELLED'}
         with open(dir_json_history_worlds, 'r', encoding='utf-8') as file:
             json_history_worlds = json.load(file)
+        if type(json_history_worlds) == list:
+            json_history_worlds = {}
         for root in reversed(json_history_worlds):
             #地址不存在则移除该root
             if not os.path.exists(root):
