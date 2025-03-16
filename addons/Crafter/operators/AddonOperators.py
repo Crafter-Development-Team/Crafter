@@ -140,20 +140,69 @@ def add_to_mcmts_collection(object,context):
     object: 目标对象
     context: 目标上下文
     '''
-    list_name_context_material = []
-    for context_material in bpy.data.materials:
-        list_name_context_material.append(context_material.name)
-    list_name_object_material = []
-    for object_material in object.data.materials:
-        list_name_object_material.append(object_material.name)
-    if object.name != "CrafterIn" and object.type == "MESH" and object.data.materials:
-        for name_material in list_name_object_material:
-            if (name_material not in context.scene.Crafter_mcmts) and (name_material != "CrafterIn"):
-                new_mcmt = context.scene.Crafter_mcmts.add()
-                new_mcmt.name = name_material
-    for i in range(len(context.scene.Crafter_mcmts)-1,-1,-1):
-        if context.scene.Crafter_mcmts[i].name not in list_name_context_material:
-            context.scene.Crafter_mcmts.remove(i)
+    if object.type == "MESH":
+        list_name_context_material = []
+        for context_material in bpy.data.materials:
+            list_name_context_material.append(context_material.name)
+        list_name_object_material = []
+        for object_material in object.data.materials:
+            list_name_object_material.append(object_material.name)
+        if object.name != "CrafterIn" and object.type == "MESH" and object.data.materials:
+            for name_material in list_name_object_material:
+                if (name_material not in context.scene.Crafter_mcmts) and (name_material != "CrafterIn"):
+                    new_mcmt = context.scene.Crafter_mcmts.add()
+                    new_mcmt.name = name_material
+        for i in range(len(context.scene.Crafter_mcmts)-1,-1,-1):
+            if context.scene.Crafter_mcmts[i].name not in list_name_context_material:
+                context.scene.Crafter_mcmts.remove(i)
+
+def find_CO_group(classification_list,real_block_name,group_CO):
+    '''
+    classification_list: 分类列表
+    real_block_name: 真实方块名称
+    group_COn: CO节点
+    return: 是否找到
+    '''
+    found = False
+    for type_name in classification_list:
+        if type_name == "banlist" or type_name == "banlist_key_words":
+            continue
+        for group_name in classification_list[type_name]:
+            banout = False
+            if "banlist_key_words" in classification_list[type_name][group_name]:
+                for item in classification_list[type_name][group_name]["banlist"]:
+                    if item in real_block_name:
+                        banout = True
+                        break
+            if banout:
+                continue
+            if "banlist" in classification_list[type_name][group_name]:
+                for item in classification_list[type_name][group_name]["banlist"]:
+                    if item == real_block_name:
+                        banout = True
+                        break
+            if banout:
+                continue
+            if "key_words" in classification_list[type_name][group_name]:
+                for item in classification_list[type_name][group_name]["key_words"]:
+                    if item in real_block_name:
+                        group_CO.node_tree = bpy.data.node_groups["CO-" + group_name]
+                        found = True
+                        break
+            if found:
+                break
+            if "full_name" in classification_list[type_name][group_name]:
+                for item in classification_list[type_name][group_name]["full_name"]:
+                    if item == real_block_name:
+                        group_CO.node_tree = bpy.data.node_groups["CO-" + group_name]
+                        found = True
+                        break
+            if found:
+                break
+        if found:
+            break
+    if not found:
+                group_CO.node_tree = bpy.data.node_groups["CO-"]
 
 class VIEW3D_OT_CrafterReloadResourcesPlans(bpy.types.Operator):#刷新资源包预设列表
     bl_label = "Reload Resources Plans"
@@ -333,7 +382,7 @@ class VIEW3D_UL_CrafterHistoryWorldSettingsList(bpy.types.UIList):
         settings=item.name.split(" ")
         layout.label(text=f"{settings[0]}     {settings[1]}     {settings[2]}   |   {settings[3]}     {settings[4]}     {settings[5]}")
 
-class VIEW3D_OT_CrafterReloadBackgrounds(bpy.types.Operator):#刷新历史世界列表
+class VIEW3D_OT_CrafterReloadHistoryWorldsList(bpy.types.Operator):#刷新历史世界列表
     bl_label = "Reload History Worlds List"
     bl_idname = "crafter.reload_history_worlds_list"
     bl_description = " "
@@ -520,6 +569,10 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             # json.dump(worldconfig, config, indent=4)
 
         self.report({'INFO'}, f"World config saved to {dir_config}")
+        #导入obj
+        pre_import_objects = set(bpy.data.objects)#纪录当前场景中的所有对象
+        start_time = time.perf_counter()#记录开始时间
+
         if os.path.exists(dir_exe_importer):
             try:
                 # 在新的进程中运行WorldImporter.exe
@@ -542,7 +595,32 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
                     bpy.ops.wm.obj_import(filepath=dir_obj_region_models)
             except Exception as e:
                 self.report({'ERROR'}, f"Error: {e}")
-        self.report({'INFO'}, "Importing finished")
+                return {"CANCELLED"}
+            # 计算新增对象
+            post_import_objects = set(bpy.data.objects)
+            new_objects = post_import_objects - pre_import_objects
+            imported_objects = list(new_objects)
+            for object in imported_objects:
+                add_to_mcmts_collection(object=object,context=context)
+        #完成导入
+        end_time = time.perf_counter()
+        used_time = end_time - start_time
+        self.report({'INFO'}, i18n("Importing finished.Time used:") + str(used_time)[:6] + "s")
+        # 自动定位到视图
+        try:
+            for window in context.window_manager.windows:
+                for area in window.screen.areas:
+                    if area.type == 'VIEW_3D':
+                        # 需要同时覆盖window/area/region三个上下文参数
+                        for region in area.regions:
+                            if region.type == 'WINDOW':  # 只处理主区域
+                                with context.temp_override(window=window, area=area, region=region):
+                                    bpy.ops.view3d.view_selected()
+                                break
+            with context.temp_override(area=area):  # 覆盖上下文到3D视图区域
+                            bpy.ops.view3d.view_selected()      # 调用内置操作器
+        except Exception as e:
+            print(e)
                 
         # 保存历史世界
         dir_json_history_worlds = os.path.join(dir_cafter_data, "history_worlds.json")
@@ -569,7 +647,6 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             json_history_settings[0] = world_settings_now
         with open(dir_json_history_worlds, 'w', encoding='utf-8') as file:
             json.dump(json_old_history_worlds, file, indent=4)
-        self.report({'INFO'}, f"History world saved")
         return {'FINISHED'}
 
 class VIEW3D_OT_CrafterImportSolidArea(bpy.types.Operator):#导入可编辑区域==========未完善==========
@@ -1006,7 +1083,13 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
                         nodes.remove(node)
                 group_CO = nodes.new(type="ShaderNodeGroup")
                 group_CO.location = (node_output.location.x - 200, node_output.location.y)
-                group_CO.node_tree = bpy.data.node_groups["CO-"]
+                real_name = fuq_bl_dot_number(name_material.name)
+                if len(real_name) > 24:
+                    last_mao_index = real_name.rfind(':')
+                    real_block_name = real_name[last_mao_index+1:]
+                    find_CO_group(group_CO=group_CO, real_block_name=real_block_name,classification_list=classification_list)
+                else:
+                    group_CO.node_tree = bpy.data.node_groups["CO-"]
                 group_CO.inputs["Base Color"].default_value = [float(material.name[6:11]),float(material.name[12:17]),float(material.name[18:23]),1]
                 for output in group_CO.outputs:
                     links.new(output, node_output.inputs[output.name])
@@ -1065,46 +1148,7 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
             # 重新添加startswith(CO-)节点组
             group_COn = nodes.new(type="ShaderNodeGroup")
             group_COn.location = (node_output.location.x - 200, node_output.location.y)
-            found = False
-            for type_name in classification_list:
-                if type_name == "banlist" or type_name == "banlist_key_words":
-                    continue
-                for group_name in classification_list[type_name]:
-                    banout = False
-                    if "banlist_key_words" in classification_list[type_name][group_name]:
-                        for item in classification_list[type_name][group_name]["banlist"]:
-                            if item in real_block_name:
-                                banout = True
-                                break
-                    if banout:
-                        continue
-                    if "banlist" in classification_list[type_name][group_name]:
-                        for item in classification_list[type_name][group_name]["banlist"]:
-                            if item == real_block_name:
-                                banout = True
-                                break
-                    if banout:
-                        continue
-                    if "key_words" in classification_list[type_name][group_name]:
-                        for item in classification_list[type_name][group_name]["key_words"]:
-                            if item in real_block_name:
-                                group_COn.node_tree = bpy.data.node_groups["CO-" + group_name]
-                                found = True
-                                break
-                    if found:
-                        break
-                    if "full_name" in classification_list[type_name][group_name]:
-                        for item in classification_list[type_name][group_name]["full_name"]:
-                            if item == real_block_name:
-                                group_COn.node_tree = bpy.data.node_groups["CO-" + group_name]
-                                found = True
-                                break
-                    if found:
-                        break
-                if found:
-                    break
-            if not found:
-                group_COn.node_tree = bpy.data.node_groups["CO-"]
+            find_CO_group(group_CO=group_COn, real_block_name=real_block_name,classification_list=classification_list)
             # 连接CO节点
             for output in group_COn.outputs:
                 links.new(output, node_output.inputs[output.name])

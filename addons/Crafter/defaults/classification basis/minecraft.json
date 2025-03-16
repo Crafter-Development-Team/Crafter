@@ -8,6 +8,7 @@
     "block":{
         "water":{
             "full_name":[
+                "water",
                 "water_flow",
                 "water_still"
             ]
