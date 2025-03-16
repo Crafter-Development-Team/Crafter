@@ -646,8 +646,8 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         elif not json_history_settings[0] == world_settings_now:
             if len(json_history_settings) < 10:
                 json_history_settings.append(None)
-            for i in range (len(json_history_settings) - 1):
-                json_history_settings[i+1] = json_history_settings[i]
+            for i in range (len(json_history_settings) - 1,0,-1):
+                json_history_settings[i] = json_history_settings[i - 1]
             json_history_settings[0] = world_settings_now
         with open(dir_json_history_worlds, 'w', encoding='utf-8') as file:
             json.dump(json_old_history_worlds, file, indent=4)
@@ -1167,38 +1167,54 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
             for node in nodes:
                 if node.type == "GROUP_OUTPUT" and node.is_active_output:
                     node_output = node
+                    continue
                 if node.type == "GROUP_INPUT":
                     node_input = node
+                    continue
                 if node.type == "GROUP":
                     if node.node_tree.name != None:
+                        if node.node_tree.name == "C-biomeTex":
+                            node_group_C_biomeTex = node
+                            continue
                         if node.node_tree.name.startswith("C-"):
-                            node_group_C_Group = node
+                            node_group_Parse = node
             group_CI = nodes.new(type='ShaderNodeGroup')
             group_CI.location = (node_output.location.x - 200, node_output.location.y)
+            #尝试匹配CI-节点组
             try:
                 group_CI.node_tree = bpy.data.node_groups["CI-" + aCO[3:]]
             except:
                 group_CI.node_tree = bpy.data.node_groups["CI-"]
+            #尝试匹配解析器节点组
             try:
-                node_group_C_Group.node_tree = bpy.data.node_groups["C-" + addon_prefs.PBR_Parser]
+                node_group_Parse.node_tree = bpy.data.node_groups["C-" + addon_prefs.PBR_Parser]
             except:
                 pass
+            #尝试匹配接口
             for output in group_CI.outputs:
+                #匹配 CI-节点组 和 输出
                 try:
-                    links.new(output, 
-                    node_output.inputs[output.name])
+                    links.new(output, node_output.inputs[output.name])
                 except:
                     pass
             for input in group_CI.inputs:
+                #匹配 CI-节点组 和 输入
                 try:
                     links.new(input, node_input.outputs[input.name])
                 except:
                     pass
+                #匹配 CI-节点组 和 解析器节点组
                 try:
-                    links.new(input, node_group_C_Group.outputs[input.name])
+                    links.new(input, node_group_Parse.outputs[input.name])
                 except:
                     pass
-            for input in node_group_C_Group.inputs:
+                #匹配 CI-节点组 和 群系图节点组
+                try:
+                    links.new(input, node_group_C_biomeTex.outputs[input.name])
+                except:
+                    pass
+            for input in node_group_Parse.inputs:
+                #匹配 解析器节点组 和 输入
                 try:
                     links.new(input, node_input.outputs[input.name])
                 except:
