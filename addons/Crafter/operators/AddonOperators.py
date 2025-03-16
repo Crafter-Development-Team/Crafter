@@ -587,14 +587,19 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
                 self.report({'INFO'}, f"WorldImporter.exe started in a new process")
                 #等待进程结束
                 process.wait()
+            except Exception as e:
+                self.report({'ERROR'}, f"Error: {e}")
+                return {"CANCELLED"}
+            #导入obj
+            try:
                 if point_cloud_mode:
                     dir_obj_output = os.path.join(dir_importer, "output.obj")
                     bpy.ops.wm.obj_import(filepath=dir_obj_output)
                 else:
                     dir_obj_region_models = os.path.join(dir_importer, "region_models.obj")
                     bpy.ops.wm.obj_import(filepath=dir_obj_region_models)
-            except Exception as e:
-                self.report({'ERROR'}, f"Error: {e}")
+            except:
+                self.report({'ERROR'}, "WorldImporter didn't export obj!")
                 return {"CANCELLED"}
             # 计算新增对象
             post_import_objects = set(bpy.data.objects)
@@ -607,20 +612,19 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         used_time = end_time - start_time
         self.report({'INFO'}, i18n("Importing finished.Time used:") + str(used_time)[:6] + "s")
         # 自动定位到视图
-        try:
-            for window in context.window_manager.windows:
-                for area in window.screen.areas:
-                    if area.type == 'VIEW_3D':
-                        # 需要同时覆盖window/area/region三个上下文参数
-                        for region in area.regions:
-                            if region.type == 'WINDOW':  # 只处理主区域
+        for window in context.window_manager.windows:
+            for area in window.screen.areas:
+                if area.type == 'VIEW_3D':
+                    # 需要同时覆盖window/area/region三个上下文参数
+                    for region in area.regions:
+                        if region.type == 'WINDOW':  # 只处理主区域
+                            try:
                                 with context.temp_override(window=window, area=area, region=region):
                                     bpy.ops.view3d.view_selected()
-                                break
-            with context.temp_override(area=area):  # 覆盖上下文到3D视图区域
-                            bpy.ops.view3d.view_selected()      # 调用内置操作器
-        except Exception as e:
-            print(e)
+                            except:
+                                pass
+                            break
+                            
                 
         # 保存历史世界
         dir_json_history_worlds = os.path.join(dir_cafter_data, "history_worlds.json")

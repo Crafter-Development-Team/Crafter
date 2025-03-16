@@ -69,6 +69,7 @@ dictionary = {
         "No Selected Background!":"无选中背景!",
         "It's not a world path!":"这不是一个世界路径!",
         "Please set the save file into the Minecraft game folder!":"请将存档文件放入Minecraft游戏文件夹!",
+        "WorldImporter didn't export obj!":"WorldImporter没有导出obj!",
         "Importing finished.Time used:":"导入完成。耗时:",
         "Haven't history worlds":"无历史世界记录",
     }
