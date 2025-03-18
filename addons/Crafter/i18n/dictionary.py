@@ -72,6 +72,7 @@ dictionary = {
         "WorldImporter didn't export obj!":"WorldImporter没有导出obj!",
         "Importing finished.Time used:":"导入完成。耗时:",
         "Haven't history worlds":"无历史世界记录",
+        "WorldImporter.exe started in a new process":"WorldImporter.exe已在新进程启动",
     }
 }
 

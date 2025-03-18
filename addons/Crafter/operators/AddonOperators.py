@@ -528,13 +528,19 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         save = os.path.basename(worldPath)
         versionPath = os.path.dirname(os.path.dirname(worldPath))
         dir_level_dat = os.path.join(worldPath, "level.dat")
+        
+        dir_obj_region_models = os.path.join(dir_importer, "region_models.obj")
+        if os.path.exists(dir_obj_region_models):
+            os.remove(dir_obj_region_models)
+
         if not os.path.exists(dir_level_dat):
             self.report({'ERROR'}, "It's not a world path!")
             return {"CANCELLED"}
         selectedGameVersion = os.path.basename(versionPath)
         if not os.path.exists(os.path.join(versionPath,selectedGameVersion+".jar")):
-            self.report({'ERROR'}, "Please set the save file into the Minecraft game folder!")
-            return {"CANCELLED"}
+            # self.report({'ERROR'}, "Please set the save file into the Minecraft game folder!")
+            # return {"CANCELLED"}
+            self.report({'INFO'}, "Please set the save file into the Minecraft game folder!")
         dot_minecraftPath = os.path.dirname(os.path.dirname(versionPath))
 
         point_cloud_mode = addon_prefs.Point_Cloud_Mode
@@ -567,8 +573,6 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             for key, value in worldconfig.items():
                 config.write(f"{key} = {value}\n")
             # json.dump(worldconfig, config, indent=4)
-
-        self.report({'INFO'}, f"World config saved to {dir_config}")
         #导入obj
         pre_import_objects = set(bpy.data.objects)#纪录当前场景中的所有对象
         start_time = time.perf_counter()#记录开始时间
@@ -596,7 +600,6 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
                     dir_obj_output = os.path.join(dir_importer, "output.obj")
                     bpy.ops.wm.obj_import(filepath=dir_obj_output)
                 else:
-                    dir_obj_region_models = os.path.join(dir_importer, "region_models.obj")
                     bpy.ops.wm.obj_import(filepath=dir_obj_region_models)
             except:
                 self.report({'ERROR'}, "WorldImporter didn't export obj!")
