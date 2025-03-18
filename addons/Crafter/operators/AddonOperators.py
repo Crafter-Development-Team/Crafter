@@ -529,6 +529,8 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         versionPath = os.path.dirname(os.path.dirname(worldPath))
         dir_level_dat = os.path.join(worldPath, "level.dat")
         
+        
+        dir_importer = os.path.join(dir_init_main, "importer")
         dir_obj_region_models = os.path.join(dir_importer, "region_models.obj")
         if os.path.exists(dir_obj_region_models):
             os.remove(dir_obj_region_models)
@@ -565,7 +567,6 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             "solid": 0,
         }
 
-        dir_importer = os.path.join(dir_init_main, "importer")
         dir_config = os.path.join(dir_importer, "config")
         dir_exe_importer = os.path.join(dir_importer, "WorldImporter.exe")
         dir_json_config = os.path.join(dir_config, "config.json")
