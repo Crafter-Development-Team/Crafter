@@ -147,9 +147,9 @@ def add_to_mcmts_collection(object,context):
         list_name_object_material = []
         for object_material in object.data.materials:
             list_name_object_material.append(object_material.name)
-        if object.name != "CrafterIn" and object.type == "MESH" and object.data.materials:
+        if object.name != "Crafter Materials Settings" and object.type == "MESH" and object.data.materials:
             for name_material in list_name_object_material:
-                if (name_material not in context.scene.Crafter_mcmts) and (name_material != "CrafterIn"):
+                if (name_material not in context.scene.Crafter_mcmts) and (name_material != "Crafter Materials Settings"):
                     new_mcmt = context.scene.Crafter_mcmts.add()
                     new_mcmt.name = name_material
         for i in range(len(context.scene.Crafter_mcmts)-1,-1,-1):
@@ -811,7 +811,7 @@ class VIEW3D_OT_CrafterLoadResources(bpy.types.Operator):#加载资源包
         if len(crafter_json) == 0:
             is_original = True
         for object in context.selected_objects:
-            if object.name == "CrafterIn":
+            if object.name == "Crafter Materials Settings":
                 continue
             if object.type == "MESH":
                 for material in object.data.materials:
@@ -1029,13 +1029,13 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
         for node in bpy.data.node_groups:
             if node.name.startswith("CO-") or node.name.startswith("CI-") or node.name.startswith("C-"):
                 bpy.data.node_groups.remove(node)
-        # 删除CrafterIn物体、材质
+        # 删除Crafter Materials Settings物体、材质
         try:
-            bpy.data.objects.remove(bpy.data.objects["CrafterIn"])
+            bpy.data.objects.remove(bpy.data.objects["Crafter Materials Settings"])
         except:
             pass
         try:
-            bpy.data.materials.remove(bpy.data.materials["CrafterIn"], do_unlink=True)
+            bpy.data.materials.remove(bpy.data.materials["Crafter Materials Settings"], do_unlink=True)
         except:
             pass
         # 导入CO-节点组
@@ -1045,18 +1045,18 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
         for node_group in bpy.data.node_groups:
             if node_group.name in node_groups_use_fake_user:
                 node_group.use_fake_user = True
-        # 导入CrafterIn物体、材质、startswith(CI-)
+        # 导入Crafter Materials Settings物体、材质、startswith(CI-)
         blend_material_dir = os.path.join(dir_materials, addon_prefs.Materials_List[addon_prefs.Materials_List_index].name + ".blend")
         with bpy.data.libraries.load(blend_material_dir, link=False) as (data_from, data_to):
-            data_to.objects = [name for name in data_from.objects if name == "CrafterIn"]
-        if "CrafterIns"  in bpy.data.collections:
-            collection_CrafterIns = bpy.data.collections["CrafterIns"]
+            data_to.objects = [name for name in data_from.objects if name == "Crafter Materials Settings"]
+        if "Crafter Materials Settings"  in bpy.data.collections:
+            collection_Crafter_Materials_Settings = bpy.data.collections["Crafter Materials Settings"]
         else:
-            collection_CrafterIns = bpy.data.collections.new(name="CrafterIns")
-            bpy.context.scene.collection.children.link(collection_CrafterIns)
-        collection_CrafterIns.objects.link(bpy.data.objects["CrafterIn"])
-        bpy.data.objects["CrafterIn"].hide_viewport = True
-        bpy.data.objects["CrafterIn"].hide_render = True
+            collection_Crafter_Materials_Settings = bpy.data.collections.new(name="Crafter Materials Settings")
+            bpy.context.scene.collection.children.link(collection_Crafter_Materials_Settings)
+        collection_Crafter_Materials_Settings.objects.link(bpy.data.objects["Crafter Materials Settings"])
+        bpy.data.objects["Crafter Materials Settings"].hide_viewport = True
+        bpy.data.objects["Crafter Materials Settings"].hide_render = True
         # 获取分类依据地址
         classification_folder_name = addon_prefs.Classification_Basis_List[addon_prefs.Classification_Basis_List_index].name
         classification_folder_dir = os.path.join(dir_classification_basis, classification_folder_name)
@@ -1170,7 +1170,7 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
             # 删去原有着色器
             try:
                 from_node = node_output.inputs[0].links[0].from_node
-                if from_node.type == "BSDF_PRINCIPLED" and material.name != "CrafterIn":
+                if from_node.type == "BSDF_PRINCIPLED" and material.name != "Crafter Materials Settings":
                     node_tree_material.nodes.remove(from_node)
             except:
                 pass
