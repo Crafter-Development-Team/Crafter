@@ -54,6 +54,7 @@ dictionary = {
         "Load resources":"加载资源包",
         "Set texture interpolation":"设置纹理插值",
             #==========加载材质==========
+        "Parsed Normal Strength":"解析后法向强度",
         "How to parse PBR texture(and normal texture)":"如何解析PBR贴图(以及法线贴图)",
         "(1-R)**2,G as F0,Emission in Alpha":"(1-R)**2,G为F0,Alpha为自发光",
         "(1-R)**2,G as Metallic,Emission in Alpha":"(1-R)**2,G为金属度,Alpha为自发光",

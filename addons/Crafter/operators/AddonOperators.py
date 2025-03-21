@@ -989,6 +989,26 @@ class VIEW3D_UL_CrafterClassificationBasis(bpy.types.UIList):
         if self.layout_type in {"DEFAULT","COMPACT"}:
             layout.label(text=item.name)
 
+class VIEW3D_OT_CrafterSetParsedNormalStrength(bpy.types.Operator):#应用解析法向强度
+    bl_label = "Set Parsed Normal Strength"
+    bl_idname = "crafter.set_parsed_normal_strength"
+    bl_description = " "
+    
+    @classmethod
+    def poll(cls, context: bpy.types.Context):
+        return True
+    
+    def execute(self, context: bpy.types.Context):
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
+
+        node_group_C_Parsed_Normal_Strength = bpy.data.node_groups["C-Parsed_Normal_Strength"]
+        for node in node_group_C_Parsed_Normal_Strength.nodes:
+            if node.type == "GROUP_OUTPUT":
+                node_output = node
+                break
+        node_output.inputs[0].default_value = addon_prefs.Parsed_Normal_Strength
+
+        return {'FINISHED'}
 class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
     bl_label = "Load Material"
     bl_idname = "crafter.load_material"
@@ -1019,11 +1039,11 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
         except:
             pass
         # 导入CO-节点组
-        CO_node_groups = ["CO-","C-Moving_texture","C-lab_PBR_1.3","C-old_continuum","C-old_BSL","C-SEUS_PBR"]
+        node_groups_use_fake_user = ["CO-","C-Moving_texture","C-lab_PBR_1.3","C-old_continuum","C-old_BSL","C-SEUS_PBR"]
         with bpy.data.libraries.load(dir_blend_append, link=False) as (data_from, data_to):
-            data_to.node_groups = [name for name in data_from.node_groups if name in CO_node_groups]
+            data_to.node_groups = [name for name in data_from.node_groups if name in node_groups_use_fake_user]
         for node_group in bpy.data.node_groups:
-            if node_group.name in CO_node_groups:
+            if node_group.name in node_groups_use_fake_user:
                 node_group.use_fake_user = True
         # 导入CrafterIn物体、材质、startswith(CI-)
         blend_material_dir = os.path.join(dir_materials, addon_prefs.Materials_List[addon_prefs.Materials_List_index].name + ".blend")
@@ -1067,9 +1087,12 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
             group_new = group_CO.copy()
             group_new.name = "CO-" + group_name
             COs.append("CO-" + group_name)
-        # 删去原有着色器 并 重新添加startswith(CO-)节点组
+        # 应用 Parsed_Normal_Strength
+        bpy.ops.crafter.set_parsed_normal_strength()
+        # 添加选中物体的材质到合集
         for object in context.selected_objects:
             add_to_mcmts_collection(object=object,context=context)
+        # 遍历材质合集
         for name_material in context.scene.Crafter_mcmts:
             material = bpy.data.materials[name_material.name]
             node_tree_material = material.node_tree
@@ -1252,6 +1275,9 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
 
         row_PBR_Parser = layout.row()
         row_PBR_Parser.prop(addon_prefs, "PBR_Parser")
+
+        row_Parsed_Normal_Strength = layout.row()
+        row_Parsed_Normal_Strength.prop(addon_prefs, "Parsed_Normal_Strength")
 
         row_Materials_List = layout.row()
         row_Materials_List.template_list("VIEW3D_UL_CrafterMaterials", "", addon_prefs, "Materials_List", addon_prefs, "Materials_List_index", rows=1)

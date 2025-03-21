@@ -1,7 +1,7 @@
 import os
 
 import bpy
-from bpy.props import StringProperty, IntProperty, BoolProperty, IntVectorProperty, EnumProperty, CollectionProperty
+from bpy.props import StringProperty, IntProperty, BoolProperty, IntVectorProperty, EnumProperty, CollectionProperty, FloatProperty
 from bpy.types import AddonPreferences
 from ..config import __addon_name__
 from ..properties import ResourcePlan, ResourcePlansInfo, Material, ClassificationBasisl,Background,HistoryWorldRoot,HistoryWorldVersion,HistoryWorldSave,HistoryWorldSetting
@@ -83,6 +83,12 @@ class CrafterAddonPreferences(AddonPreferences):
                               default="lab_PBR_1.3",
                               description="How to parse PBR texture(and normal texture)",
                               update=lambda self, context: self.update_PBR_Parser(context))# type: ignore
+    Parsed_Normal_Strength: FloatProperty(name="Parsed Normal Strength",
+                                          default=1.0,
+                                          min=0.0,
+                                          max=100.0,
+                                          description="Parsed Normal strength",
+                                          update=lambda self,context: self.set_parsed_normal_strength(context))# type: ignore
     Materials_List: CollectionProperty(name="Materials",type=Material)#type: ignore
     Materials_List_index: IntProperty(name="Material",default=0)# type: ignore
     Classification_Basis_List: CollectionProperty(name="Classification Basis",type=ClassificationBasisl)# type: ignore
@@ -114,4 +120,7 @@ class CrafterAddonPreferences(AddonPreferences):
         return None
     def reload_history_worlds_list(self, context):
         bpy.ops.crafter.reload_history_worlds_list()
+        return None
+    def set_parsed_normal_strength(self, context):
+        bpy.ops.crafter.set_parsed_normal_strength()
         return None
