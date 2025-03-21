@@ -161,44 +161,40 @@ def find_CO_group(classification_list,real_block_name,group_CO):
     classification_list: 分类列表
     real_block_name: 真实方块名称
     group_COn: CO节点
-    return: 是否找到
     '''
     found = False
-    for type_name in classification_list:
-        if type_name == "banlist" or type_name == "banlist_key_words":
+    for group_name in classification_list:
+        if group_name == "banlist" or group_name == "banlist_key_words":
             continue
-        for group_name in classification_list[type_name]:
-            banout = False
-            if "banlist_key_words" in classification_list[type_name][group_name]:
-                for item in classification_list[type_name][group_name]["banlist"]:
-                    if item in real_block_name:
-                        banout = True
-                        break
-            if banout:
-                continue
-            if "banlist" in classification_list[type_name][group_name]:
-                for item in classification_list[type_name][group_name]["banlist"]:
-                    if item == real_block_name:
-                        banout = True
-                        break
-            if banout:
-                continue
-            if "key_words" in classification_list[type_name][group_name]:
-                for item in classification_list[type_name][group_name]["key_words"]:
-                    if item in real_block_name:
-                        group_CO.node_tree = bpy.data.node_groups["CO-" + group_name]
-                        found = True
-                        break
-            if found:
-                break
-            if "full_name" in classification_list[type_name][group_name]:
-                for item in classification_list[type_name][group_name]["full_name"]:
-                    if item == real_block_name:
-                        group_CO.node_tree = bpy.data.node_groups["CO-" + group_name]
-                        found = True
-                        break
-            if found:
-                break
+        banout = False
+        if "banlist_key_words" in classification_list[group_name]:
+            for item in classification_list[group_name]["banlist"]:
+                if item in real_block_name:
+                    banout = True
+                    break
+        if banout:
+            continue
+        if "banlist" in classification_list[group_name]:
+            for item in classification_list[group_name]["banlist"]:
+                if item == real_block_name:
+                    banout = True
+                    break
+        if banout:
+            continue
+        if "full_name" in classification_list[group_name]:
+            for item in classification_list[group_name]["full_name"]:
+                if item == real_block_name:
+                    group_CO.node_tree = bpy.data.node_groups["CO-" + group_name]
+                    found = True
+                    break
+        if found:
+            break
+        if "key_words" in classification_list[group_name]:
+            for item in classification_list[group_name]["key_words"]:
+                if item in real_block_name:
+                    group_CO.node_tree = bpy.data.node_groups["CO-" + group_name]
+                    found = True
+                    break
         if found:
             break
     if not found:
@@ -1065,13 +1061,12 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
                     print(e)
         # 创建所有startswith(CO-)节点组
         group_CO = bpy.data.node_groups['CO-']
-        for type_name in classification_list:
-            if type_name == "banlist" or type_name == "banlist_key_words":
+        for group_name in classification_list:
+            if group_name == "banlist" or group_name == "banlist_key_words":
                 continue
-            for group_name in classification_list[type_name]:
-                group_new = group_CO.copy()
-                group_new.name = "CO-" + group_name
-                COs.append("CO-" + group_name)
+            group_new = group_CO.copy()
+            group_new.name = "CO-" + group_name
+            COs.append("CO-" + group_name)
         # 删去原有着色器 并 重新添加startswith(CO-)节点组
         for object in context.selected_objects:
             add_to_mcmts_collection(object=object,context=context)
@@ -1143,7 +1138,7 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
                 continue
             # 设置材质置换方式为仅置换
             material.displacement_method = "DISPLACEMENT"
-            #获得node_output 并 删去无内容节点组 并 删去Rain_value
+            #获得node_output 并 删去无内容节点组
             for node in nodes:
                 if node.type == "OUTPUT_MATERIAL" and node.is_active_output:
                     node_output = node
