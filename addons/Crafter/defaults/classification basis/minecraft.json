@@ -65,11 +65,12 @@
     "color_tran_move":{
         "full_name":[
             "grass",
+            "short_grass",
             "tall_grass_top",
+            "tall_grass_bottom",
             "fern",
             "vine",
-            "lily_pad",
-            "tall_grass_bottom"
+            "lily_pad"
         ]
     },
     "no_rain":{
