@@ -50,6 +50,7 @@ dictionary = {
         "Import the solid area":"导入实心区域",
         "Starting coordinates":"起始坐标",
         "Ending coordinates":"结束坐标",
+        "No version isolation":"无隔离版本",
             #==========加载资源包==========
         "Load resources":"加载资源包",
         "Set texture interpolation":"设置纹理插值",
@@ -69,6 +70,7 @@ dictionary = {
         #==========提示==========
         "No Selected Background!":"无选中背景!",
         "It's not a world path!":"这不是一个世界路径!",
+        "Detected version isolation is not enabled":"检测到未开启版本隔离",
         "Please set the save file into the Minecraft game folder!":"请将存档文件放入Minecraft游戏文件夹!",
         "WorldImporter didn't export obj!":"WorldImporter没有导出obj!",
         "Importing finished.Time used:":"导入完成。耗时:",

@@ -9,6 +9,7 @@ import zipfile
 
 from ..config import __addon_name__
 from ....common.i18n.i18n import i18n
+from bpy.props import StringProperty, IntProperty, BoolProperty, IntVectorProperty, EnumProperty, CollectionProperty, FloatProperty
 from ..__init__ import dir_cafter_data, dir_resourcepacks_plans, dir_materials, dir_classification_basis, dir_blend_append, dir_init_main, dir_backgrounds
 
 # crafter_resources_icons = bpy.utils.previews.new()
@@ -456,12 +457,13 @@ class VIEW3D_OT_UseCrafterHistoryWorlds(bpy.types.Operator):#使用历史世界
             json_history_worlds = json.load(file)
         if type(json_history_worlds) == list:
             json_history_worlds = {}
-        for root in reversed(json_history_worlds):
+        for root in list(json_history_worlds):
             #地址不存在则移除该root
             if not os.path.exists(root):
                 del json_history_worlds[root]
                 continue
-            for version in reversed(json_history_worlds[root]):
+
+            for version in list(json_history_worlds[root]):
                 #版本不存在则移除该version
                 if not os.path.exists(os.path.join(root, "versions", version)):
                     del json_history_worlds[root][version]
@@ -475,7 +477,7 @@ class VIEW3D_OT_UseCrafterHistoryWorlds(bpy.types.Operator):#使用历史世界
                 dir_saves = os.path.join(dir_version, "saves")
                 if not os.path.exists(dir_saves):
                     continue
-                for save in reversed(json_history_worlds[root][version]):
+                for save in list(json_history_worlds[root][version]):
                     #存档不存在则移除该save
                     if not os.path.exists(os.path.join(dir_saves, save)):
                         del json_history_worlds[root][version][save]
@@ -513,36 +515,39 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
     bl_description = "Import the surface world"
     bl_options = {'REGISTER', 'UNDO'}
     
+    worldPath: StringProperty(name="World path",
+                               default="World path",
+                               subtype="DIR_PATH",)#type: ignore
+    versionPath: StringProperty(name="Version path",
+                               default="Version path",
+                               subtype="DIR_PATH",)#type: ignore
+    selectedGameVersion: StringProperty(name="Selected Game Version",
+                                      default="Selected Game Version",
+                                      description="Selected Game Version")#type: ignore
+    dot_minecraftPath: StringProperty(name=".minecraft path",
+                               default=".minecraft path",
+                               subtype="DIR_PATH",)#type: ignore
     @classmethod
     def poll(cls, context: bpy.types.Context):
         return True
 
     def execute(self, context: bpy.types.Context):
         addon_prefs = context.preferences.addons[__addon_name__].preferences
-
-        worldPath = os.path.normpath(addon_prefs.World_Path)
-        save = os.path.basename(worldPath)
-        versionPath = os.path.dirname(os.path.dirname(worldPath))
-        dir_level_dat = os.path.join(worldPath, "level.dat")
-        
-        
+        # 删去之前导出的obj
         dir_importer = os.path.join(dir_init_main, "importer")
         dir_obj_region_models = os.path.join(dir_importer, "region_models.obj")
         if os.path.exists(dir_obj_region_models):
             os.remove(dir_obj_region_models)
 
-        if not os.path.exists(dir_level_dat):
-            self.report({'ERROR'}, "It's not a world path!")
-            return {"CANCELLED"}
-        selectedGameVersion = os.path.basename(versionPath)
-        if not os.path.exists(os.path.join(versionPath,selectedGameVersion+".jar")):
-            # self.report({'ERROR'}, "Please set the save file into the Minecraft game folder!")
-            # return {"CANCELLED"}
-            self.report({'INFO'}, "Please set the save file into the Minecraft game folder!")
-        dot_minecraftPath = os.path.dirname(os.path.dirname(versionPath))
+        #写入conifg.json
+        worldPath = self.worldPath
+        versionPath = self.versionPath
+        selectedGameVersion = self.selectedGameVersion
+        json_version = self.selectedGameVersion
+        save = os.path.basename(self.worldPath)
+        dot_minecraftPath = self.dot_minecraftPath
 
         point_cloud_mode = addon_prefs.Point_Cloud_Mode
-
         if point_cloud_mode:
             status = 2
         else:
@@ -635,9 +640,9 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         else:
             json_old_history_worlds = {}
         json_old_history_worlds.setdefault(dot_minecraftPath, {})
-        json_old_history_worlds[dot_minecraftPath].setdefault(selectedGameVersion, {})
-        json_old_history_worlds[dot_minecraftPath][selectedGameVersion].setdefault(save, [])
-        json_history_settings = json_old_history_worlds[dot_minecraftPath][selectedGameVersion][save]
+        json_old_history_worlds[dot_minecraftPath].setdefault(json_version, {})
+        json_old_history_worlds[dot_minecraftPath][json_version].setdefault(save, [])
+        json_history_settings = json_old_history_worlds[dot_minecraftPath][json_version][save]
         if json_history_settings == None:
             json_history_settings = []
         world_settings_now = [list(addon_prefs.XYZ_1), list(addon_prefs.XYZ_2)]
@@ -653,6 +658,38 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         with open(dir_json_history_worlds, 'w', encoding='utf-8') as file:
             json.dump(json_old_history_worlds, file, indent=4)
         return {'FINISHED'}
+    def invoke(self, context, event):
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
+
+        # 获取世界路径，检测路径合法性
+        self.worldPath = os.path.normpath(addon_prefs.World_Path)
+        dir_level_dat = os.path.join(self.worldPath, "level.dat")
+        if not os.path.exists(dir_level_dat):
+            self.report({'ERROR'}, "It's not a world path!")
+            return {"CANCELLED"}
+        
+        # 检查游戏文件路径
+        self.versionPath = os.path.dirname(os.path.dirname(self.worldPath))
+        dir_not_diveded_versions = os.path.join(self.versionPath, "versions")
+        if os.path.exists(dir_not_diveded_versions):
+            self.report({"ERROR"},"现在白给还没做无版本隔离的支持，所以忠城这边暂时也没做")
+            return {"CANCELLED"}
+            # self.report({"INFO"},"Detected version isolation is not enabled")
+            self.selectedGameVersion = "No version isolation"
+            self.dot_minecraftPath = os.path.dirname(self.versionPath)
+        else:
+            self.selectedGameVersion = os.path.basename(self.versionPath)
+            self.dot_minecraftPath = os.path.dirname(os.path.dirname(self.versionPath))
+            if not os.path.exists(os.path.join(self.versionPath,self.selectedGameVersion+".jar")):
+                self.report({'ERROR'}, "Please set the save file into the Minecraft game folder!")
+                return {"CANCELLED"}
+        
+        return context.window_manager.invoke_props_dialog(self)
+
+    def draw(self, context):
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
+        layout = self.layout
+
 
 class VIEW3D_OT_CrafterImportSolidArea(bpy.types.Operator):#导入可编辑区域==========未完善==========
     bl_label = "Import Solid Area"
