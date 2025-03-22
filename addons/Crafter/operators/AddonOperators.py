@@ -1038,14 +1038,16 @@ class VIEW3D_OT_CrafterSetParsedNormalStrength(bpy.types.Operator):#应用解析
     def execute(self, context: bpy.types.Context):
         addon_prefs = context.preferences.addons[__addon_name__].preferences
 
-        node_group_C_Parsed_Normal_Strength = bpy.data.node_groups["C-Parsed_Normal_Strength"]
-        for node in node_group_C_Parsed_Normal_Strength.nodes:
-            if node.type == "GROUP_OUTPUT":
-                node_output = node
-                break
-        node_output.inputs[0].default_value = addon_prefs.Parsed_Normal_Strength
+        if "C-Parsed_Normal_Strength" in bpy.data.node_groups:
+            node_group_C_Parsed_Normal_Strength = bpy.data.node_groups["C-Parsed_Normal_Strength"]
+            for node in node_group_C_Parsed_Normal_Strength.nodes:
+                if node.type == "GROUP_OUTPUT":
+                    node_output = node
+                    break
+            node_output.inputs[0].default_value = addon_prefs.Parsed_Normal_Strength
 
         return {'FINISHED'}
+
 class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
     bl_label = "Load Material"
     bl_idname = "crafter.load_material"
