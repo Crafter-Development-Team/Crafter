@@ -45,6 +45,7 @@ dictionary = {
         #==========操作介绍==========
             #==========导入世界==========
         "Import world":"导入世界",
+        "Import World":"导入世界",
         "Import the surface world":"导入表面世界",
         "Import the solid area":"导入实心区域",
         "Starting coordinates":"起始坐标",

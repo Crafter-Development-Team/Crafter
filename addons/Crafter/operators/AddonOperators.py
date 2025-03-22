@@ -510,7 +510,7 @@ class VIEW3D_OT_UseCrafterHistoryWorlds(bpy.types.Operator):#使用历史世界
             layout.template_list("VIEW3D_UL_CrafterHistoryWorldSettingsList", "", addon_prefs, "History_World_Settings_List", addon_prefs, "History_World_Settings_List_index", rows=10)
 
 class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世界
-    bl_label = "Import Surface World"
+    bl_label = "Import World"
     bl_idname = "crafter.import_surface_world"
     bl_description = "Import the surface world"
     bl_options = {'REGISTER', 'UNDO'}
@@ -1441,7 +1441,8 @@ class VIEW3D_OT_CrafterLoadBackground(bpy.types.Operator):#加载背景
 
         row_Backgrounds = layout.row()
         col_Background_List = row_Backgrounds.column()
-        col_Background_List.template_list("VIEW3D_UL_CrafterBackgroundsList", "", addon_prefs, "Backgrounds_List", addon_prefs, "History_Worlds_List_index", rows=1)
+        col_Background_List.template_list("VIEW3D_UL_CrafterBackgroundsList", "", addon_prefs, "Backgrounds_List", addon_prefs, "Backgrounds_List_index", rows=1)
         col_Background_List_ops = row_Backgrounds.column()
         col_Background_List_ops.operator("crafter.open_backgrounds",icon="FILE_FOLDER",text="")
         col_Background_List_ops.operator("crafter.reload_all",icon="FILE_REFRESH",text="")
+        
