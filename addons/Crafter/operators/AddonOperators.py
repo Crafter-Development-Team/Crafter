@@ -565,6 +565,18 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             "minZ": min(addon_prefs.XYZ_1[2], addon_prefs.XYZ_2[2]),
             "maxZ": max(addon_prefs.XYZ_1[2], addon_prefs.XYZ_2[2]),
             "status": status,
+            # "useChunkPrecision":addon_prefs.useChunkPrecision,
+            # "keepBoundary":addon_prefs.keepBoundary,
+            # "strictDeduplication":addon_prefs.strictDeduplication,
+            # "cullCave":addon_prefs.cullCave,
+            # "exportLightBlock":addon_prefs.exportLightBlock,
+            # "allowDoubleFace":addon_prefs.allowDoubleFace,
+            # "activeLOD":addon_prefs.activeLOD,
+            # "useUnderwaterLOD":addon_prefs.useUnderwaterLOD,
+            # "LOD0renderDistance":addon_prefs.LOD0renderDistance,
+            # "LOD1renderDistance":addon_prefs.LOD1renderDistance,
+            # "LOD2renderDistance":addon_prefs.LOD2renderDistance,
+            # "LOD3renderDistance":addon_prefs.LOD3renderDistance,
             "solid": 0,
         }
 
@@ -689,6 +701,30 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
     def draw(self, context):
         addon_prefs = context.preferences.addons[__addon_name__].preferences
         layout = self.layout
+
+        row = layout.row()
+
+        col_1 = row.column()
+        col_1.prop(addon_prefs, "useChunkPrecision")
+        col_1.prop(addon_prefs, "strictDeduplication")
+        col_1.prop(addon_prefs, "exportLightBlock")
+        col_1.prop(addon_prefs, "activeLOD")
+
+        col_2 = row.column()
+        col_2.prop(addon_prefs, "keepBoundary")
+        col_2.prop(addon_prefs, "cullCave")
+        col_2.prop(addon_prefs, "allowDoubleFace")
+        if addon_prefs.activeLOD:
+            row_lod = layout.row()
+            
+            col_lod_1 = row_lod.column()
+            col_lod_1.prop(addon_prefs, "LOD0renderDistance")
+            col_lod_1.prop(addon_prefs, "LOD1renderDistance")
+            col_lod_1.prop(addon_prefs, "LOD2renderDistance")
+            col_lod_1.prop(addon_prefs, "LOD3renderDistance")
+
+            col_lod_2 = row_lod.column()
+            col_lod_2.prop(addon_prefs, "useUnderwaterLOD")
 
 
 class VIEW3D_OT_CrafterImportSolidArea(bpy.types.Operator):#导入可编辑区域==========未完善==========

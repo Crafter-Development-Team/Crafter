@@ -57,6 +57,34 @@ class CrafterAddonPreferences(AddonPreferences):
                                                    default=0)# type: ignore
     solid: IntProperty(name="Solid",
                        default=0,)# type: ignore
+    useChunkPrecision: BoolProperty(name="Chunk Precision",
+                                    default=True,)# type: ignore
+    keepBoundary: BoolProperty(name="Keep Boundary",
+                               default=False,)# type: ignore
+    strictDeduplication: BoolProperty(name="Strict Surface Pruning",
+                                      default=True,)# type: ignore
+    cullCave: BoolProperty(name="Cull Cave",
+                           default=True,)# type: ignore
+    exportLightBlock: BoolProperty(name="Export Light Block",
+                                   default=True,)# type: ignore
+    allowDoubleFace: BoolProperty(name="Allow Double Face",
+                                  default=False,)# type: ignore
+    activeLOD: BoolProperty(name="LOD",
+                            default=True,)# type: ignore
+    useUnderwaterLOD: BoolProperty(name="Underwater LOD",
+                                   default=False,)# type: ignore
+    LOD0renderDistance: IntProperty(name="LOD0 Distance",
+                                   default=6,
+                                   min=0)# type: ignore
+    LOD1renderDistance: IntProperty(name="LOD1 Distance",
+                                   default=6,
+                                   min=0)# type: ignore
+    LOD2renderDistance: IntProperty(name="LOD2 Distance",
+                                   default=6,
+                                   min=0)# type: ignore
+    LOD3renderDistance: IntProperty(name="LOD3 Distance",
+                                   default=6,
+                                   min=0)# type: ignore
 #==========加载资源包属性==========
     Resources_Plans_List: CollectionProperty(name="Resources Plans",type=ResourcePlan)#type: ignore
     Resources_Plans_List_index: IntProperty(name="Resources",

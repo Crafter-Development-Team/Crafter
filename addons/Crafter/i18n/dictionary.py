@@ -2,7 +2,6 @@ from common.i18n.dictionary import preprocess_dictionary
 
 dictionary = {
     "zh_CN": {
-        "Crafter": "Crafter",
         "Plans":"方案",
         #==========面板==========
             #==========加载==========
@@ -51,6 +50,17 @@ dictionary = {
         "Starting coordinates":"起始坐标",
         "Ending coordinates":"结束坐标",
         "No version isolation":"无隔离版本",
+        "Chunk Precision":"区块精度导出",
+        "Keep Boundary":"保留边界",
+        "Strict Surface Pruning":"严格剔除面",
+        "Cull Cave":"剔除洞穴",
+        "Export Light Block":"导出光照方块",
+        "Allow Double Face":"允许重叠面",
+        "Underwater LOD":"水下LOD",
+        "LOD0 Distance":"LOD0距离",
+        "LOD1 Distance":"LOD1距离",
+        "LOD2 Distance":"LOD2距离",
+        "LOD3 Distance":"LOD3距离",
             #==========加载资源包==========
         "Load resources":"加载资源包",
         "Set texture interpolation":"设置纹理插值",
