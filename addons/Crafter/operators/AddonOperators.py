@@ -573,10 +573,10 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             # "allowDoubleFace":addon_prefs.allowDoubleFace,
             # "activeLOD":addon_prefs.activeLOD,
             # "useUnderwaterLOD":addon_prefs.useUnderwaterLOD,
-            # "LOD0renderDistance":addon_prefs.LOD0renderDistance,
-            # "LOD1renderDistance":addon_prefs.LOD1renderDistance,
-            # "LOD2renderDistance":addon_prefs.LOD2renderDistance,
-            # "LOD3renderDistance":addon_prefs.LOD3renderDistance,
+            "LOD0renderDistance":addon_prefs.LOD0renderDistance,
+            "LOD1renderDistance":addon_prefs.LOD1renderDistance,
+            "LOD2renderDistance":addon_prefs.LOD2renderDistance,
+            "LOD3renderDistance":addon_prefs.LOD3renderDistance,
             "solid": 0,
         }
 
