@@ -531,6 +531,33 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
     def poll(cls, context: bpy.types.Context):
         return True
 
+    def invoke(self, context, event):
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
+
+        # 获取世界路径，检测路径合法性
+        self.worldPath = os.path.normpath(addon_prefs.World_Path)
+        dir_level_dat = os.path.join(self.worldPath, "level.dat")
+        if not os.path.exists(dir_level_dat):
+            self.report({'ERROR'}, "It's not a world path!")
+            return {"CANCELLED"}
+        
+        # 检查游戏文件路径
+        self.versionPath = os.path.dirname(os.path.dirname(self.worldPath))
+        dir_not_diveded_versions = os.path.join(self.versionPath, "versions")
+        if os.path.exists(dir_not_diveded_versions):
+            self.report({"ERROR"},"现在白给还没做无版本隔离的支持，所以忠城这边暂时也没做")
+            return {"CANCELLED"}
+            # self.report({"INFO"},"Detected version isolation is not enabled")
+            self.selectedGameVersion = "No version isolation"
+            self.dot_minecraftPath = os.path.dirname(self.versionPath)
+        else:
+            self.selectedGameVersion = os.path.basename(self.versionPath)
+            self.dot_minecraftPath = os.path.dirname(os.path.dirname(self.versionPath))
+            if not os.path.exists(os.path.join(self.versionPath,self.selectedGameVersion+".jar")):
+                self.report({'ERROR'}, "Please set the save file into the Minecraft game folder!")
+                return {"CANCELLED"}
+        
+        return context.window_manager.invoke_props_dialog(self)
     def execute(self, context: bpy.types.Context):
         addon_prefs = context.preferences.addons[__addon_name__].preferences
         # 删去之前导出的obj
@@ -670,33 +697,6 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         with open(dir_json_history_worlds, 'w', encoding='utf-8') as file:
             json.dump(json_old_history_worlds, file, indent=4)
         return {'FINISHED'}
-    def invoke(self, context, event):
-        addon_prefs = context.preferences.addons[__addon_name__].preferences
-
-        # 获取世界路径，检测路径合法性
-        self.worldPath = os.path.normpath(addon_prefs.World_Path)
-        dir_level_dat = os.path.join(self.worldPath, "level.dat")
-        if not os.path.exists(dir_level_dat):
-            self.report({'ERROR'}, "It's not a world path!")
-            return {"CANCELLED"}
-        
-        # 检查游戏文件路径
-        self.versionPath = os.path.dirname(os.path.dirname(self.worldPath))
-        dir_not_diveded_versions = os.path.join(self.versionPath, "versions")
-        if os.path.exists(dir_not_diveded_versions):
-            self.report({"ERROR"},"现在白给还没做无版本隔离的支持，所以忠城这边暂时也没做")
-            return {"CANCELLED"}
-            # self.report({"INFO"},"Detected version isolation is not enabled")
-            self.selectedGameVersion = "No version isolation"
-            self.dot_minecraftPath = os.path.dirname(self.versionPath)
-        else:
-            self.selectedGameVersion = os.path.basename(self.versionPath)
-            self.dot_minecraftPath = os.path.dirname(os.path.dirname(self.versionPath))
-            if not os.path.exists(os.path.join(self.versionPath,self.selectedGameVersion+".jar")):
-                self.report({'ERROR'}, "Please set the save file into the Minecraft game folder!")
-                return {"CANCELLED"}
-        
-        return context.window_manager.invoke_props_dialog(self)
 
     def draw(self, context):
         addon_prefs = context.preferences.addons[__addon_name__].preferences
