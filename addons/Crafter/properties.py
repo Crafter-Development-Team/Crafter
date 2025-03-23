@@ -2,6 +2,8 @@ import bpy
 from bpy.props import StringProperty, PointerProperty
 
 #==========导入世界属性==========
+class LatestWorld(bpy.types.PropertyGroup):
+    Latest_World: StringProperty(name="Latest World",)# type: ignore
 class HistoryWorldRoot(bpy.types.PropertyGroup):
     History_World_Root: StringProperty(name="History World Root",)# type: ignore
 class HistoryWorldVersion(bpy.types.PropertyGroup):

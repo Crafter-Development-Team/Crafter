@@ -11,6 +11,7 @@ dictionary = {
             #==========导入世界==========
         "Import World":"导入世界",
         "Import Editable Area":"导入可编辑区域",
+        "Minecraft Saves":"Minecraft存档",
         "World path":"存档地址",
         "XYZ-1":"坐标1",
         "XYZ-2":"坐标2",

@@ -4,7 +4,7 @@ import bpy
 from bpy.props import StringProperty, IntProperty, BoolProperty, IntVectorProperty, EnumProperty, CollectionProperty, FloatProperty
 from bpy.types import AddonPreferences
 from ..config import __addon_name__
-from ..properties import ResourcePlan, ResourcePlansInfo, Material, ClassificationBasisl,Background,HistoryWorldRoot,HistoryWorldVersion,HistoryWorldSave,HistoryWorldSetting
+from ..properties import ResourcePlan, ResourcePlansInfo, Material, ClassificationBasisl,Background,HistoryWorldRoot,HistoryWorldVersion,HistoryWorldSave,HistoryWorldSetting,LatestWorld
 
 
 class CrafterAddonPreferences(AddonPreferences):
@@ -36,22 +36,27 @@ class CrafterAddonPreferences(AddonPreferences):
                              description="Ending coordinates")# type: ignore
     Point_Cloud_Mode: BoolProperty(name="Point Cloud Mode",
                                    default=False,)# type: ignore
+    Latest_World_List: CollectionProperty(name="Latest Worlds List",
+                                            type=LatestWorld)#type: ignore
+    Latest_World_List_index: IntProperty(name="Latest Worlds",
+                                           default=0,
+                                           update=lambda self, context: self.reload_latest_worlds_list(context))# type: ignore
     History_World_Roots_List: CollectionProperty(name="History Worlds Roots List",
                                             type=HistoryWorldRoot)#type: ignore
     History_World_Roots_List_index: IntProperty(name="History World Roots",
                                            default=0,
                                            update=lambda self, context: self.reload_history_worlds_list(context))# type: ignore
-    History_World_Versions_List: CollectionProperty(name="History Versions",
+    History_World_Versions_List: CollectionProperty(name="History Versions List",
                                                     type=HistoryWorldVersion)#type: ignore
     History_World_Versions_List_index: IntProperty(name="History Versions",
                                                    default=0,
                                                    update=lambda self, context: self.reload_history_worlds_list(context))# type: ignore
-    History_World_Saves_List: CollectionProperty(name="History Saves",
+    History_World_Saves_List: CollectionProperty(name="History Saves List",
                                                  type=HistoryWorldSave)#type: ignore
     History_World_Saves_List_index: IntProperty(name="History Saves",
                                                 default=0,
                                                 update=lambda self, context: self.reload_history_worlds_list(context))# type: ignore
-    History_World_Settings_List: CollectionProperty(name="History Settings",
+    History_World_Settings_List: CollectionProperty(name="History Settings List",
                                                     type=HistoryWorldSetting)#type: ignore
     History_World_Settings_List_index: IntProperty(name="History Settings",
                                                    default=0)# type: ignore
@@ -145,6 +150,9 @@ class CrafterAddonPreferences(AddonPreferences):
     
     def update_PBR_Parser(self, context):
         bpy.ops.crafter.set_pbr_parser()
+        return None
+    def reload_latest_worlds_list(self, context):
+        bpy.ops.crafter.reload_latest_worlds_list()
         return None
     def reload_history_worlds_list(self, context):
         bpy.ops.crafter.reload_history_worlds_list()
