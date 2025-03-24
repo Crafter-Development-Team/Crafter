@@ -27,13 +27,16 @@ class CrafterAddonPreferences(AddonPreferences):
 #==========导入世界属性==========
     World_Path: StringProperty(name="World path",
                                default="World path",
-                               subtype="DIR_PATH",) # type: ignore
+                               subtype="DIR_PATH",
+                               update=lambda self, context: context.area.tag_redraw()) # type: ignore
     XYZ_1: IntVectorProperty(name="XYZ-1",
                              default=(0,0,0),
-                             description="Starting coordinates")# type: ignore
+                             description="Starting coordinates",
+                             update=lambda self, context: context.area.tag_redraw())# type: ignore
     XYZ_2: IntVectorProperty(name="XYZ-2",
                              default=(0,0,0),
-                             description="Ending coordinates")# type: ignore
+                             description="Ending coordinates",
+                             update=lambda self, context: context.area.tag_redraw())# type: ignore
     Point_Cloud_Mode: BoolProperty(name="Point Cloud Mode",
                                    default=False,)# type: ignore
     Latest_World_List: CollectionProperty(name="Latest Worlds List",

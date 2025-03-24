@@ -17,7 +17,7 @@ bl_info = {
     "name": "Crafter",
     "author": "Crafter Production Team [ 白给 若有来生 少年忠城 WangXinRui ]",
     "blender": (4, 2, 0),
-    "version": (0, 1, 3),
+    "version": (0, 1, 4),
     "description": "目标是成为从Minecraft到Blender全流程的Blender插件",
     "warning": "",
     "doc_url": "https://github.com/Crafter-Production-Team/Crafter?tab=readme-ov-file#crafter",

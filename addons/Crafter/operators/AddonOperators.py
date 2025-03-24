@@ -817,6 +817,9 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         # 保存到json文件
         with open(dir_json_latest_worlds, 'w', encoding='utf-8') as file:
             json.dump(json_latest_worlds, file, indent=4)
+        # 归零index
+        addon_prefs.Latest_World_List_index = 0
+        addon_prefs.History_World_Settings_List_index = 0
 
         return {'FINISHED'}
 
