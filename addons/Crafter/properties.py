@@ -12,6 +12,8 @@ class HistoryWorldSave(bpy.types.PropertyGroup):
     History_World_Save: StringProperty(name="History World Save",)# type: ignore
 class HistoryWorldSetting(bpy.types.PropertyGroup):
     History_World_Setting: StringProperty(name="History World Setting",)# type: ignore
+class Resource(bpy.types.PropertyGroup):
+    Resource: StringProperty(name="Resource",)# type: ignore
 #==========加载资源属性==========
 class ResourcePlan(bpy.types.PropertyGroup):
     Resources_Plan: StringProperty(name="Resources Plan",)# type: ignore

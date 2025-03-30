@@ -271,6 +271,42 @@ def merge_obj_files(source_dir: str, output_file: str):
         out_f.write("\n# Merged Faces\n")
         out_f.write('\n'.join(all_faces) + '\n')
 
+class VIEW3D_OT_CrafterGameReloadResources(bpy.types.Operator):#刷新游戏资源包列表
+    bl_label = "Reload Game Resources"
+    bl_idname = "crafter.reload_game_resources"
+    bl_description = " "
+    
+    @classmethod
+    def poll(cls, context: bpy.types.Context):
+        return True
+
+    def execute(self, context: bpy.types.Context):
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
+
+        dir_json_resourcepacks = os.path.join(dir_cafter_data, "resourcepacks.json")
+
+        worldPath = os.path.normpath(addon_prefs.World_Path)
+        dir_saves = os.path.dirname(worldPath)
+        
+        addon_prefs.Game_Resources_List.clear()
+        addon_prefs.Game_unuse_Resources_List.clear()
+
+        if os.path.exists(dir_json_resourcepacks):
+            with open(dir_json_resourcepacks, "r", encoding="utf-8") as file:
+                json_resourcepacks = json.load(file)
+        else:
+            return {'FINISHED'}
+        resourcepacks = json_resourcepacks[dir_saves]
+        for resourcepack in resourcepacks[0]:
+            resourcepack_use = addon_prefs.Game_Resources_List.add()
+            resourcepack_use.name = resourcepack
+        for resourcepack in resourcepacks[1]:
+            resourcepack_unuse = addon_prefs.Game_unuse_Resources_List.add()
+            resourcepack_unuse.name = resourcepack
+
+
+        return {'FINISHED'}
+
 class VIEW3D_OT_CrafterReloadResourcesPlans(bpy.types.Operator):#刷新资源包预设列表
     bl_label = "Reload Resources Plans"
     bl_idname = "crafter.reload_resources_plans"
@@ -664,71 +700,346 @@ class VIEW3D_OT_UseCrafterHistoryWorlds(bpy.types.Operator):#使用历史世界
         if len(addon_prefs.History_World_Settings_List) > 0:
             layout.template_list("VIEW3D_UL_CrafterHistoryWorldSettingsList", "", addon_prefs, "History_World_Settings_List", addon_prefs, "History_World_Settings_List_index", rows=10)
 
+class VIEW3D_UL_CrafterGameResources(bpy.types.UIList):
+     def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
+        text = item.name
+        index_na = text.rfind("\\")
+        text = text[index_na+1:-4]
+        true_text = ""
+        i = 0
+        while i < len(text):
+            if text[i] == "§":
+                i+=1
+            elif text[i] != "!":
+                true_text += text[i]
+            i+=1
+        layout.label(text=true_text)
+
+class VIEW3D_UL_CrafterGameUnuseResources(bpy.types.UIList):
+     def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
+        text = item.name
+        index_na = text.rfind("\\")
+        text = text[index_na+1:-4]
+        true_text = ""
+        i = 0
+        while i < len(text):
+            if text[i] == "§":
+                i+=1
+            elif text[i] != "!":
+                true_text += text[i]
+            i+=1
+        layout.label(text=true_text)
+
+class VIEW3D_OT_CrafterUpGameResource(bpy.types.Operator):#提高游戏资源包优先级
+    bl_label = "Up resource's priority"    
+    bl_idname = "crafter.up_game_resource"
+    bl_description = " "
+
+    @classmethod
+    def poll(cls, context: bpy.types.Context):
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
+        
+        return addon_prefs.Game_Resources_List_index > 0
+
+    def execute(self, context: bpy.types.Context):
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
+
+        dir_json_resourcepacks = os.path.join(dir_cafter_data, "resourcepacks.json")
+        with open(dir_json_resourcepacks, "r", encoding="utf-8") as file:
+            json_resourcepacks = json.load(file)
+
+        worldPath = addon_prefs.World_Path
+        dir_saves = os.path.dirname(worldPath)
+        target_name = addon_prefs.Game_Resources_List[addon_prefs.Game_Resources_List_index].name
+        for i in range(len(json_resourcepacks[dir_saves][0])):
+            if json_resourcepacks[dir_saves][0][i] == target_name:
+                if i > 0:
+                    json_resourcepacks[dir_saves][0][i], json_resourcepacks[dir_saves][0][i - 1] = json_resourcepacks[dir_saves][0][i - 1], json_resourcepacks[dir_saves][0][i]
+                    addon_prefs.Game_Resources_List_index -= 1
+                    break
+        with open(dir_json_resourcepacks, 'w', encoding='utf-8') as file:
+            json.dump(json_resourcepacks, file, indent=4)
+        bpy.ops.crafter.reload_game_resources()
+
+        return {'FINISHED'}
+
+class VIEW3D_OT_CrafterDownGameResource(bpy.types.Operator):#降低游戏资源包优先级
+    bl_label = "Down resource's priority"    
+    bl_idname = "crafter.down_game_resource"
+    bl_description = " "
+
+    @classmethod
+    def poll(cls, context: bpy.types.Context):
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
+        
+        return addon_prefs.Game_Resources_List_index < len(addon_prefs.Game_Resources_List) - 1
+
+    def execute(self, context: bpy.types.Context):
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
+
+        dir_json_resourcepacks = os.path.join(dir_cafter_data, "resourcepacks.json")
+        with open(dir_json_resourcepacks, "r", encoding="utf-8") as file:
+            json_resourcepacks = json.load(file)
+
+        worldPath = addon_prefs.World_Path
+        dir_saves = os.path.dirname(worldPath)
+        target_name = addon_prefs.Game_Resources_List[addon_prefs.Game_Resources_List_index].name
+        for i in range(len(json_resourcepacks[dir_saves][0])):
+            print(i)
+            print(json_resourcepacks[dir_saves][0][i])
+            print(target_name)
+            if json_resourcepacks[dir_saves][0][i] == target_name:
+                print('=')
+                if i < len(addon_prefs.Game_Resources_List) - 1:
+                    print("down")
+                    json_resourcepacks[dir_saves][0][i], json_resourcepacks[dir_saves][0][i + 1] = json_resourcepacks[dir_saves][0][i + 1], json_resourcepacks[dir_saves][0][i]
+                    addon_prefs.Game_Resources_List_index += 1
+                    break
+
+        with open(dir_json_resourcepacks, 'w', encoding='utf-8') as file:
+            json.dump(json_resourcepacks, file, indent=4)
+
+        bpy.ops.crafter.reload_game_resources()
+
+        return {'FINISHED'}
+    
+class VIEW3D_OT_CrafterBanGameResource(bpy.types.Operator):#Ban游戏资源包
+    bl_label = "Ban resource"    
+    bl_idname = "crafter.ban_game_resource"
+    bl_description = " "
+
+    @classmethod
+    def poll(cls, context: bpy.types.Context):
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
+        
+        return True
+
+    def execute(self, context: bpy.types.Context):
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
+
+        dir_json_resourcepacks = os.path.join(dir_cafter_data, "resourcepacks.json")
+        with open(dir_json_resourcepacks, "r", encoding="utf-8") as file:
+            json_resourcepacks = json.load(file)
+
+        worldPath = addon_prefs.World_Path
+        dir_saves = os.path.dirname(worldPath)
+        use_list = json_resourcepacks[dir_saves][0].copy()
+        unuse_list = json_resourcepacks[dir_saves][1].copy()
+        json_resourcepacks[dir_saves][0] = []
+        json_resourcepacks[dir_saves][1] = []
+        for i in range(len(use_list)):
+            if i == addon_prefs.Game_Resources_List_index:
+                continue
+            json_resourcepacks[dir_saves][0].append(use_list[i])
+        json_resourcepacks[dir_saves][1].append(addon_prefs.Game_Resources_List[addon_prefs.Game_Resources_List_index].name)
+        for resource in unuse_list:
+            json_resourcepacks[dir_saves][1].append(resource)
+
+        with open(dir_json_resourcepacks, 'w', encoding='utf-8') as file:
+            json.dump(json_resourcepacks, file, indent=4)
+
+        if (addon_prefs.Game_Resources_List_index > 0) and (addon_prefs.Game_Resources_List_index == len(addon_prefs.Game_Resources_List) - 1):
+            addon_prefs.Game_Resources_List_index -= 1
+
+        bpy.ops.crafter.reload_game_resources()
+
+        return {'FINISHED'}
+
+class VIEW3D_OT_CrafterUseGameResource(bpy.types.Operator):#使用游戏资源包
+    bl_label = "Use resource"    
+    bl_idname = "crafter.use_game_resource"
+    bl_description = " "
+
+    @classmethod
+    def poll(cls, context: bpy.types.Context):
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
+        
+        return True
+
+    def execute(self, context: bpy.types.Context):
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
+
+        dir_json_resourcepacks = os.path.join(dir_cafter_data, "resourcepacks.json")
+        with open(dir_json_resourcepacks, "r", encoding="utf-8") as file:
+            json_resourcepacks = json.load(file)
+
+        worldPath = addon_prefs.World_Path
+        dir_saves = os.path.dirname(worldPath)
+        use_list = json_resourcepacks[dir_saves][0].copy()
+        unuse_list = json_resourcepacks[dir_saves][1].copy()
+        json_resourcepacks[dir_saves][0] = []
+        json_resourcepacks[dir_saves][1] = []
+        json_resourcepacks[dir_saves][0].append(addon_prefs.Game_unuse_Resources_List[addon_prefs.Game_unuse_Resources_List_index].name)
+        for resource in use_list:
+            json_resourcepacks[dir_saves][0].append(resource)
+        for i in range(len(unuse_list)):
+            if i == addon_prefs.Game_unuse_Resources_List_index:
+                continue
+            json_resourcepacks[dir_saves][1].append(unuse_list[i])
+
+        with open(dir_json_resourcepacks, 'w', encoding='utf-8') as file:
+            json.dump(json_resourcepacks, file, indent=4)
+
+        if (addon_prefs.Game_unuse_Resources_List_index > 0) and (addon_prefs.Game_unuse_Resources_List_index == len(addon_prefs.Game_unuse_Resources_List) - 1):
+            addon_prefs.Game_unuse_Resources_List_index -= 1
+
+        bpy.ops.crafter.reload_game_resources()
+
+        return {'FINISHED'}
+
 class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世界
     bl_label = "Import World"
     bl_idname = "crafter.import_surface_world"
     bl_description = "Import the surface world"
     bl_options = {'REGISTER', 'UNDO'}
     
-    worldPath: StringProperty(name="World path",
-                               default="World path",
-                               subtype="DIR_PATH",)#type: ignore
-    versionPath: StringProperty(name="Version path",
-                               default="Version path",
-                               subtype="DIR_PATH",)#type: ignore
-    selectedGameVersion: StringProperty(name="Selected Game Version",
-                                      default="Selected Game Version",
-                                      description="Selected Game Version")#type: ignore
-    dot_minecraftPath: StringProperty(name=".minecraft path",
-                               default=".minecraft path",
-                               subtype="DIR_PATH",)#type: ignore
+    worldPath = StringProperty(name="World path")#type: ignore
+    jarPath: StringProperty(name="Jar path")#type: ignore
+    modsPath = StringProperty(name="Mods path")#type: ignore
+
+    save: StringProperty(name="Save")#type: ignore
+    version: StringProperty(name="Version")#type: ignore
+    dot_minecraftPath: StringProperty(name=".minecraft path")#type: ignore
+
     @classmethod
     def poll(cls, context: bpy.types.Context):
         return True
+    def draw(self, context):
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
+        layout = self.layout
+
+        row = layout.row()
+
+        col_1 = row.column()
+        col_1.prop(addon_prefs, "useChunkPrecision")
+        col_1.prop(addon_prefs, "strictDeduplication")
+        col_1.prop(addon_prefs, "exportLightBlock")
+        col_1.prop(addon_prefs, "activeLOD")
+
+        col_2 = row.column()
+        col_2.prop(addon_prefs, "keepBoundary")
+        col_2.prop(addon_prefs, "cullCave")
+        col_2.prop(addon_prefs, "allowDoubleFace")
+        if addon_prefs.activeLOD:
+            row_lod = layout.row()
+            
+            col_lod_1 = row_lod.column()
+            col_lod_1.prop(addon_prefs, "LOD0renderDistance")
+            col_lod_1.prop(addon_prefs, "LOD1renderDistance")
+            col_lod_1.prop(addon_prefs, "LOD2renderDistance")
+            col_lod_1.prop(addon_prefs, "LOD3renderDistance")
+
+            col_lod_2 = row_lod.column()
+            col_lod_2.prop(addon_prefs, "useUnderwaterLOD")
+
+        row_resources_use = layout.row()
+        col_use_list = row_resources_use.column()
+        col_use_list.template_list("VIEW3D_UL_CrafterGameResources", "", addon_prefs, "Game_Resources_List", addon_prefs, "Game_Resources_List_index", rows=1)
+        col_use_ops = row_resources_use.column(align=True)
+        if len (addon_prefs.Game_Resources_List) > 0:
+            col_use_ops.operator("crafter.ban_game_resource", text="", icon="REMOVE")
+        if len (addon_prefs.Game_Resources_List) > 1:
+            col_use_ops.separator()
+            col_use_ops.operator("crafter.up_game_resource", text="", icon="TRIA_UP")
+            col_use_ops.operator("crafter.down_game_resource", text="", icon="TRIA_DOWN")
+
+        row_resources_unuse = layout.row()
+        col_unuse_list = row_resources_unuse.column()
+        col_unuse_list.template_list("VIEW3D_UL_CrafterGameUnuseResources", "", addon_prefs, "Game_unuse_Resources_List", addon_prefs, "Game_unuse_Resources_List_index", rows=1)
+        col_unuse_ops = row_resources_unuse.column()
+        if len (addon_prefs.Game_unuse_Resources_List) > 0:
+            col_unuse_ops.operator("crafter.use_game_resource", text="", icon="ADD")
 
     def invoke(self, context, event):
         addon_prefs = context.preferences.addons[__addon_name__].preferences
 
         # 获取世界路径，检测路径合法性
-        self.worldPath = os.path.normpath(addon_prefs.World_Path)
-        dir_level_dat = os.path.join(self.worldPath, "level.dat")
+        worldPath = os.path.normpath(addon_prefs.World_Path)
+        dir_saves = os.path.dirname(worldPath)
+        dir_level_dat = os.path.join(worldPath, "level.dat")
         if not os.path.exists(dir_level_dat):
             self.report({'ERROR'}, "It's not a world path!")
             return {"CANCELLED"}
         
         # 检查游戏文件路径
-        self.versionPath = os.path.dirname(os.path.dirname(self.worldPath))
-        dir_not_diveded_versions = os.path.join(self.versionPath, "versions")
+        versionPath = os.path.dirname(os.path.dirname(worldPath))
+        dir_not_diveded_versions = os.path.join(versionPath, "versions")
+
         if os.path.exists(dir_not_diveded_versions):
             self.report({"ERROR"},"现在白给还没做无版本隔离的支持，所以忠城这边暂时也没做")
             return {"CANCELLED"}
-            # self.report({"INFO"},"Detected version isolation is not enabled")
-            self.selectedGameVersion = "No version isolation"
-            self.dot_minecraftPath = os.path.dirname(self.versionPath)
+            self.report({"INFO"},"Detected version isolation is not enabled")
+            version = "No version isolation"
+            dot_minecraftPath = os.path.dirname(versionPath)
         else:
-            self.selectedGameVersion = os.path.basename(self.versionPath)
-            self.dot_minecraftPath = os.path.dirname(os.path.dirname(self.versionPath))
-            if not os.path.exists(os.path.join(self.versionPath,self.selectedGameVersion+".jar")):
+            version = os.path.basename(versionPath)
+            jarPath = os.path.join(versionPath, version+".jar")
+            if not os.path.exists(jarPath):
                 self.report({'ERROR'}, "Please set the save file into the Minecraft game folder!")
                 return {"CANCELLED"}
+            modsPath = os.path.join(versionPath, "mods")
+            dir_resourcepacks = os.path.join(versionPath, "resourcepacks")
+            dot_minecraftPath = os.path.dirname(os.path.dirname(versionPath))
+        
+        list_dir_resourcepacks = os.listdir(dir_resourcepacks)
+        dir_json_resourcepacks = os.path.join(dir_cafter_data, "resourcepacks.json")
+        
+        if os.path.exists(dir_json_resourcepacks):
+            with open(dir_json_resourcepacks, "r", encoding="utf-8") as file:
+                json_resourcepacks = json.load(file)
+        else:
+            json_resourcepacks = {}
+        for dir_saves_old in list(json_resourcepacks):
+            if not os.path.exists(dir_saves_old):
+                del json_resourcepacks[dir_saves_old]
+        json_resourcepacks.setdefault(dir_saves,[[],[]])
+        resourcepacks_use_copy = json_resourcepacks[dir_saves][0].copy()
+        resourcepacks_unuse_copy = json_resourcepacks[dir_saves][1].copy()
+        json_resourcepacks[dir_saves][0] =[]
+        json_resourcepacks[dir_saves][1] =[]
+
+        for resourcepack in list_dir_resourcepacks:
+            dir_resourcepack = os.path.join(dir_resourcepacks, resourcepack)
+            if (not dir_resourcepack in resourcepacks_use_copy) and (not dir_resourcepack in resourcepacks_unuse_copy):
+                if dir_resourcepack.endswith(".zip"):
+                    json_resourcepacks[dir_saves][0].append(dir_resourcepack)
+        for dir_resourcepack in resourcepacks_use_copy:
+            if os.path.exists(dir_resourcepack):
+                json_resourcepacks[dir_saves][0].append(dir_resourcepack)
+        for dir_resourcepack in resourcepacks_unuse_copy:
+            if os.path.exists(dir_resourcepack):
+                json_resourcepacks[dir_saves][1].append(dir_resourcepack)
+    
+        with open (dir_json_resourcepacks, "w", encoding="utf-8") as file:
+            json.dump(json_resourcepacks, file, indent=4)
+        
+        bpy.ops.crafter.reload_game_resources()
+        
+
+        self.worldPath = worldPath
+        self.jarPath = jarPath
+        self.modsPath = modsPath
+
+        self.save = os.path.basename(worldPath)
+        self.version = version
+        self.dot_minecraftPath = dot_minecraftPath
         
         return context.window_manager.invoke_props_dialog(self)
     def execute(self, context: bpy.types.Context):
         addon_prefs = context.preferences.addons[__addon_name__].preferences
-        # 删去之前导出的obj
-        dir_importer = os.path.join(dir_init_main, "importer")
-        for file in os.listdir(dir_importer):
-            if file.endswith(".obj"):
-                os.remove(os.path.join(dir_importer, file))
-
-        #写入conifg.json
+    
         worldPath = self.worldPath
-        versionPath = self.versionPath
-        selectedGameVersion = self.selectedGameVersion
-        json_version = self.selectedGameVersion
-        save = os.path.basename(self.worldPath)
-        dot_minecraftPath = self.dot_minecraftPath
+        jarPath = self.jarPath
+        modsPath = self.modsPath
+        resourcepacksPaths = []
 
+        for resourcepacksPath in addon_prefs.Game_Resources_List:
+            resourcepacksPaths.append(resourcepacksPath.name)
+        
+        save = self.save
+        version = self.version
+        dot_minecraftPath = self.dot_minecraftPath
+        #写入conifg.json
         point_cloud_mode = addon_prefs.Point_Cloud_Mode
         if point_cloud_mode:
             status = 2
@@ -737,8 +1048,9 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         
         worldconfig = {
             "worldPath": worldPath,
-            "packagePath": versionPath,
-            "selectedGameVersion":selectedGameVersion,
+            "jarPath": jarPath,
+            "modsPath": modsPath,
+            "resourcepacksPaths":resourcepacksPaths,
             "biomeMappingFile": "config\\jsons\\biomes.json",
             "minX": min(addon_prefs.XYZ_1[0], addon_prefs.XYZ_2[0]),
             "maxX": max(addon_prefs.XYZ_1[0], addon_prefs.XYZ_2[0]),
@@ -747,14 +1059,14 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             "minZ": min(addon_prefs.XYZ_1[2], addon_prefs.XYZ_2[2]),
             "maxZ": max(addon_prefs.XYZ_1[2], addon_prefs.XYZ_2[2]),
             "status": status,
-            # "useChunkPrecision":addon_prefs.useChunkPrecision,
-            # "keepBoundary":addon_prefs.keepBoundary,
-            # "strictDeduplication":addon_prefs.strictDeduplication,
-            # "cullCave":addon_prefs.cullCave,
-            # "exportLightBlock":addon_prefs.exportLightBlock,
-            # "allowDoubleFace":addon_prefs.allowDoubleFace,
-            # "activeLOD":addon_prefs.activeLOD,
-            # "useUnderwaterLOD":addon_prefs.useUnderwaterLOD,
+            "useChunkPrecision":addon_prefs.useChunkPrecision,
+            "keepBoundary":addon_prefs.keepBoundary,
+            "strictDeduplication":addon_prefs.strictDeduplication,
+            "cullCave":addon_prefs.cullCave,
+            "exportLightBlock":addon_prefs.exportLightBlock,
+            "allowDoubleFace":addon_prefs.allowDoubleFace,
+            "activeLOD":addon_prefs.activeLOD,
+            "useUnderwaterLOD":addon_prefs.useUnderwaterLOD,
             "LOD0renderDistance":addon_prefs.LOD0renderDistance,
             "LOD1renderDistance":addon_prefs.LOD1renderDistance,
             "LOD2renderDistance":addon_prefs.LOD2renderDistance,
@@ -762,13 +1074,24 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             "solid": 0,
         }
 
+        dir_importer = os.path.join(dir_init_main, "importer")
         dir_config = os.path.join(dir_importer, "config")
-        dir_exe_importer = os.path.join(dir_importer, "WorldImporter.exe")
         dir_json_config = os.path.join(dir_config, "config.json")
+
         with open(dir_json_config, 'w', encoding='utf-8') as config:
-            for key, value in worldconfig.items():
-                config.write(f"{key} = {value}\n")
-            # json.dump(worldconfig, config, indent=4)
+            # for key, value in worldconfig.items():
+            #     config.write(f"{key} = {value}\n")
+            json.dump(worldconfig, config, indent=4)
+
+        return {"FINISHED"}
+        
+        # 删去之前导出的obj
+        dir_importer = os.path.join(dir_init_main, "importer")
+        dir_exe_importer = os.path.join(dir_importer, "WorldImporter.exe")
+        for file in os.listdir(dir_importer):
+            if file.endswith(".obj"):
+                os.remove(os.path.join(dir_importer, file))
+
         #生成obj
         start_time = time.perf_counter()#记录开始时间
 
@@ -854,9 +1177,9 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         else:
             json_history_worlds = {}
         json_history_worlds.setdefault(dot_minecraftPath, {})
-        json_history_worlds[dot_minecraftPath].setdefault(json_version, {})
-        json_history_worlds[dot_minecraftPath][json_version].setdefault(save, [])
-        json_history_settings = json_history_worlds[dot_minecraftPath][json_version][save]
+        json_history_worlds[dot_minecraftPath].setdefault(version, {})
+        json_history_worlds[dot_minecraftPath][version].setdefault(save, [])
+        json_history_settings = json_history_worlds[dot_minecraftPath][version][save]
         world_settings_now = [list(addon_prefs.XYZ_1), list(addon_prefs.XYZ_2)]
         if len(json_history_settings) == 0:
             json_history_settings.append(None)
@@ -880,7 +1203,7 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             json.dump(json_history_worlds, file, indent=4)
 
         # 保存最近世界
-        world_now = f"{save}|{json_version}|{dot_minecraftPath}"
+        world_now = f"{save}|{version}|{dot_minecraftPath}"
         dir_json_latest_worlds = os.path.join(dir_cafter_data, "latest_worlds.json")
         if os.path.exists(dir_json_latest_worlds):
             with open(dir_json_latest_worlds, 'r', encoding='utf-8') as file:
@@ -911,34 +1234,6 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         addon_prefs.History_World_Settings_List_index = 0
 
         return {'FINISHED'}
-
-    def draw(self, context):
-        addon_prefs = context.preferences.addons[__addon_name__].preferences
-        layout = self.layout
-
-        row = layout.row()
-
-        col_1 = row.column()
-        col_1.prop(addon_prefs, "useChunkPrecision")
-        col_1.prop(addon_prefs, "strictDeduplication")
-        col_1.prop(addon_prefs, "exportLightBlock")
-        col_1.prop(addon_prefs, "activeLOD")
-
-        col_2 = row.column()
-        col_2.prop(addon_prefs, "keepBoundary")
-        col_2.prop(addon_prefs, "cullCave")
-        col_2.prop(addon_prefs, "allowDoubleFace")
-        if addon_prefs.activeLOD:
-            row_lod = layout.row()
-            
-            col_lod_1 = row_lod.column()
-            col_lod_1.prop(addon_prefs, "LOD0renderDistance")
-            col_lod_1.prop(addon_prefs, "LOD1renderDistance")
-            col_lod_1.prop(addon_prefs, "LOD2renderDistance")
-            col_lod_1.prop(addon_prefs, "LOD3renderDistance")
-
-            col_lod_2 = row_lod.column()
-            col_lod_2.prop(addon_prefs, "useUnderwaterLOD")
 
 class VIEW3D_OT_CrafterImportSolidArea(bpy.types.Operator):#导入可编辑区域==========未完善==========
     bl_label = "Import Solid Area"
@@ -1036,8 +1331,7 @@ class VIEW3D_OT_CrafterDownResource(bpy.types.Operator):#降低资源包优先�
 
 class VIEW3D_UL_CrafterResources(bpy.types.UIList):
      def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
-        if self.layout_type in {"DEFAULT","COMPACT"}:
-            layout.label(text=item.name)
+        layout.label(text=item.name)
 
 class VIEW3D_UL_CrafterResourcesInfo(bpy.types.UIList):
      def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
@@ -1045,22 +1339,19 @@ class VIEW3D_UL_CrafterResourcesInfo(bpy.types.UIList):
         dir_resourcepacks = os.path.join(dir_resourcepacks_plans, addon_prefs.Resources_Plans_List[addon_prefs.Resources_Plans_List_index].name)
         dir_resourcepack = os.path.join(dir_resourcepacks, item.name)
         
-        if self.layout_type in {"DEFAULT","COMPACT"}:
-            item_name = ""
-            i = 0
-            while i < len(item.name):
-                if item.name[i] == "§":
-                    i+=1
-                elif item.name[i] == ".":
-                    break
-                elif item.name[i] != "!":
-                    item_name += item.name[i]
+        item_name = ""
+        i = 0
+        while i < len(item.name):
+            if item.name[i] == "§":
                 i+=1
-            # if "pack.png" in os.listdir(dir_resourcepack):
-            #     layout.label(text=item_name,icon="crafter_resources" + item.name)
-            # else:
-            #     layout.label(text=item_name)
-            layout.label(text=item_name)
+            elif item.name[i] != "!":
+                item_name += item.name[i]
+            i+=1
+        # if "pack.png" in os.listdir(dir_resourcepack):
+        #     layout.label(text=item_name,icon="crafter_resources" + item.name)
+        # else:
+        #     layout.label(text=item_name)
+        layout.label(text=item_name[:-4])
 
 class VIEW3D_OT_CrafterLoadResources(bpy.types.Operator):#加载资源包
     bl_label = "Load Resources"

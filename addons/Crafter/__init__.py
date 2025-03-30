@@ -28,7 +28,7 @@ bl_info = {
 
 _addon_properties = {
     bpy.types.Scene: {
-        "Crafter_mcmts": CollectionProperty(type=McMt, name="McMt")
+        "Crafter_mcmts": CollectionProperty(type=McMt, name="McMt"),
         # "Crafter_rain":FloatProperty(name="Rain",
         #                            description="rain",
         #                            subtype="FACTOR",

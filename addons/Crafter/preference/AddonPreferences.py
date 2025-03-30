@@ -4,7 +4,7 @@ import bpy
 from bpy.props import StringProperty, IntProperty, BoolProperty, IntVectorProperty, EnumProperty, CollectionProperty, FloatProperty
 from bpy.types import AddonPreferences
 from ..config import __addon_name__
-from ..properties import ResourcePlan, ResourcePlansInfo, Material, ClassificationBasisl,Background,HistoryWorldRoot,HistoryWorldVersion,HistoryWorldSave,HistoryWorldSetting,LatestWorld
+from ..properties import ResourcePlan, ResourcePlansInfo, Material, ClassificationBasisl,Background,HistoryWorldRoot,HistoryWorldVersion,HistoryWorldSave,HistoryWorldSetting,LatestWorld,Resource
 
 
 class CrafterAddonPreferences(AddonPreferences):
@@ -63,6 +63,12 @@ class CrafterAddonPreferences(AddonPreferences):
                                                     type=HistoryWorldSetting)#type: ignore
     History_World_Settings_List_index: IntProperty(name="History Settings",
                                                    default=0)# type: ignore
+    Game_Resources_List: CollectionProperty(name="Resources",type=Resource)# type: ignore
+    Game_Resources_List_index: IntProperty(name="Resource",
+                                      default=0,)# type: ignore
+    Game_unuse_Resources_List: CollectionProperty(name="Resources",type=Resource)# type: ignore
+    Game_unuse_Resources_List_index: IntProperty(name="Resource",
+                                      default=0,)# type: ignore
     solid: IntProperty(name="Solid",
                        default=0,)# type: ignore
     useChunkPrecision: BoolProperty(name="Chunk Precision",
