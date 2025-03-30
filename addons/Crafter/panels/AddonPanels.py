@@ -62,10 +62,9 @@ class VIEW3D_PT_CrafterImportWorld(bpy.types.Panel):
 
         layout.prop(addon_prefs, "World_Path")
 
-        cul_XYZ = layout.column(align=True)
-        row_XYZ1 = cul_XYZ.row()
+        row_XYZ1 = layout.row()
         row_XYZ1.prop(addon_prefs, "XYZ_1")
-        row_XYZ2 = cul_XYZ.row()
+        row_XYZ2 = layout.row()
         row_XYZ2.prop(addon_prefs, "XYZ_2")
         
         row_setting = layout.row()

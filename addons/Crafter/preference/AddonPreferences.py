@@ -63,10 +63,12 @@ class CrafterAddonPreferences(AddonPreferences):
                                                     type=HistoryWorldSetting)#type: ignore
     History_World_Settings_List_index: IntProperty(name="History Settings",
                                                    default=0)# type: ignore
-    Game_Resources_List: CollectionProperty(name="Resources",type=Resource)# type: ignore
+    Game_Resources_List: CollectionProperty(name="Resources",
+                                            type=Resource)# type: ignore
     Game_Resources_List_index: IntProperty(name="Resource",
                                       default=0,)# type: ignore
-    Game_unuse_Resources_List: CollectionProperty(name="Resources",type=Resource)# type: ignore
+    Game_unuse_Resources_List: CollectionProperty(name="Resources",
+                                                  type=Resource)# type: ignore
     Game_unuse_Resources_List_index: IntProperty(name="Resource",
                                       default=0,)# type: ignore
     solid: IntProperty(name="Solid",
@@ -83,10 +85,21 @@ class CrafterAddonPreferences(AddonPreferences):
                                    default=True,)# type: ignore
     allowDoubleFace: BoolProperty(name="Allow Double Face",
                                   default=False,)# type: ignore
+    exportFullModel: BoolProperty(name="As Chunk",
+                                  default=False,)# type: ignore
+    partitionSize: IntProperty(name="Chunk Size",
+                               default=4,
+                               min=1)#type: ignore
     activeLOD: BoolProperty(name="LOD",
                             default=True,)# type: ignore
     useUnderwaterLOD: BoolProperty(name="Underwater LOD",
                                    default=False,)# type: ignore
+    isLODAutoCenter: BoolProperty(name="LOD Auto Center",
+                                  default=True,)# type: ignore
+    LODCenterX: IntProperty(name="LOD Center X",
+                            default=0)# type: ignore
+    LODCenterZ: IntProperty(name="LOD Center Z",
+                            default=0)# type: ignore
     LOD0renderDistance: IntProperty(name="LOD0 Distance",
                                    default=6,
                                    min=0)# type: ignore

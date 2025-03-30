@@ -914,12 +914,19 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         col_1.prop(addon_prefs, "useChunkPrecision")
         col_1.prop(addon_prefs, "strictDeduplication")
         col_1.prop(addon_prefs, "exportLightBlock")
-        col_1.prop(addon_prefs, "activeLOD")
 
         col_2 = row.column()
         col_2.prop(addon_prefs, "keepBoundary")
         col_2.prop(addon_prefs, "cullCave")
         col_2.prop(addon_prefs, "allowDoubleFace")
+
+        row_exportFullModel = layout.row()
+        row_exportFullModel.prop(addon_prefs, "exportFullModel")
+        if addon_prefs.exportFullModel:
+            row_exportFullModel.prop(addon_prefs, "partitionSize")
+        
+        row_if_lod = layout.row()
+        row_if_lod.prop(addon_prefs, "activeLOD")
         if addon_prefs.activeLOD:
             row_lod = layout.row()
             
@@ -931,6 +938,10 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
 
             col_lod_2 = row_lod.column()
             col_lod_2.prop(addon_prefs, "useUnderwaterLOD")
+            col_lod_2.prop(addon_prefs, "isLODAutoCenter")
+            if addon_prefs.isLODAutoCenter:
+                col_lod_2.prop(addon_prefs, "LODCenterX")
+                col_lod_2.prop(addon_prefs, "LODCenterZ")
 
         row_resources_use = layout.row()
         col_use_list = row_resources_use.column()
@@ -1065,8 +1076,13 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             "cullCave":addon_prefs.cullCave,
             "exportLightBlock":addon_prefs.exportLightBlock,
             "allowDoubleFace":addon_prefs.allowDoubleFace,
+            "exportFullModel":not addon_prefs.exportFullModel,
+            "partitionSize":addon_prefs.partitionSize,
             "activeLOD":addon_prefs.activeLOD,
             "useUnderwaterLOD":addon_prefs.useUnderwaterLOD,
+            "isLODAutoCenter":addon_prefs.isLODAutoCenter,
+            "LODCenterX":addon_prefs.LODCenterX,
+            "LODCenterZ":addon_prefs.LODCenterZ,
             "LOD0renderDistance":addon_prefs.LOD0renderDistance,
             "LOD1renderDistance":addon_prefs.LOD1renderDistance,
             "LOD2renderDistance":addon_prefs.LOD2renderDistance,
