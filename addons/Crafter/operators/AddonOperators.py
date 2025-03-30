@@ -6,6 +6,7 @@ import threading
 import platform
 import json
 import zipfile
+from pathlib import Path
 
 from ..config import __addon_name__
 from ....common.i18n.i18n import i18n
@@ -200,6 +201,75 @@ def find_CO_group(classification_list,real_block_name,group_CO):
             break
     if not found:
                 group_CO.node_tree = bpy.data.node_groups["CO-"]
+
+def merge_obj_files(source_dir: str, output_file: str):
+    """
+    合并指定目录下所有.obj文件到单一文件
+    :param source_dir: 源目录路径
+    :param output_file: 输出文件路径
+    """
+    # 初始化数据容器
+    all_vertices = []
+    all_normals = []
+    all_faces = []
+    
+    # 顶点/法线偏移量统计
+    vertex_offset = 0
+    normal_offset = 0
+
+    # 遍历目录中的OBJ文件
+    obj_dir = Path(source_dir)
+    for obj_file in obj_dir.glob("*.obj"):
+        with open(obj_file, 'r') as f:
+            current_vertices = []
+            current_normals = []
+            
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue  # 跳过注释和空行
+                
+                parts = line.split()
+                if not parts:
+                    continue
+                
+                # 分类处理不同类型数据
+                if parts[0] == 'v':
+                    current_vertices.append(' '.join(parts[1:]))
+                elif parts[0] == 'vn':
+                    current_normals.append(' '.join(parts[1:]))
+                elif parts[0] == 'f':
+                    # 调整面索引的偏移量
+                    adjusted_face = []
+                    for vertex in parts[1:]:
+                        v_info = vertex.split('//')
+                        if len(v_info) == 2:
+                            v_idx = int(v_info[0]) + vertex_offset
+                            n_idx = int(v_info[1]) + normal_offset
+                            adjusted_face.append(f"{v_idx}//{n_idx}")
+                    all_faces.append('f ' + ' '.join(adjusted_face))
+            
+            # 更新全局数据
+            all_vertices.extend(current_vertices)
+            all_normals.extend(current_normals)
+            
+            # 累加偏移量
+            vertex_offset += len(current_vertices)
+            normal_offset += len(current_normals)
+
+    # 写入合并文件
+    with open(output_file, 'w') as out_f:
+        # 写入顶点数据
+        out_f.write("# Merged Vertices\n")
+        out_f.write('\n'.join([f"v {v}" for v in all_vertices]) + '\n')
+        
+        # 写入法线数据
+        out_f.write("\n# Merged Normals\n")
+        out_f.write('\n'.join([f"vn {n}" for n in all_normals]) + '\n')
+        
+        # 写入面数据
+        out_f.write("\n# Merged Faces\n")
+        out_f.write('\n'.join(all_faces) + '\n')
 
 class VIEW3D_OT_CrafterReloadResourcesPlans(bpy.types.Operator):#刷新资源包预设列表
     bl_label = "Reload Resources Plans"
@@ -647,9 +717,9 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         addon_prefs = context.preferences.addons[__addon_name__].preferences
         # 删去之前导出的obj
         dir_importer = os.path.join(dir_init_main, "importer")
-        dir_obj_region_models = os.path.join(dir_importer, "region_models.obj")
-        if os.path.exists(dir_obj_region_models):
-            os.remove(dir_obj_region_models)
+        for file in os.listdir(dir_importer):
+            if file.endswith(".obj"):
+                os.remove(os.path.join(dir_importer, file))
 
         #写入conifg.json
         worldPath = self.worldPath
@@ -699,8 +769,7 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             for key, value in worldconfig.items():
                 config.write(f"{key} = {value}\n")
             # json.dump(worldconfig, config, indent=4)
-        #导入obj
-        pre_import_objects = set(bpy.data.objects)#纪录当前场景中的所有对象
+        #生成obj
         start_time = time.perf_counter()#记录开始时间
 
         if os.path.exists(dir_exe_importer):
@@ -720,26 +789,46 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             except Exception as e:
                 self.report({'ERROR'}, f"Error: {e}")
                 return {"CANCELLED"}
+            used_time = time.perf_counter() - start_time
+            self.report({'INFO'}, i18n("At") + " " + str(used_time)[:6] + "s,"+ i18n("object generated"))
+
             #导入obj
-            try:
-                if point_cloud_mode:
-                    dir_obj_output = os.path.join(dir_importer, "output.obj")
-                    bpy.ops.wm.obj_import(filepath=dir_obj_output)
-                else:
-                    bpy.ops.wm.obj_import(filepath=dir_obj_region_models)
-            except:
+            have_obj = False
+            real_name_dic = {}
+            material_should_delete = []
+            for file in os.listdir(dir_importer):
+                if file.endswith(".obj"):
+                    pre_import_objects = set(bpy.data.objects)#纪录当前场景中的所有对象
+                    
+                    bpy.ops.wm.obj_import(filepath=os.path.join(dir_importer, file))
+                    bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
+                    have_obj = True
+                    
+                    post_import_objects = set(bpy.data.objects)
+                    new_objects = post_import_objects - pre_import_objects# 计算新增对象
+                    imported_objects = list(new_objects)
+                    for object in imported_objects:
+                        for i in range(len(object.data.materials)):
+                            material = object.data.materials[i]
+                            real_material_name = fuq_bl_dot_number(material.name)
+                            if real_material_name in real_name_dic:
+                                object.data.materials[i] = bpy.data.materials[real_name_dic[real_material_name]]
+                                material_should_delete.append(material.name)
+                            else:
+                                real_name_dic[real_material_name] = material.name
+                        add_to_mcmts_collection(object=object,context=context)
+                    
+                    used_time = time.perf_counter() - start_time
+                    self.report({'INFO'}, i18n("At") + " " + str(used_time)[:6] + "s,"+ file + i18n("imported"))
+            if not have_obj:
                 self.report({'ERROR'}, "WorldImporter didn't export obj!")
                 return {"CANCELLED"}
-            bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
-            # 计算新增对象
-            post_import_objects = set(bpy.data.objects)
-            new_objects = post_import_objects - pre_import_objects
-            imported_objects = list(new_objects)
-            for object in imported_objects:
-                add_to_mcmts_collection(object=object,context=context)
+            
+            for material in material_should_delete:
+                bpy.data.materials.remove(bpy.data.materials[material])
+            
         #完成导入
-        end_time = time.perf_counter()
-        used_time = end_time - start_time
+        used_time = time.perf_counter() - start_time
         self.report({'INFO'}, i18n("Importing finished.Time used:") + str(used_time)[:6] + "s")
         # 自动定位到视图
         for window in context.window_manager.windows:
@@ -1318,7 +1407,7 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
                     find_CO_group(group_CO=group_CO, real_block_name=real_block_name,classification_list=classification_list)
                 else:
                     group_CO.node_tree = bpy.data.node_groups["CO-"]
-                group_CO.inputs["Base Color"].default_value = [float(material.name[6:11]),float(material.name[12:17]),float(material.name[18:23]),1]
+                group_CO.inputs["Base Color"].default_value = [float(material.name[6:10]),float(material.name[11:15]),float(material.name[16:20]),1]
                 for output in group_CO.outputs:
                     links.new(output, node_output.inputs[output.name])
                 continue

@@ -88,6 +88,9 @@ dictionary = {
         "Importing finished.Time used:":"导入完成。耗时:",
         "Haven't history worlds":"无历史世界记录",
         "WorldImporter.exe started in a new process":"WorldImporter.exe已在新进程启动",
+        "At":"在",
+        "imported":"导入完毕",
+        "object generated":"obj生成完毕",
     }
 }
 
