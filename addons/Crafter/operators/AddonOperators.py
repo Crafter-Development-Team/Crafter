@@ -939,7 +939,7 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             col_lod_2 = row_lod.column()
             col_lod_2.prop(addon_prefs, "useUnderwaterLOD")
             col_lod_2.prop(addon_prefs, "isLODAutoCenter")
-            if addon_prefs.isLODAutoCenter:
+            if not addon_prefs.isLODAutoCenter:
                 col_lod_2.prop(addon_prefs, "LODCenterX")
                 col_lod_2.prop(addon_prefs, "LODCenterZ")
 

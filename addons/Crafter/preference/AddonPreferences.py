@@ -74,7 +74,7 @@ class CrafterAddonPreferences(AddonPreferences):
     solid: IntProperty(name="Solid",
                        default=0,)# type: ignore
     useChunkPrecision: BoolProperty(name="Chunk Precision",
-                                    default=True,)# type: ignore
+                                    default=False,)# type: ignore
     keepBoundary: BoolProperty(name="Keep Boundary",
                                default=False,)# type: ignore
     strictDeduplication: BoolProperty(name="Strict Surface Pruning",
