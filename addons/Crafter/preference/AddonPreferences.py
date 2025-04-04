@@ -4,7 +4,7 @@ import bpy
 from bpy.props import StringProperty, IntProperty, BoolProperty, IntVectorProperty, EnumProperty, CollectionProperty, FloatProperty
 from bpy.types import AddonPreferences
 from ..config import __addon_name__
-from ..properties import ResourcePlan, ResourcePlansInfo, Material, ClassificationBasisl,Background,HistoryWorldRoot,HistoryWorldVersion,HistoryWorldSave,HistoryWorldSetting,LatestWorld,Resource
+from ..properties import ResourcePlan, ResourcePlansInfo, Material, ClassificationBasisl,Background,HistoryWorldRoot,HistoryWorldVersion,HistoryWorldSave,HistoryWorldSetting,LatestWorld,Resource,UndividedVersion
 
 
 class CrafterAddonPreferences(AddonPreferences):
@@ -63,6 +63,12 @@ class CrafterAddonPreferences(AddonPreferences):
                                                     type=HistoryWorldSetting)#type: ignore
     History_World_Settings_List_index: IntProperty(name="History Settings",
                                                    default=0)# type: ignore
+    Undivided_Vsersions_List: CollectionProperty(name="Undivided Versions List",
+                                                type=UndividedVersion)#type: ignore
+    Undivided_Vsersions_List_index: IntProperty(name="Undivided Versions",
+                                                default=0)# type: ignore
+    is_Undivided: BoolProperty(name="Undivided",
+                               default=False,)# type: ignore
     Game_Resources_List: CollectionProperty(name="Resources",
                                             type=Resource)# type: ignore
     Game_Resources_List_index: IntProperty(name="Resource",

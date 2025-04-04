@@ -271,7 +271,20 @@ def merge_obj_files(source_dir: str, output_file: str):
         out_f.write("\n# Merged Faces\n")
         out_f.write('\n'.join(all_faces) + '\n')
 
-class VIEW3D_OT_CrafterGameReloadResources(bpy.types.Operator):#刷新游戏资源包列表
+def reload_Undivided_Vsersions(context: bpy.types.Context,dir_versions):#刷新无版本隔离列表
+
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
+
+        list_versions = os.listdir(dir_versions)
+        addon_prefs.Undivided_Vsersions_List.clear()
+        for version in list_versions:
+            versionPath = os.path.join(dir_versions, version)
+            undivided_version = addon_prefs.Undivided_Vsersions_List.add()
+            undivided_version.name = versionPath
+        if (len(addon_prefs.Undivided_Vsersions_List) - 1 < addon_prefs.Undivided_Vsersions_List_index) or (addon_prefs.Undivided_Vsersions_List_index < 0):
+            addon_prefs.Undivided_Vsersions_List_index = 0
+    
+class VIEW3D_OT_CrafterReloadGameResources(bpy.types.Operator):#刷新游戏资源包列表
     bl_label = "Reload Game Resources"
     bl_idname = "crafter.reload_game_resources"
     bl_description = " "
@@ -491,6 +504,66 @@ class VIEW3D_UL_CrafterHistoryWorldSettingsList(bpy.types.UIList):
         settings=item.name.split(" ")
         layout.label(text=f"{settings[0]}     {settings[1]}     {settings[2]}   |   {settings[3]}     {settings[4]}     {settings[5]}")
 
+class VIEW3D_OT_CrafterReloadLatestWorldsList(bpy.types.Operator):#刷新最近世界列表
+    bl_label = "Reload Latest Worlds List"
+    bl_idname = "crafter.reload_latest_worlds_list"
+    bl_description = " "
+    
+    @classmethod
+    def poll(cls, context: bpy.types.Context):
+        return True
+
+    def execute(self, context: bpy.types.Context):
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
+
+        bpy.ops.crafter.reload_history_worlds_list()
+
+        dir_json_latest_worlds = os.path.join(dir_cafter_data, "latest_worlds.json")
+        with open(dir_json_latest_worlds, 'r', encoding='utf-8') as file:
+            json_latest_worlds = json.load(file)
+        
+        addon_prefs.Latest_World_List.clear()
+   
+        for latest_world in json_latest_worlds:
+            latest_world_name = addon_prefs.Latest_World_List.add()
+            latest_world_name.name = latest_world
+        if len(addon_prefs.Latest_World_List) > 0:
+            if addon_prefs.Latest_World_List_index < 0 or addon_prefs.Latest_World_List_index >= len(addon_prefs.Latest_World_List):
+                addon_prefs.Latest_World_List_index = 0
+            world_now = addon_prefs.Latest_World_List[addon_prefs.Latest_World_List_index].name
+            world_now = world_now.split("|")
+            for i in range(len(addon_prefs.History_World_Roots_List)):
+                if addon_prefs.History_World_Roots_List[i].name == world_now[2]:
+                    addon_prefs.History_World_Roots_List_index = i
+                    bpy.ops.crafter.reload_history_worlds_list()
+                    if addon_prefs.is_Undivided:# 是否开启版本隔离
+                        dir_versions = os.path.join(world_now[2], "versions")
+                        reload_Undivided_Vsersions(context=context,dir_versions=dir_versions)
+                        for j in range(len(addon_prefs.Undivided_Vsersions_List)):
+                            if addon_prefs.Undivided_Vsersions_List[j].name == world_now[1]:
+                                addon_prefs.Undivided_Vsersions_List_index = j
+                                break
+                        for j in range(len(addon_prefs.History_World_Saves_List)):
+                                    if addon_prefs.History_World_Saves_List[j].name == world_now[0]:
+                                        addon_prefs.History_World_Saves_List_index = j
+                                        break
+                        bpy.ops.crafter.reload_history_worlds_list()
+                        break
+                    else:
+                        for j in range(len(addon_prefs.History_World_Versions_List)):
+                            if addon_prefs.History_World_Versions_List[j].name == world_now[1]:
+                                addon_prefs.History_World_Versions_List_index = j
+                                bpy.ops.crafter.reload_history_worlds_list()
+                                for k in range(len(addon_prefs.History_World_Saves_List)):
+                                    if addon_prefs.History_World_Saves_List[k].name == world_now[0]:
+                                        addon_prefs.History_World_Saves_List_index = k
+                                        bpy.ops.crafter.reload_history_worlds_list()
+                                        break
+                                break
+                        break
+
+        return {'FINISHED'}
+
 class VIEW3D_OT_CrafterReloadHistoryWorldsList(bpy.types.Operator):#刷新历史世界列表
     bl_label = "Reload History Worlds List"
     bl_idname = "crafter.reload_history_worlds_list"
@@ -518,65 +591,34 @@ class VIEW3D_OT_CrafterReloadHistoryWorldsList(bpy.types.Operator):#刷新历史
         if len(addon_prefs.History_World_Roots_List) > 0:
             if addon_prefs.History_World_Roots_List_index < 0 or addon_prefs.History_World_Roots_List_index >= len(addon_prefs.History_World_Roots_List):
                 addon_prefs.History_World_Roots_List_index = 0
-            for version in json_history_worlds[addon_prefs.History_World_Roots_List[addon_prefs.History_World_Roots_List_index].name]:
-                history_world_version = addon_prefs.History_World_Versions_List.add()
-                history_world_version.name = version
-            if len(addon_prefs.History_World_Versions_List) > 0:
-                if addon_prefs.History_World_Versions_List_index < 0 or addon_prefs.History_World_Versions_List_index >= len(addon_prefs.History_World_Versions_List):
-                    addon_prefs.History_World_Versions_List_index = 0
-                for save in json_history_worlds[addon_prefs.History_World_Roots_List[addon_prefs.History_World_Roots_List_index].name][addon_prefs.History_World_Versions_List[addon_prefs.History_World_Versions_List_index].name]:
+            if type(json_history_worlds[addon_prefs.History_World_Roots_List[addon_prefs.History_World_Roots_List_index].name]) == list:
+                addon_prefs.is_Undivided = True
+                for save in json_history_worlds[addon_prefs.History_World_Roots_List[addon_prefs.History_World_Roots_List_index].name][0]:
                     history_world_save = addon_prefs.History_World_Saves_List.add()
                     history_world_save.name = save
-                if len(addon_prefs.History_World_Saves_List) > 0:
-                    if addon_prefs.History_World_Saves_List_index < 0 or addon_prefs.History_World_Saves_List_index >= len(addon_prefs.History_World_Saves_List):
-                        addon_prefs.History_World_Saves_List_index = 0
-                    for settings in json_history_worlds[addon_prefs.History_World_Roots_List[addon_prefs.History_World_Roots_List_index].name][addon_prefs.History_World_Versions_List[addon_prefs.History_World_Versions_List_index].name][addon_prefs.History_World_Saves_List[addon_prefs.History_World_Saves_List_index].name]:
-                        history_world_setting = addon_prefs.History_World_Settings_List.add()
-                        history_world_setting.name = f"{settings[0][0]} {settings[0][1]} {settings[0][2]} {settings[1][0]} {settings[1][1]} {settings[1][2]}" 
-
-        return {'FINISHED'}
-
-class VIEW3D_OT_CrafterReloadLatestWorldsList(bpy.types.Operator):#刷新最近世界列表
-    bl_label = "Reload Latest Worlds List"
-    bl_idname = "crafter.reload_latest_worlds_list"
-    bl_description = " "
-    
-    @classmethod
-    def poll(cls, context: bpy.types.Context):
-        return True
-
-    def execute(self, context: bpy.types.Context):
-        addon_prefs = context.preferences.addons[__addon_name__].preferences
-
-        dir_json_latest_worlds = os.path.join(dir_cafter_data, "latest_worlds.json")
-        with open(dir_json_latest_worlds, 'r', encoding='utf-8') as file:
-            json_latest_worlds = json.load(file)
-        
-        addon_prefs.Latest_World_List.clear()
-   
-        for latest_world in json_latest_worlds:
-            latest_world_name = addon_prefs.Latest_World_List.add()
-            latest_world_name.name = latest_world
-        if len(addon_prefs.Latest_World_List) > 0:
-            if addon_prefs.Latest_World_List_index < 0 or addon_prefs.Latest_World_List_index >= len(addon_prefs.Latest_World_List):
-                addon_prefs.Latest_World_List_index = 0
-            world_now = addon_prefs.Latest_World_List[addon_prefs.Latest_World_List_index].name
-            world_now = world_now.split("|")
-            for i in range(len(addon_prefs.History_World_Roots_List)):
-                if addon_prefs.History_World_Roots_List[i].name == world_now[2]:
-                    addon_prefs.History_World_Roots_List_index = i
-                    bpy.ops.crafter.reload_history_worlds_list()
-                    for j in range(len(addon_prefs.History_World_Versions_List)):
-                        if addon_prefs.History_World_Versions_List[j].name == world_now[1]:
-                            addon_prefs.History_World_Versions_List_index = j
-                            bpy.ops.crafter.reload_history_worlds_list()
-                            for k in range(len(addon_prefs.History_World_Saves_List)):
-                                if addon_prefs.History_World_Saves_List[k].name == world_now[0]:
-                                    addon_prefs.History_World_Saves_List_index = k
-                                    bpy.ops.crafter.reload_history_worlds_list()
-                                    break
-                            break
-                    break
+                    if len(addon_prefs.History_World_Saves_List) > 0:
+                        if addon_prefs.History_World_Saves_List_index < 0 or addon_prefs.History_World_Saves_List_index >= len(addon_prefs.History_World_Saves_List):
+                            addon_prefs.History_World_Saves_List_index = 0
+                        for settings in json_history_worlds[addon_prefs.History_World_Roots_List[addon_prefs.History_World_Roots_List_index].name][0][addon_prefs.History_World_Saves_List[addon_prefs.History_World_Saves_List_index].name]["settings"]:
+                            history_world_setting = addon_prefs.History_World_Settings_List.add()
+                            history_world_setting.name = f"{settings[0][0]} {settings[0][1]} {settings[0][2]} {settings[1][0]} {settings[1][1]} {settings[1][2]}" 
+            else:
+                addon_prefs.is_Undivided = False
+                for version in json_history_worlds[addon_prefs.History_World_Roots_List[addon_prefs.History_World_Roots_List_index].name]:
+                    history_world_version = addon_prefs.History_World_Versions_List.add()
+                    history_world_version.name = version
+                if len(addon_prefs.History_World_Versions_List) > 0:
+                    if addon_prefs.History_World_Versions_List_index < 0 or addon_prefs.History_World_Versions_List_index >= len(addon_prefs.History_World_Versions_List):
+                        addon_prefs.History_World_Versions_List_index = 0
+                    for save in json_history_worlds[addon_prefs.History_World_Roots_List[addon_prefs.History_World_Roots_List_index].name][addon_prefs.History_World_Versions_List[addon_prefs.History_World_Versions_List_index].name]:
+                        history_world_save = addon_prefs.History_World_Saves_List.add()
+                        history_world_save.name = save
+                    if len(addon_prefs.History_World_Saves_List) > 0:
+                        if addon_prefs.History_World_Saves_List_index < 0 or addon_prefs.History_World_Saves_List_index >= len(addon_prefs.History_World_Saves_List):
+                            addon_prefs.History_World_Saves_List_index = 0
+                        for settings in json_history_worlds[addon_prefs.History_World_Roots_List[addon_prefs.History_World_Roots_List_index].name][addon_prefs.History_World_Versions_List[addon_prefs.History_World_Versions_List_index].name][addon_prefs.History_World_Saves_List[addon_prefs.History_World_Saves_List_index].name]:
+                            history_world_setting = addon_prefs.History_World_Settings_List.add()
+                            history_world_setting.name = f"{settings[0][0]} {settings[0][1]} {settings[0][2]} {settings[1][0]} {settings[1][1]} {settings[1][2]}" 
 
         return {'FINISHED'}
 
@@ -588,21 +630,7 @@ class VIEW3D_OT_UseCrafterHistoryWorlds(bpy.types.Operator):#使用历史世界
     @classmethod
     def poll(cls, context: bpy.types.Context):
         return True
-    def execute(self, context):
-        addon_prefs = context.preferences.addons[__addon_name__].preferences
-
-        if len(addon_prefs.History_World_Saves_List) > 0:
-            dir_root = addon_prefs.History_World_Roots_List[addon_prefs.History_World_Roots_List_index].name
-            dir_version = os.path.join(dir_root,"versions",addon_prefs.History_World_Versions_List[addon_prefs.History_World_Versions_List_index].name)
-            dir_save = os.path.join(dir_version,"saves",addon_prefs.History_World_Saves_List[addon_prefs.History_World_Saves_List_index].name)
-            addon_prefs.World_Path = dir_save
-            if len(addon_prefs.History_World_Settings_List) > 0:
-                settings = addon_prefs.History_World_Settings_List[addon_prefs.History_World_Settings_List_index].name
-                setting = settings.split(" ")
-                addon_prefs.XYZ_1 = (int(setting[0]),int(setting[1]),int(setting[2]))
-                addon_prefs.XYZ_2 = (int(setting[3]),int(setting[4]),int(setting[5]))
-        return {'FINISHED'}
-
+    
     def invoke(self, context, event):
         addon_prefs = context.preferences.addons[__addon_name__].preferences
 
@@ -623,46 +651,57 @@ class VIEW3D_OT_UseCrafterHistoryWorlds(bpy.types.Operator):#使用历史世界
             json_history_worlds = json.load(file)
         if type(json_history_worlds) == list:
             json_history_worlds = {}
+        # 整理json
         for root in list(json_history_worlds):
             #地址不存在则移除该root
             if not os.path.exists(root):
                 del json_history_worlds[root]
                 continue
-
-            for version in list(json_history_worlds[root]):
-                #版本不存在则移除该version
-                if not os.path.exists(os.path.join(root, "versions", version)):
-                    del json_history_worlds[root][version]
-                    continue
-            dir_versions = os.path.join(root, "versions")
-            for version in os.listdir(dir_versions):
-                if os.path.isdir(os.path.join(dir_versions, version)):
-                    json_history_worlds[root].setdefault(version, {})
-            for version in json_history_worlds[root]:
-                dir_version = os.path.join(root, "versions", version)
-                dir_saves = os.path.join(dir_version, "saves")
-                if not os.path.exists(dir_saves):
-                    continue
-                for save in list(json_history_worlds[root][version]):
+            if type(json_history_worlds[root]) == list:#判断是否版本隔离
+                for save in list(json_history_worlds[root][0]):
                     #存档不存在则移除该save
-                    if not os.path.exists(os.path.join(dir_saves, save)):
-                        del json_history_worlds[root][version][save]
+                    if not os.path.exists(os.path.join(root, "saves", save)):
+                        del json_history_worlds[root][0][save]
                         continue
-                for save in os.listdir(dir_saves):
-                    if os.path.isdir(os.path.join(dir_saves, save)):
-                        json_history_worlds[root][version].setdefault(save, [])
-        
+                    #加入新找到的save
+                    for save in os.listdir(os.path.join(root, "saves")):
+                        if os.path.isdir(os.path.join(root, "saves", save)):
+                            json_history_worlds[root][0].setdefault(save, {})
+            else:
+                for version in list(json_history_worlds[root]):
+                    #版本不存在则移除该version
+                    if not os.path.exists(os.path.join(root, "versions", version)):
+                        del json_history_worlds[root][version]
+                        continue
+                    #存档不存在则移除该save
+                    dir_version = os.path.join(root, "versions", version)
+                    dir_saves = os.path.join(dir_version, "saves")
+                    for save in list(json_history_worlds[root][version]):
+                        if not os.path.exists(os.path.join(dir_saves, save)):
+                            del json_history_worlds[root][version][save]
+                            continue
+                    #加入新找到的save
+                    if os.path.exists(dir_saves):
+                        for save in os.listdir(dir_saves):
+                            if os.path.isdir(os.path.join(dir_saves, save)):
+                                json_history_worlds[root][version].setdefault(save, [])
+        # 清理最近世界历史记录
         for i in range(len(json_latest_worlds)-1,-1,-1):
             world = json_latest_worlds[i].split("|")
             if not world[2] in json_history_worlds:
                 del json_latest_worlds[i]
                 continue
-            if not world[1] in json_history_worlds[world[2]]:
-                del json_latest_worlds[i]
-                continue
-            if not world[0] in json_history_worlds[world[2]][world[1]]:
-                del json_latest_worlds[i]
-                continue
+            if type(json_history_worlds[world[2]]) == list:#判断是否版本隔离
+                if not world[0] in json_history_worlds[world[2]][0]:
+                    del json_latest_worlds[i]
+                    continue
+            else:#版本隔离
+                if not world[1] in json_history_worlds[world[2]]:
+                    del json_latest_worlds[i]
+                    continue
+                if not world[0] in json_history_worlds[world[2]][world[1]]:
+                    del json_latest_worlds[i]
+                    continue
 
         with open(dir_json_history_worlds, 'w', encoding='utf-8') as file:
             json.dump(json_history_worlds, file, indent=4)
@@ -673,12 +712,11 @@ class VIEW3D_OT_UseCrafterHistoryWorlds(bpy.types.Operator):#使用历史世界
         #刷新list
         if len(json_latest_worlds) > 0:
             bpy.ops.crafter.reload_latest_worlds_list()
-            bpy.ops.crafter.reload_history_worlds_list()
         else:
             bpy.ops.crafter.reload_history_worlds_list()
                         
         return context.window_manager.invoke_props_dialog(self)
-
+    
     def draw(self, context):
         addon_prefs = context.preferences.addons[__addon_name__].preferences
         layout = self.layout
@@ -691,14 +729,46 @@ class VIEW3D_OT_UseCrafterHistoryWorlds(bpy.types.Operator):#使用历史世界
             layout.label(text="Minecraft Saves")
             row_root = min(len(addon_prefs.History_World_Roots_List),4)
             layout.template_list("VIEW3D_UL_CrafterHistoryWorldRootsList", "", addon_prefs, "History_World_Roots_List", addon_prefs, "History_World_Roots_List_index", rows=row_root)
-        if len(addon_prefs.History_World_Versions_List) > 0:
-            row_version = min(len(addon_prefs.History_World_Versions_List),4)
-            layout.template_list("VIEW3D_UL_CrafterHistoryWorldVersionsList", "", addon_prefs, "History_World_Versions_List", addon_prefs, "History_World_Versions_List_index", rows=row_version)
+        if addon_prefs.is_Undivided:
+            if len(addon_prefs.Undivided_Vsersions_List) > 0:
+                row_version = min(len(addon_prefs.Undivided_Vsersions_List),4)
+                layout.template_list("VIEW3D_UL_CrafterDividedVersions", "", addon_prefs, "Undivided_Vsersions_List", addon_prefs, "Undivided_Vsersions_List_index", rows=row_version)
+            pass
+        else:
+            if len(addon_prefs.History_World_Versions_List) > 0:
+                row_version = min(len(addon_prefs.History_World_Versions_List),4)
+                layout.template_list("VIEW3D_UL_CrafterHistoryWorldVersionsList", "", addon_prefs, "History_World_Versions_List", addon_prefs, "History_World_Versions_List_index", rows=row_version)
         if len(addon_prefs.History_World_Saves_List) > 0:
             row_save = min(len(addon_prefs.History_World_Saves_List),4)
             layout.template_list("VIEW3D_UL_CrafterHistoryWorldSavesList", "", addon_prefs, "History_World_Saves_List", addon_prefs, "History_World_Saves_List_index", rows=row_save)
         if len(addon_prefs.History_World_Settings_List) > 0:
-            layout.template_list("VIEW3D_UL_CrafterHistoryWorldSettingsList", "", addon_prefs, "History_World_Settings_List", addon_prefs, "History_World_Settings_List_index", rows=10)
+            layout.template_list("VIEW3D_UL_CrafterHistoryWorldSettingsList", "", addon_prefs, "History_World_Settings_List", addon_prefs, "History_World_Settings_List_index", rows=1,maxrows=10)
+
+    def execute(self, context):
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
+
+        if len(addon_prefs.History_World_Saves_List) > 0:
+            dir_root = addon_prefs.History_World_Roots_List[addon_prefs.History_World_Roots_List_index].name
+            dir_undivided_saves = os.path.join(dir_root,"saves")
+            if os.path.exists(dir_undivided_saves):
+                dir_save = os.path.join(dir_undivided_saves,addon_prefs.History_World_Saves_List[addon_prefs.History_World_Saves_List_index].name)
+            else:
+                dir_version = os.path.join(dir_root,"versions",addon_prefs.History_World_Versions_List[addon_prefs.History_World_Versions_List_index].name)
+                dir_save = os.path.join(dir_version,"saves",addon_prefs.History_World_Saves_List[addon_prefs.History_World_Saves_List_index].name)
+            addon_prefs.World_Path = dir_save
+            if len(addon_prefs.History_World_Settings_List) > 0:
+                settings = addon_prefs.History_World_Settings_List[addon_prefs.History_World_Settings_List_index].name
+                setting = settings.split(" ")
+                addon_prefs.XYZ_1 = (int(setting[0]),int(setting[1]),int(setting[2]))
+                addon_prefs.XYZ_2 = (int(setting[3]),int(setting[4]),int(setting[5]))
+        return {'FINISHED'}
+
+class VIEW3D_UL_CrafterDividedVersions(bpy.types.UIList):
+     def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
+        text = item.name
+        index_na = text.rfind("\\")
+        text = text[index_na+1:]
+        layout.label(text=text)
 
 class VIEW3D_UL_CrafterGameResources(bpy.types.UIList):
      def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
@@ -942,24 +1012,32 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             if not addon_prefs.isLODAutoCenter:
                 col_lod_2.prop(addon_prefs, "LODCenterX")
                 col_lod_2.prop(addon_prefs, "LODCenterZ")
+        # 无版本隔离选择
+        if self.version == "Blender-Python-Crafter-None":
+            layout.label(text="Versions")
+            row_undivided = layout.row()
+            row_undivided.template_list("VIEW3D_UL_CrafterDividedVersions","",addon_prefs,"Undivided_Vsersions_List",addon_prefs,"Undivided_Vsersions_List_index",rows=1,)
 
-        row_resources_use = layout.row()
-        col_use_list = row_resources_use.column()
-        col_use_list.template_list("VIEW3D_UL_CrafterGameResources", "", addon_prefs, "Game_Resources_List", addon_prefs, "Game_Resources_List_index", rows=1)
-        col_use_ops = row_resources_use.column(align=True)
-        if len (addon_prefs.Game_Resources_List) > 0:
-            col_use_ops.operator("crafter.ban_game_resource", text="", icon="REMOVE")
-        if len (addon_prefs.Game_Resources_List) > 1:
-            col_use_ops.separator()
-            col_use_ops.operator("crafter.up_game_resource", text="", icon="TRIA_UP")
-            col_use_ops.operator("crafter.down_game_resource", text="", icon="TRIA_DOWN")
+        # 资源包列表
+        if len(addon_prefs.Game_Resources_List) + len(addon_prefs.Game_unuse_Resources_List) > 0:
+            layout.label(text="Resources List")
+            row_resources_use = layout.row()
+            col_use_list = row_resources_use.column()
+            col_use_list.template_list("VIEW3D_UL_CrafterGameResources", "", addon_prefs, "Game_Resources_List", addon_prefs, "Game_Resources_List_index", rows=1)
+            col_use_ops = row_resources_use.column(align=True)
+            if len (addon_prefs.Game_Resources_List) > 0:
+                col_use_ops.operator("crafter.ban_game_resource", text="", icon="REMOVE")
+            if len (addon_prefs.Game_Resources_List) > 1:
+                col_use_ops.separator()
+                col_use_ops.operator("crafter.up_game_resource", text="", icon="TRIA_UP")
+                col_use_ops.operator("crafter.down_game_resource", text="", icon="TRIA_DOWN")
 
-        row_resources_unuse = layout.row()
-        col_unuse_list = row_resources_unuse.column()
-        col_unuse_list.template_list("VIEW3D_UL_CrafterGameUnuseResources", "", addon_prefs, "Game_unuse_Resources_List", addon_prefs, "Game_unuse_Resources_List_index", rows=1)
-        col_unuse_ops = row_resources_unuse.column()
-        if len (addon_prefs.Game_unuse_Resources_List) > 0:
-            col_unuse_ops.operator("crafter.use_game_resource", text="", icon="ADD")
+            row_resources_unuse = layout.row()
+            col_unuse_list = row_resources_unuse.column()
+            col_unuse_list.template_list("VIEW3D_UL_CrafterGameUnuseResources", "", addon_prefs, "Game_unuse_Resources_List", addon_prefs, "Game_unuse_Resources_List_index", rows=1)
+            col_unuse_ops = row_resources_unuse.column()
+            if len (addon_prefs.Game_unuse_Resources_List) > 0:
+                col_unuse_ops.operator("crafter.use_game_resource", text="", icon="ADD")
 
     def invoke(self, context, event):
         addon_prefs = context.preferences.addons[__addon_name__].preferences
@@ -972,27 +1050,45 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             self.report({'ERROR'}, "It's not a world path!")
             return {"CANCELLED"}
         
-        # 检查游戏文件路径
-        versionPath = os.path.dirname(os.path.dirname(worldPath))
-        dir_not_diveded_versions = os.path.join(versionPath, "versions")
+        #初始化路径
+        jarPath = "Blender-Python-Crafter-None"
+        versionName = "Blender-Python-Crafter-None"
+        # 计算游戏文件路径
+        dir_saves = os.path.dirname(worldPath)
+        dir_back_saves = os.path.dirname(dir_saves)
 
-        if os.path.exists(dir_not_diveded_versions):
-            self.report({"ERROR"},"现在白给还没做无版本隔离的支持，所以忠城这边暂时也没做")
-            return {"CANCELLED"}
-            self.report({"INFO"},"Detected version isolation is not enabled")
-            version = "No version isolation"
-            dot_minecraftPath = os.path.dirname(versionPath)
+        if os.path.basename(dir_back_saves) == ".minecraft":
+            dir_dot_minecraft = dir_back_saves
+            dir_versions = os.path.join(dir_dot_minecraft,"versions")
+            list_versions = os.listdir(dir_versions)
+            if len(list_versions) == 0:
+                self.report({'ERROR'}, "Can't find any versions!")
+                return {"CANCELLED"}
+            reload_Undivided_Vsersions(context=context,dir_versions=dir_versions)
+            dir_resourcepacks = os.path.join(dir_dot_minecraft,"resourcepacks")
+            dir_mods = os.path.join(dir_dot_minecraft,"mods")
+
         else:
-            version = os.path.basename(versionPath)
-            jarPath = os.path.join(versionPath, version+".jar")
+            versionPath = dir_back_saves
+            versionName = os.path.basename(versionPath)
+            jarPath = os.path.join(versionPath, versionName+".jar")
             if not os.path.exists(jarPath):
                 self.report({'ERROR'}, "Please set the save file into the Minecraft game folder!")
                 return {"CANCELLED"}
-            modsPath = os.path.join(versionPath, "mods")
+            dir_mods = os.path.join(versionPath, "mods")
             dir_resourcepacks = os.path.join(versionPath, "resourcepacks")
-            dot_minecraftPath = os.path.dirname(os.path.dirname(versionPath))
-        
-        list_dir_resourcepacks = os.listdir(dir_resourcepacks)
+            dir_versions = os.path.dirname(versionPath)
+            dir_dot_minecraft = os.path.dirname(dir_versions)
+        #储存信息到self
+        self.worldPath = worldPath
+        self.jarPath = jarPath
+        self.modsPath = dir_mods
+
+        self.save = os.path.basename(worldPath)
+        self.version = versionName
+        self.dot_minecraftPath = dir_dot_minecraft
+        # 获取资源包
+        list_resourcepacks = os.listdir(dir_resourcepacks)
         dir_json_resourcepacks = os.path.join(dir_cafter_data, "resourcepacks.json")
         
         if os.path.exists(dir_json_resourcepacks):
@@ -1009,7 +1105,7 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         json_resourcepacks[dir_saves][0] =[]
         json_resourcepacks[dir_saves][1] =[]
 
-        for resourcepack in list_dir_resourcepacks:
+        for resourcepack in list_resourcepacks:
             dir_resourcepack = os.path.join(dir_resourcepacks, resourcepack)
             if (not dir_resourcepack in resourcepacks_use_copy) and (not dir_resourcepack in resourcepacks_unuse_copy):
                 if dir_resourcepack.endswith(".zip"):
@@ -1026,30 +1122,30 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         
         bpy.ops.crafter.reload_game_resources()
         
-
-        self.worldPath = worldPath
-        self.jarPath = jarPath
-        self.modsPath = modsPath
-
-        self.save = os.path.basename(worldPath)
-        self.version = version
-        self.dot_minecraftPath = dot_minecraftPath
-        
         return context.window_manager.invoke_props_dialog(self)
+    
     def execute(self, context: bpy.types.Context):
         addon_prefs = context.preferences.addons[__addon_name__].preferences
-    
+
+        if self.version == "Blender-Python-Crafter-None":
+            undivided = True
+            dir_version = addon_prefs.Undivided_Vsersions_List[addon_prefs.Undivided_Vsersions_List_index].name
+            version = os.path.basename(dir_version)
+            jarPath = os.path.join(dir_version, version + ".jar")
+
+        else:
+            jarPath = self.jarPath
+            version = self.version
         worldPath = self.worldPath
-        jarPath = self.jarPath
         modsPath = self.modsPath
         resourcepacksPaths = []
+
+        save = self.save
+        dot_minecraftPath = self.dot_minecraftPath
 
         for resourcepacksPath in addon_prefs.Game_Resources_List:
             resourcepacksPaths.append(resourcepacksPath.name)
         
-        save = self.save
-        version = self.version
-        dot_minecraftPath = self.dot_minecraftPath
         #写入conifg.json
         point_cloud_mode = addon_prefs.Point_Cloud_Mode
         if point_cloud_mode:
@@ -1099,91 +1195,90 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             #     config.write(f"{key} = {value}\n")
             json.dump(worldconfig, config, indent=4)
 
-        return {"FINISHED"}
-        
-        # 删去之前导出的obj
-        dir_importer = os.path.join(dir_init_main, "importer")
-        dir_exe_importer = os.path.join(dir_importer, "WorldImporter.exe")
-        for file in os.listdir(dir_importer):
-            if file.endswith(".obj"):
-                os.remove(os.path.join(dir_importer, file))
+# '''
+#         # 删去之前导出的obj
+#         dir_importer = os.path.join(dir_init_main, "importer")
+#         dir_exe_importer = os.path.join(dir_importer, "WorldImporter.exe")
+#         for file in os.listdir(dir_importer):
+#             if file.endswith(".obj"):
+#                 os.remove(os.path.join(dir_importer, file))
 
-        #生成obj
-        start_time = time.perf_counter()#记录开始时间
+#         #生成obj
+#         start_time = time.perf_counter()#记录开始时间
 
-        if os.path.exists(dir_exe_importer):
-            try:
-                # 在新的进程中运行WorldImporter.exe
-                CREATE_NEW_PROCESS_GROUP = 0x00000200
-                DETACHED_PROCESS = 0x00000008
-                process = subprocess.Popen(
-                    [dir_exe_importer],
-                    cwd=dir_importer,
-                    creationflags=CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS,
-                    shell=True
-                )
-                self.report({'INFO'}, f"WorldImporter.exe started in a new process")
-                #等待进程结束
-                process.wait()
-            except Exception as e:
-                self.report({'ERROR'}, f"Error: {e}")
-                return {"CANCELLED"}
-            used_time = time.perf_counter() - start_time
-            self.report({'INFO'}, i18n("At") + " " + str(used_time)[:6] + "s,"+ i18n("object generated"))
+#         if os.path.exists(dir_exe_importer):
+#             try:
+#                 # 在新的进程中运行WorldImporter.exe
+#                 CREATE_NEW_PROCESS_GROUP = 0x00000200
+#                 DETACHED_PROCESS = 0x00000008
+#                 process = subprocess.Popen(
+#                     [dir_exe_importer],
+#                     cwd=dir_importer,
+#                     creationflags=CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS,
+#                     shell=True
+#                 )
+#                 self.report({'INFO'}, f"WorldImporter.exe started in a new process")
+#                 #等待进程结束
+#                 process.wait()
+#             except Exception as e:
+#                 self.report({'ERROR'}, f"Error: {e}")
+#                 return {"CANCELLED"}
+#             used_time = time.perf_counter() - start_time
+#             self.report({'INFO'}, i18n("At") + " " + str(used_time)[:6] + "s,"+ i18n("object generated"))
 
-            #导入obj
-            have_obj = False
-            real_name_dic = {}
-            material_should_delete = []
-            for file in os.listdir(dir_importer):
-                if file.endswith(".obj"):
-                    pre_import_objects = set(bpy.data.objects)#纪录当前场景中的所有对象
+#             #导入obj
+#             have_obj = False
+#             real_name_dic = {}
+#             material_should_delete = []
+#             for file in os.listdir(dir_importer):
+#                 if file.endswith(".obj"):
+#                     pre_import_objects = set(bpy.data.objects)#纪录当前场景中的所有对象
                     
-                    bpy.ops.wm.obj_import(filepath=os.path.join(dir_importer, file))
-                    bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
-                    have_obj = True
+#                     bpy.ops.wm.obj_import(filepath=os.path.join(dir_importer, file))
+#                     bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
+#                     have_obj = True
                     
-                    post_import_objects = set(bpy.data.objects)
-                    new_objects = post_import_objects - pre_import_objects# 计算新增对象
-                    imported_objects = list(new_objects)
-                    for object in imported_objects:
-                        for i in range(len(object.data.materials)):
-                            material = object.data.materials[i]
-                            real_material_name = fuq_bl_dot_number(material.name)
-                            if real_material_name in real_name_dic:
-                                object.data.materials[i] = bpy.data.materials[real_name_dic[real_material_name]]
-                                material_should_delete.append(material.name)
-                            else:
-                                real_name_dic[real_material_name] = material.name
-                        add_to_mcmts_collection(object=object,context=context)
+#                     post_import_objects = set(bpy.data.objects)
+#                     new_objects = post_import_objects - pre_import_objects# 计算新增对象
+#                     imported_objects = list(new_objects)
+#                     for object in imported_objects:
+#                         for i in range(len(object.data.materials)):
+#                             material = object.data.materials[i]
+#                             real_material_name = fuq_bl_dot_number(material.name)
+#                             if real_material_name in real_name_dic:
+#                                 object.data.materials[i] = bpy.data.materials[real_name_dic[real_material_name]]
+#                                 material_should_delete.append(material.name)
+#                             else:
+#                                 real_name_dic[real_material_name] = material.name
+#                         add_to_mcmts_collection(object=object,context=context)
                     
-                    used_time = time.perf_counter() - start_time
-                    self.report({'INFO'}, i18n("At") + " " + str(used_time)[:6] + "s,"+ file + i18n("imported"))
-            if not have_obj:
-                self.report({'ERROR'}, "WorldImporter didn't export obj!")
-                return {"CANCELLED"}
+#                     used_time = time.perf_counter() - start_time
+#                     self.report({'INFO'}, i18n("At") + " " + str(used_time)[:6] + "s,"+ file + i18n("imported"))
+#             if not have_obj:
+#                 self.report({'ERROR'}, "WorldImporter didn't export obj!")
+#                 return {"CANCELLED"}
             
-            for material in material_should_delete:
-                bpy.data.materials.remove(bpy.data.materials[material])
+#             for material in material_should_delete:
+#                 bpy.data.materials.remove(bpy.data.materials[material])
             
-        #完成导入
-        used_time = time.perf_counter() - start_time
-        self.report({'INFO'}, i18n("Importing finished.Time used:") + str(used_time)[:6] + "s")
-        # 自动定位到视图
-        for window in context.window_manager.windows:
-            for area in window.screen.areas:
-                if area.type == 'VIEW_3D':
-                    # 需要同时覆盖window/area/region三个上下文参数
-                    for region in area.regions:
-                        if region.type == 'WINDOW':  # 只处理主区域
-                            try:
-                                with context.temp_override(window=window, area=area, region=region):
-                                    bpy.ops.view3d.view_selected()
-                            except:
-                                pass
-                            break
+#         #完成导入
+#         used_time = time.perf_counter() - start_time
+#         self.report({'INFO'}, i18n("Importing finished.Time used:") + str(used_time)[:6] + "s")
+#         # 自动定位到视图
+#         for window in context.window_manager.windows:
+#             for area in window.screen.areas:
+#                 if area.type == 'VIEW_3D':
+#                     # 需要同时覆盖window/area/region三个上下文参数
+#                     for region in area.regions:
+#                         if region.type == 'WINDOW':  # 只处理主区域
+#                             try:
+#                                 with context.temp_override(window=window, area=area, region=region):
+#                                     bpy.ops.view3d.view_selected()
+#                             except:
+#                                 pass
+#                             break
                             
-                
+#        '''         
         # 保存历史世界
         dir_json_history_worlds = os.path.join(dir_cafter_data, "history_worlds.json")
         # 读取json，若不存在则创建一个空的json文件
@@ -1192,10 +1287,17 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
                 json_history_worlds = json.load(file)
         else:
             json_history_worlds = {}
-        json_history_worlds.setdefault(dot_minecraftPath, {})
-        json_history_worlds[dot_minecraftPath].setdefault(version, {})
-        json_history_worlds[dot_minecraftPath][version].setdefault(save, [])
-        json_history_settings = json_history_worlds[dot_minecraftPath][version][save]
+        # 根据是否隔离，按不同方式保存历史记录
+        if undivided:
+            json_history_worlds.setdefault(dot_minecraftPath, [{}])
+            undivided_list = json_history_worlds[dot_minecraftPath][0].setdefault(save,{})
+            json_history_settings = undivided_list.setdefault("settings", [])
+            undivided_list["version"] = version
+        else:
+            json_history_worlds.setdefault(dot_minecraftPath, {})
+            json_history_worlds[dot_minecraftPath].setdefault(version, {})
+            json_history_worlds[dot_minecraftPath][version].setdefault(save, [])
+            json_history_settings = json_history_worlds[dot_minecraftPath][version][save]
         world_settings_now = [list(addon_prefs.XYZ_1), list(addon_prefs.XYZ_2)]
         if len(json_history_settings) == 0:
             json_history_settings.append(None)
