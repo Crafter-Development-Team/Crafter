@@ -1,82 +1,91 @@
 {
-    "banlist_key_words":[
+    "ban_keyw":[
     ],
-    "banlist":[
+    "ban":[
     ],
     "water":{
-        "full_name":[
+        "full":[
             "water",
             "water_flow",
             "water_still"
         ]
     },
+    "sss_tran":{
+        "keyw":[
+            "bamboo_stalk",
+            "cactus_side",
+            "cactus_top",
+            "cocoa_stage"
+        ]
+    },
     "sss_tran_move": {
-        "banlist":[
-            "oak_leaves",
-            "spruce_leaves",
-            "birch_leaves",
-            "jungle_leaves",
-            "acacia_leaves",
-            "dark_oak_leaves",
+        "ban_keyw":[
+        ],
+        "keyw":[
             "azalea_leaves",
-            "cherry_leaves"
-        ],
-        "key_words":[
-            "leaves"
-        ],
-        "full_name":[
             "flowering_azalea_leaves",
-            "mangrove_leaves"
+            "cherry_leaves",
+            "pale_oak_leaves"
         ]
     },
     "color_sss_tran_move":{
-        "full_name":[
+        "ban_keyw":[
+            "pale_oak_leaves"
+        ],
+        "keyw":[
             "oak_leaves",
-            "spruce_leaves",
-            "birch_leaves",
             "jungle_leaves",
             "acacia_leaves",
             "dark_oak_leaves",
-            "azalea_leaves",
-            "cherry_leaves"
+            "mangrove_leaves",
+            "spruce_leaves",
+            "birch_leaves"
         ]
     },
     "color":{
-        "key_words":[
+        "keyw":[
             "grass_block_top",
             "grass_block_side_overlay"
         ]
     },
     "tran_move":{
-        "key_words":[
+        "keyw":[
+            "azalea_plant",
+            "azalea_side",
+            "azalea_top",
+            "flowering_azalea_side",
+            "flowering_azalea_top",
+            "spore_blossom",
+            "bamboo_stage",
+            "sugar_cane",
+            "beetroots_stage",
+            "carrots_stage",
+            "potatoes_stage",
             "wheat_stage"
-        ],
-        "full_name":[
-            "lilac_top",
-            "lilac_bottom",
-            "poppy",
-            "dandelion",
-            "azure_bluet",
-            "seagrass",
-            "oxeye_daisy",
-            "lily_of_the_valley"
         ]
     },
     "color_tran_move":{
-        "full_name":[
+        "keyw":[
+            "melon_stem",
+            "attached_melon_stem",
+            "pumpkin_stem",
+            "attached_pumpkin_stem",
+            "lily_pad",
+            "short_grass"
+        ],
+        "full":[
             "grass",
-            "short_grass",
             "tall_grass_top",
             "tall_grass_bottom",
             "fern",
-            "vine",
-            "lily_pad"
+            "vine"
         ]
     },
     "no_rain":{
-        "key_words":[
+        "keyw":[
             "lava_still",
-            "lava_flow"
+            "lava_flow",
+            "lava"
         ]
     }
 }

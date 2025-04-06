@@ -166,33 +166,33 @@ def find_CO_group(classification_list,real_block_name,group_CO):
     '''
     found = False
     for group_name in classification_list:
-        if group_name == "banlist" or group_name == "banlist_key_words":
+        if group_name == "ban" or group_name == "ban_keyw":
             continue
         banout = False
-        if "banlist_key_words" in classification_list[group_name]:
-            for item in classification_list[group_name]["banlist"]:
+        if "ban_keyw" in classification_list[group_name]:
+            for item in classification_list[group_name]["ban_keyw"]:
                 if item in real_block_name:
                     banout = True
                     break
         if banout:
             continue
-        if "banlist" in classification_list[group_name]:
-            for item in classification_list[group_name]["banlist"]:
+        if "ban" in classification_list[group_name]:
+            for item in classification_list[group_name]["ban"]:
                 if item == real_block_name:
                     banout = True
                     break
         if banout:
             continue
-        if "full_name" in classification_list[group_name]:
-            for item in classification_list[group_name]["full_name"]:
+        if "full" in classification_list[group_name]:
+            for item in classification_list[group_name]["full"]:
                 if item == real_block_name:
                     group_CO.node_tree = bpy.data.node_groups["CO-" + group_name]
                     found = True
                     break
         if found:
             break
-        if "key_words" in classification_list[group_name]:
-            for item in classification_list[group_name]["key_words"]:
+        if "keyw" in classification_list[group_name]:
+            for item in classification_list[group_name]["keyw"]:
                 if item in real_block_name:
                     group_CO.node_tree = bpy.data.node_groups["CO-" + group_name]
                     found = True
@@ -668,13 +668,19 @@ class VIEW3D_OT_UseCrafterHistoryWorlds(bpy.types.Operator):#使用历史世界
                         if os.path.isdir(os.path.join(root, "saves", save)):
                             json_history_worlds[root][0].setdefault(save, {})
             else:
+                dir_versions = os.path.join(root, "versions")
+                # 添加版本
+                for version in os.listdir(dir_versions):
+                    if os.path.exists(os.path.join(dir_versions, version, version + ".jar")):
+                        print("setdefault",version)
+                        json_history_worlds[root].setdefault(version, {})
                 for version in list(json_history_worlds[root]):
                     #版本不存在则移除该version
-                    if not os.path.exists(os.path.join(root, "versions", version)):
+                    if not os.path.exists(os.path.join(dir_versions, version)):
                         del json_history_worlds[root][version]
                         continue
                     #存档不存在则移除该save
-                    dir_version = os.path.join(root, "versions", version)
+                    dir_version = os.path.join(dir_versions, version)
                     dir_saves = os.path.join(dir_version, "saves")
                     for save in list(json_history_worlds[root][version]):
                         if not os.path.exists(os.path.join(dir_saves, save)):
@@ -684,6 +690,7 @@ class VIEW3D_OT_UseCrafterHistoryWorlds(bpy.types.Operator):#使用历史世界
                     if os.path.exists(dir_saves):
                         for save in os.listdir(dir_saves):
                             if os.path.isdir(os.path.join(dir_saves, save)):
+                                print("++set",version,save)
                                 json_history_worlds[root][version].setdefault(save, [])
         # 清理最近世界历史记录
         for i in range(len(json_latest_worlds)-1,-1,-1):
@@ -1146,6 +1153,8 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             version = self.version
         worldPath = self.worldPath
         modsPath = self.modsPath
+        dir_version = os.path.dirname(jarPath)
+        versionJsonPath = os.path.join(dir_version, version + ".json")
         resourcepacksPaths = []
 
         save = self.save
@@ -1164,6 +1173,7 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         worldconfig = {
             "worldPath": worldPath,
             "jarPath": jarPath,
+            "versionJsonPath": versionJsonPath,
             "modsPath": modsPath,
             "resourcepacksPaths":resourcepacksPaths,
             "minX": min(addon_prefs.XYZ_1[0], addon_prefs.XYZ_2[0]),
@@ -1768,7 +1778,7 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
         COs = ["CO-"]
         classification_list = {}
         banlist = []
-        banlist_key_words = []
+        ban_keyw = []
         # 获取classification_list
         for filename in os.listdir(classification_folder_dir):
             file_path = os.path.join(classification_folder_dir, filename)
@@ -1777,16 +1787,16 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
                     with open(file_path, 'r', encoding='utf-8') as file:
                         data = json.load(file)
                         classification_list = make_json_together(classification_list, data)
-                        if "banlist" in data:
-                            banlist.extend(data["banlist"])
-                        if "banlist_key_words" in data:
-                            banlist_key_words.extend(data["banlist_key_words"])
+                        if "ban" in data:
+                            banlist.extend(data["ban"])
+                        if "ban_keyw" in data:
+                            ban_keyw.extend(data["ban_keyw"])
                 except Exception as e:
                     print(e)
         # 创建所有startswith(CO-)节点组
         group_CO = bpy.data.node_groups['CO-']
         for group_name in classification_list:
-            if group_name == "banlist" or group_name == "banlist_key_words":
+            if group_name == "ban" or group_name == "ban_keyw":
                 continue
             group_new = group_CO.copy()
             group_new.name = "CO-" + group_name
@@ -1857,7 +1867,7 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
             #     type_name = real_material_name[last____index+1:last_hen_index]
             # 如果在banlist里直接跳过
             ban = False
-            for ban_key in banlist_key_words:
+            for ban_key in ban_keyw:
                 if real_block_name in ban_key:
                     ban = True
                     break
