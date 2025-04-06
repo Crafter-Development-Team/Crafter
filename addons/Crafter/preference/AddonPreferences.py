@@ -89,6 +89,12 @@ class CrafterAddonPreferences(AddonPreferences):
                            default=True,)# type: ignore
     exportLightBlock: BoolProperty(name="Export Light Block",
                                    default=True,)# type: ignore
+    exportLightBlockOnly: BoolProperty(name="Only Export Light Block",
+                                       default=False,)# type: ignore
+    lightBlockSize: FloatProperty(name="Light Block Size",
+                                   default=0.05,
+                                   min=0.0001,
+                                   max=1.0)# type: ignore
     allowDoubleFace: BoolProperty(name="Allow Double Face",
                                   default=False,)# type: ignore
     exportFullModel: BoolProperty(name="As Chunk",
@@ -118,6 +124,9 @@ class CrafterAddonPreferences(AddonPreferences):
     LOD3renderDistance: IntProperty(name="LOD3 Distance",
                                    default=6,
                                    min=0)# type: ignore
+    shell: BoolProperty(name="Shell ",
+                        description="Enable this option when reporting a bug and include the shell output content",
+                        default=True,)# type: ignore
 #==========加载资源包属性==========
     Resources_Plans_List: CollectionProperty(name="Resources Plans",type=ResourcePlan)#type: ignore
     Resources_Plans_List_index: IntProperty(name="Resources",

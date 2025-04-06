@@ -24,7 +24,9 @@ dictionary = {
         "Keep Boundary":"保留边界",
         "Strict Surface Pruning":"严格剔除面",
         "Cull Cave":"剔除洞穴",
-        "Export Light Block":"导出光照方块",
+        "Export Light Block":"导出光源方块",
+        "Only Export Light Block":"只导出光源方块",
+        "Light Block Size":"光源方块大小",
         "Allow Double Face":"允许重叠面",
         "As Chunk":"分块",
         "Chunk Size":"分块大小",
@@ -69,6 +71,7 @@ dictionary = {
         "Import the solid area":"导入实心区域",
         "Starting coordinates":"起始坐标",
         "Ending coordinates":"结束坐标",
+        "Enable this option when reporting a bug and include the shell output content":"反馈bug时,请启用此项并附带shell输出的内容",
             #==========加载资源包==========
         "Load resources":"加载资源包",
         "Set texture interpolation":"设置纹理插值",
@@ -95,8 +98,8 @@ dictionary = {
         "Haven't history worlds":"无历史世界记录",
         "WorldImporter.exe started in a new process":"WorldImporter.exe已在新进程启动",
         "At":"在",
+        "WorldImporter.exe finished":"WorldImporter.exe结束运行",
         "imported":"导入完毕",
-        "object generated":"obj生成完毕",
     }
 }
 

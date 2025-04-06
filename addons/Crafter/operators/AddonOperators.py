@@ -983,12 +983,19 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         col_1 = row.column()
         col_1.prop(addon_prefs, "useChunkPrecision")
         col_1.prop(addon_prefs, "strictDeduplication")
+        col_1.prop(addon_prefs, "allowDoubleFace")
         col_1.prop(addon_prefs, "exportLightBlock")
 
         col_2 = row.column()
         col_2.prop(addon_prefs, "keepBoundary")
         col_2.prop(addon_prefs, "cullCave")
-        col_2.prop(addon_prefs, "allowDoubleFace")
+        col_2.prop(addon_prefs, "shell")
+
+        if addon_prefs.exportLightBlock:
+            row_Light_Block = layout.row()
+            row_Light_Block.prop(addon_prefs, "exportLightBlockOnly")
+            row_Light_Block.prop(addon_prefs, "lightBlockSize")
+
 
         row_exportFullModel = layout.row()
         row_exportFullModel.prop(addon_prefs, "exportFullModel")
@@ -1134,6 +1141,7 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             jarPath = os.path.join(dir_version, version + ".jar")
 
         else:
+            undivided = False
             jarPath = self.jarPath
             version = self.version
         worldPath = self.worldPath
@@ -1158,7 +1166,6 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             "jarPath": jarPath,
             "modsPath": modsPath,
             "resourcepacksPaths":resourcepacksPaths,
-            "biomeMappingFile": "config\\jsons\\biomes.json",
             "minX": min(addon_prefs.XYZ_1[0], addon_prefs.XYZ_2[0]),
             "maxX": max(addon_prefs.XYZ_1[0], addon_prefs.XYZ_2[0]),
             "minY": min(addon_prefs.XYZ_1[1], addon_prefs.XYZ_2[1]),
@@ -1171,6 +1178,8 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             "strictDeduplication":addon_prefs.strictDeduplication,
             "cullCave":addon_prefs.cullCave,
             "exportLightBlock":addon_prefs.exportLightBlock,
+            "exportLightBlockOnly":addon_prefs.exportLightBlockOnly,
+            "lightBlockSize":addon_prefs.lightBlockSize,
             "allowDoubleFace":addon_prefs.allowDoubleFace,
             "exportFullModel":not addon_prefs.exportFullModel,
             "partitionSize":addon_prefs.partitionSize,
@@ -1195,90 +1204,88 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             #     config.write(f"{key} = {value}\n")
             json.dump(worldconfig, config, indent=4)
 
-# '''
-#         # 删去之前导出的obj
-#         dir_importer = os.path.join(dir_init_main, "importer")
-#         dir_exe_importer = os.path.join(dir_importer, "WorldImporter.exe")
-#         for file in os.listdir(dir_importer):
-#             if file.endswith(".obj"):
-#                 os.remove(os.path.join(dir_importer, file))
+        # 删去之前导出的obj
+        dir_importer = os.path.join(dir_init_main, "importer")
+        dir_exe_importer = os.path.join(dir_importer, "WorldImporter.exe")
+        for file in os.listdir(dir_importer):
+            if file.endswith(".obj"):
+                os.remove(os.path.join(dir_importer, file))
 
-#         #生成obj
-#         start_time = time.perf_counter()#记录开始时间
+        #生成obj
+        start_time = time.perf_counter()#记录开始时间
 
-#         if os.path.exists(dir_exe_importer):
-#             try:
-#                 # 在新的进程中运行WorldImporter.exe
-#                 CREATE_NEW_PROCESS_GROUP = 0x00000200
-#                 DETACHED_PROCESS = 0x00000008
-#                 process = subprocess.Popen(
-#                     [dir_exe_importer],
-#                     cwd=dir_importer,
-#                     creationflags=CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS,
-#                     shell=True
-#                 )
-#                 self.report({'INFO'}, f"WorldImporter.exe started in a new process")
-#                 #等待进程结束
-#                 process.wait()
-#             except Exception as e:
-#                 self.report({'ERROR'}, f"Error: {e}")
-#                 return {"CANCELLED"}
-#             used_time = time.perf_counter() - start_time
-#             self.report({'INFO'}, i18n("At") + " " + str(used_time)[:6] + "s,"+ i18n("object generated"))
+        if os.path.exists(dir_exe_importer):
+            try:
+                # 在新的进程中运行WorldImporter.exe
+                CREATE_NEW_PROCESS_GROUP = 0x00000200
+                DETACHED_PROCESS = 0x00000008
+                process = subprocess.Popen(
+                    [dir_exe_importer],
+                    cwd=dir_importer,
+                    creationflags=CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS,
+                    shell=addon_prefs.shell
+                )
+                self.report({'INFO'}, f"WorldImporter.exe started in a new process")
+                #等待进程结束
+                process.wait()
+            except Exception as e:
+                self.report({'ERROR'}, f"Error: {e}")
+                return {"CANCELLED"}
+            used_time = time.perf_counter() - start_time
+            self.report({'INFO'}, i18n("At") + " " + str(used_time)[:6] + "s,"+ i18n("WorldImporter.exe finished"))
 
-#             #导入obj
-#             have_obj = False
-#             real_name_dic = {}
-#             material_should_delete = []
-#             for file in os.listdir(dir_importer):
-#                 if file.endswith(".obj"):
-#                     pre_import_objects = set(bpy.data.objects)#纪录当前场景中的所有对象
+            #导入obj
+            have_obj = False
+            real_name_dic = {}
+            material_should_delete = []
+            for file in os.listdir(dir_importer):
+                if file.endswith(".obj"):
+                    pre_import_objects = set(bpy.data.objects)#纪录当前场景中的所有对象
                     
-#                     bpy.ops.wm.obj_import(filepath=os.path.join(dir_importer, file))
-#                     bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
-#                     have_obj = True
+                    bpy.ops.wm.obj_import(filepath=os.path.join(dir_importer, file))
+                    bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
+                    have_obj = True
                     
-#                     post_import_objects = set(bpy.data.objects)
-#                     new_objects = post_import_objects - pre_import_objects# 计算新增对象
-#                     imported_objects = list(new_objects)
-#                     for object in imported_objects:
-#                         for i in range(len(object.data.materials)):
-#                             material = object.data.materials[i]
-#                             real_material_name = fuq_bl_dot_number(material.name)
-#                             if real_material_name in real_name_dic:
-#                                 object.data.materials[i] = bpy.data.materials[real_name_dic[real_material_name]]
-#                                 material_should_delete.append(material.name)
-#                             else:
-#                                 real_name_dic[real_material_name] = material.name
-#                         add_to_mcmts_collection(object=object,context=context)
+                    post_import_objects = set(bpy.data.objects)
+                    new_objects = post_import_objects - pre_import_objects# 计算新增对象
+                    imported_objects = list(new_objects)
+                    for object in imported_objects:
+                        for i in range(len(object.data.materials)):
+                            material = object.data.materials[i]
+                            real_material_name = fuq_bl_dot_number(material.name)
+                            if real_material_name in real_name_dic:
+                                object.data.materials[i] = bpy.data.materials[real_name_dic[real_material_name]]
+                                material_should_delete.append(material.name)
+                            else:
+                                real_name_dic[real_material_name] = material.name
+                        add_to_mcmts_collection(object=object,context=context)
                     
-#                     used_time = time.perf_counter() - start_time
-#                     self.report({'INFO'}, i18n("At") + " " + str(used_time)[:6] + "s,"+ file + i18n("imported"))
-#             if not have_obj:
-#                 self.report({'ERROR'}, "WorldImporter didn't export obj!")
-#                 return {"CANCELLED"}
+                    used_time = time.perf_counter() - start_time
+                    self.report({'INFO'}, i18n("At") + " " + str(used_time)[:6] + "s,"+ file + i18n("imported"))
+            if not have_obj:
+                self.report({'ERROR'}, "WorldImporter didn't export obj!")
+                return {"CANCELLED"}
             
-#             for material in material_should_delete:
-#                 bpy.data.materials.remove(bpy.data.materials[material])
+            for material in material_should_delete:
+                bpy.data.materials.remove(bpy.data.materials[material])
             
-#         #完成导入
-#         used_time = time.perf_counter() - start_time
-#         self.report({'INFO'}, i18n("Importing finished.Time used:") + str(used_time)[:6] + "s")
-#         # 自动定位到视图
-#         for window in context.window_manager.windows:
-#             for area in window.screen.areas:
-#                 if area.type == 'VIEW_3D':
-#                     # 需要同时覆盖window/area/region三个上下文参数
-#                     for region in area.regions:
-#                         if region.type == 'WINDOW':  # 只处理主区域
-#                             try:
-#                                 with context.temp_override(window=window, area=area, region=region):
-#                                     bpy.ops.view3d.view_selected()
-#                             except:
-#                                 pass
-#                             break
+        #完成导入
+        used_time = time.perf_counter() - start_time
+        self.report({'INFO'}, i18n("Importing finished.Time used:") + str(used_time)[:6] + "s")
+        # 自动定位到视图
+        for window in context.window_manager.windows:
+            for area in window.screen.areas:
+                if area.type == 'VIEW_3D':
+                    # 需要同时覆盖window/area/region三个上下文参数
+                    for region in area.regions:
+                        if region.type == 'WINDOW':  # 只处理主区域
+                            try:
+                                with context.temp_override(window=window, area=area, region=region):
+                                    bpy.ops.view3d.view_selected()
+                            except:
+                                pass
+                            break
                             
-#        '''         
         # 保存历史世界
         dir_json_history_worlds = os.path.join(dir_cafter_data, "history_worlds.json")
         # 读取json，若不存在则创建一个空的json文件
