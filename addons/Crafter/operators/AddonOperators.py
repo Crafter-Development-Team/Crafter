@@ -672,7 +672,6 @@ class VIEW3D_OT_UseCrafterHistoryWorlds(bpy.types.Operator):#使用历史世界
                 # 添加版本
                 for version in os.listdir(dir_versions):
                     if os.path.exists(os.path.join(dir_versions, version, version + ".jar")):
-                        print("setdefault",version)
                         json_history_worlds[root].setdefault(version, {})
                 for version in list(json_history_worlds[root]):
                     #版本不存在则移除该version
@@ -690,7 +689,6 @@ class VIEW3D_OT_UseCrafterHistoryWorlds(bpy.types.Operator):#使用历史世界
                     if os.path.exists(dir_saves):
                         for save in os.listdir(dir_saves):
                             if os.path.isdir(os.path.join(dir_saves, save)):
-                                print("++set",version,save)
                                 json_history_worlds[root][version].setdefault(save, [])
         # 清理最近世界历史记录
         for i in range(len(json_latest_worlds)-1,-1,-1):
