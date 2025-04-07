@@ -1,4 +1,4 @@
-#Crafter
+# Crafter
 
 ## 维护插件注意事项
 
