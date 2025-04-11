@@ -57,7 +57,6 @@
             "flowering_azalea_top",
             "spore_blossom",
             "bamboo_stage",
-            "sugar_cane",
             "beetroots_stage",
             "carrots_stage",
             "potatoes_stage",
@@ -116,9 +115,15 @@
             "cherry_sapling",
             "pale_oak_sapling",
             "sweet_berry_bush_stage",
+            "seagrass",
             "tall_seagrass_top",
             "tall_seagrass_bottom",
             "cave_vines"
+        ]
+    },
+    "tran":{
+        "keyw":[
+            "sugar_cane"
         ]
     },
     "color_tran_move":{

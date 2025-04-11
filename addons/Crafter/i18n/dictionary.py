@@ -38,8 +38,8 @@ dictionary = {
         "LOD1 Distance":"LOD1距离",
         "LOD2 Distance":"LOD2距离",
         "LOD3 Distance":"LOD3距离",
-            #==========加载资源包==========
-        "Load Resources":"加载资源包",
+            #==========替换资源包==========
+        "Replace Resources":"替换资源包",
         "Resources":"资源包预设",
         "original":"原版",
         "Open Resources Plans":"打开资源包预设列表文件夹",
@@ -73,8 +73,8 @@ dictionary = {
         "Starting coordinates":"起始坐标",
         "Ending coordinates":"结束坐标",
         "Enable this option when reporting a bug and include the shell output content":"反馈bug时,请启用此项并附带shell输出的内容",
-            #==========加载资源包==========
-        "Load resources":"加载资源包",
+            #==========替换资源包==========
+        "Replace resources,but can only replace textures with the same name":"替换资源包,但只能替换同名纹理",
         "Set texture interpolation":"设置纹理插值",
             #==========加载材质==========
         "Parsed Normal Strength":"解析后法向强度",

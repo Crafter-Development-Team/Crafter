@@ -80,51 +80,6 @@ def add_node_moving_texture_without_list(node_tex, nodes, links):
         links.new(node_Moving_texture.outputs["Vector"], node_tex.inputs["Vector"])
         return node_Moving_texture
 
-def load_normal_and_PBR_and_link_all(node_tex_base, group_COn, nodes, links):
-    '''
-    以基础色节点添加法向贴图节点和PBR贴图节点、连接并添加动态纹理节点
-    node_tex_base: 基础色节点
-    group_COn: 材质组节点
-    nodes: 目标材质节点组
-    links:目标材质连接组
-    '''
-    name_image = fuq_bl_dot_number(node_tex_base.image.name)
-    name_block = name_image[:-4]
-    links.new(node_tex_base.outputs["Color"], group_COn.inputs["Base Color"])
-    links.new(node_tex_base.outputs["Alpha"], group_COn.inputs["Alpha"])
-    dir_image = os.path.dirname(node_tex_base.image.filepath)
-    dir_n = os.path.join(dir_image,name_block + "_n.png")
-    dir_s = os.path.join(dir_image,name_block + "_s.png")
-    dir_a = os.path.join(dir_image,name_block + "_a.png")
-    add_node_moving_texture_without_list(node_tex_base, nodes, links)
-    if os.path.exists(bpy.path.abspath(dir_n)):
-        node_tex = nodes.new(type="ShaderNodeTexImage")
-        node_tex.location = (node_tex_base.location.x, node_tex_base.location.y - 300)
-        node_tex.image = bpy.data.images.load(dir_n)
-        node_tex.interpolation = "Closest"
-        bpy.data.images[node_tex.image.name].colorspace_settings.name = "Non-Color"
-        links.new(node_tex.outputs["Color"], group_COn.inputs["Normal"])
-        links.new(node_tex.outputs["Alpha"], group_COn.inputs["Normal Alpha"])
-        add_node_moving_texture_without_list(node_tex, nodes, links)
-    if os.path.exists(bpy.path.abspath(dir_s)):
-        node_tex = nodes.new(type="ShaderNodeTexImage")
-        node_tex.location = (node_tex_base.location.x, node_tex_base.location.y - 600)
-        node_tex.image = bpy.data.images.load(dir_s)
-        node_tex.interpolation = "Closest"
-        bpy.data.images[node_tex.image.name].colorspace_settings.name = "Non-Color"
-        links.new(node_tex.outputs["Color"], group_COn.inputs["PBR"])
-        links.new(node_tex.outputs["Alpha"], group_COn.inputs["PBR Alpha"])
-        add_node_moving_texture_without_list(node_tex, nodes, links)
-    elif os.path.exists(bpy.path.abspath(dir_a)):
-        node_tex = nodes.new(type="ShaderNodeTexImage")
-        node_tex.location = (node_tex_base.location.x, node_tex_base.location.y - 600)
-        node_tex.image = bpy.data.images.load(dir_a)
-        node_tex.interpolation = "Closest"
-        bpy.data.images[node_tex.image.name].colorspace_settings.name = "Non-Color"
-        links.new(node_tex.outputs["Color"], group_COn.inputs["PBR"])
-        links.new(node_tex.outputs["Alpha"], group_COn.inputs["PBR Alpha"])
-        add_node_moving_texture_without_list(node_tex, nodes, links)
-
 def fuq_bl_dot_number(name: str):
     '''
     去除blender中重复时烦人的.xxx
@@ -158,11 +113,11 @@ def add_to_mcmts_collection(object,context):
             if context.scene.Crafter_mcmts[i].name not in list_name_context_material:
                 context.scene.Crafter_mcmts.remove(i)
 
-def find_CO_group(classification_list,real_block_name,group_CO):
+def find_CI_group(classification_list,real_block_name,group_CI):
     '''
     classification_list: 分类列表
     real_block_name: 真实方块名称
-    group_COn: CO节点
+    group_CI: CI节点组
     '''
     found = False
     for group_name in classification_list:
@@ -186,7 +141,11 @@ def find_CO_group(classification_list,real_block_name,group_CO):
         if "full" in classification_list[group_name]:
             for item in classification_list[group_name]["full"]:
                 if item == real_block_name:
-                    group_CO.node_tree = bpy.data.node_groups["CO-" + group_name]
+                    name_node = "CI-" + group_name
+                    if name_node in bpy.data.node_groups:
+                        group_CI.node_tree = bpy.data.node_groups[name_node]
+                    else:
+                        group_CI.node_tree = bpy.data.node_groups["CI-"]
                     found = True
                     break
         if found:
@@ -194,13 +153,98 @@ def find_CO_group(classification_list,real_block_name,group_CO):
         if "keyw" in classification_list[group_name]:
             for item in classification_list[group_name]["keyw"]:
                 if item in real_block_name:
-                    group_CO.node_tree = bpy.data.node_groups["CO-" + group_name]
+                    name_node = "CI-" + group_name
+                    if name_node in bpy.data.node_groups:
+                        group_CI.node_tree = bpy.data.node_groups[name_node]
+                    else:
+                        group_CI.node_tree = bpy.data.node_groups["CI-"]
                     found = True
                     break
         if found:
             break
     if not found:
-                group_CO.node_tree = bpy.data.node_groups["CO-"]
+                group_CI.node_tree = bpy.data.node_groups["CI-"]
+
+def link_CI_output(group_CI, node_output_EEVEE, node_output_Cycles, links):
+    '''
+    group_CI: 材质组节点
+    node_output_EEVEE: EEVEE输出节点
+    node_output_Cycles: Cycles输出节点
+    nodes: 目标材质节点组
+    links:目标材质连接组
+    '''
+    if "EEVEE-Surface" in group_CI.outputs:
+        links.new(group_CI.outputs["EEVEE-Surface"], node_output_EEVEE.inputs["Surface"])
+    if "Cycles-Surface" in group_CI.outputs: 
+        links.new(group_CI.outputs["Cycles-Surface"], node_output_Cycles.inputs["Surface"])
+    if "EEVEE-Volume" in group_CI.outputs: 
+        links.new(group_CI.outputs["EEVEE-Volume"], node_output_EEVEE.inputs["Volume"])
+    if "Cycles-Volume" in group_CI.outputs: 
+        links.new(group_CI.outputs["Cycles-Volume"], node_output_Cycles.inputs["Volume"])
+    if "EEVEE-Displacement" in group_CI.outputs: 
+        links.new(group_CI.outputs["EEVEE-Displacement"], node_output_EEVEE.inputs["Displacement"])
+    if "Cycles-Displacement" in group_CI.outputs: 
+        links.new(group_CI.outputs["Cycles-Displacement"], node_output_Cycles.inputs["Displacement"])
+    if "EEVEE-Thickness" in group_CI.outputs: 
+        links.new(group_CI.outputs["EEVEE-Thickness"], node_output_EEVEE.inputs["Thickness"])
+    if "Cycles-Thickness" in group_CI.outputs: 
+        links.new(group_CI.outputs["Cycles-Thickness"], node_output_Cycles.inputs["Thickness"])
+
+def add_node_parser(group_CI, nodes, links):
+    node_C_PBR_Parser = nodes.new(type="ShaderNodeGroup")
+    node_C_PBR_Parser.location = (group_CI.location.x - 200, group_CI.location.y - 160)
+    node_C_PBR_Parser.node_tree = bpy.data.node_groups["C-PBR_Parser"]
+    for output in node_C_PBR_Parser.outputs:
+        if output.name in group_CI.inputs:
+            links.new(output, group_CI.inputs[output.name])
+    return node_C_PBR_Parser
+
+def load_normal_and_PBR_and_link(node_tex_base, group_CI, nodes, links, node_C_PBR_Parser):
+    '''
+    以基础色节点添加法向贴图节点和PBR贴图节点、连接并添加动态纹理节点
+    node_tex_base: 基础色节点
+    group_CI: 材质组节点
+    nodes: 目标材质节点组
+    links:目标材质连接组
+    '''
+    name_image = fuq_bl_dot_number(node_tex_base.image.name)
+    name_block = name_image[:-4]
+    if "Base Color" in group_CI.inputs:
+        links.new(node_tex_base.outputs["Color"], group_CI.inputs["Base Color"])
+    if "Alpha" in group_CI.inputs:
+        links.new(node_tex_base.outputs["Alpha"], group_CI.inputs["Alpha"])
+    dir_image = os.path.dirname(node_tex_base.image.filepath)
+    dir_n = os.path.join(dir_image,name_block + "_n.png")
+    dir_s = os.path.join(dir_image,name_block + "_s.png")
+    dir_a = os.path.join(dir_image,name_block + "_a.png")
+    add_node_moving_texture_without_list(node_tex_base, nodes, links)
+    if os.path.exists(bpy.path.abspath(dir_n)):
+        node_tex = nodes.new(type="ShaderNodeTexImage")
+        node_tex.location = (node_tex_base.location.x, node_tex_base.location.y - 300)
+        node_tex.image = bpy.data.images.load(dir_n)
+        node_tex.interpolation = "Closest"
+        bpy.data.images[node_tex.image.name].colorspace_settings.name = "Non-Color"
+        links.new(node_tex.outputs["Color"], node_C_PBR_Parser.inputs["Normal"])
+        links.new(node_tex.outputs["Alpha"], node_C_PBR_Parser.inputs["Normal Alpha"])
+        add_node_moving_texture_without_list(node_tex, nodes, links)
+    if os.path.exists(bpy.path.abspath(dir_s)):
+        node_tex = nodes.new(type="ShaderNodeTexImage")
+        node_tex.location = (node_tex_base.location.x, node_tex_base.location.y - 600)
+        node_tex.image = bpy.data.images.load(dir_s)
+        node_tex.interpolation = "Closest"
+        bpy.data.images[node_tex.image.name].colorspace_settings.name = "Non-Color"
+        links.new(node_tex.outputs["Color"], node_C_PBR_Parser.inputs["PBR"])
+        links.new(node_tex.outputs["Alpha"], node_C_PBR_Parser.inputs["PBR Alpha"])
+        add_node_moving_texture_without_list(node_tex, nodes, links)
+    elif os.path.exists(bpy.path.abspath(dir_a)):
+        node_tex = nodes.new(type="ShaderNodeTexImage")
+        node_tex.location = (node_tex_base.location.x, node_tex_base.location.y - 600)
+        node_tex.image = bpy.data.images.load(dir_a)
+        node_tex.interpolation = "Closest"
+        bpy.data.images[node_tex.image.name].colorspace_settings.name = "Non-Color"
+        links.new(node_tex.outputs["Color"], node_C_PBR_Parser.inputs["PBR"])
+        links.new(node_tex.outputs["Alpha"], node_C_PBR_Parser.inputs["PBR Alpha"])
+        add_node_moving_texture_without_list(node_tex, nodes, links)
 
 def merge_obj_files(source_dir: str, output_file: str):
     """
@@ -1025,7 +1069,7 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
                 col_lod_2.prop(addon_prefs, "LODCenterX")
                 col_lod_2.prop(addon_prefs, "LODCenterZ")
         # 无版本隔离选择
-        if self.version == "Blender-Python-Crafter-None":
+        if self.version == "":
             layout.label(text="Versions")
             row_undivided = layout.row()
             row_undivided.template_list("VIEW3D_UL_CrafterDividedVersions","",addon_prefs,"Undivided_Vsersions_List",addon_prefs,"Undivided_Vsersions_List_index",rows=1,)
@@ -1063,8 +1107,8 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             return {"CANCELLED"}
         
         #初始化路径
-        jarPath = "Blender-Python-Crafter-None"
-        versionName = "Blender-Python-Crafter-None"
+        jarPath = ""
+        versionName = ""
         # 计算游戏文件路径
         dir_saves = os.path.dirname(worldPath)
         dir_back_saves = os.path.dirname(dir_saves)
@@ -1139,7 +1183,9 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
     def execute(self, context: bpy.types.Context):
         addon_prefs = context.preferences.addons[__addon_name__].preferences
 
-        if self.version == "Blender-Python-Crafter-None":
+        if len(context.selected_objects) != 0:
+            bpy.ops.object.mode_set(mode='OBJECT')
+        if self.version == "":
             undivided = True
             dir_version = addon_prefs.Undivided_Vsersions_List[addon_prefs.Undivided_Vsersions_List_index].name
             version = os.path.basename(dir_version)
@@ -1384,7 +1430,7 @@ class VIEW3D_OT_CrafterImportSolidArea(bpy.types.Operator):#导入可编辑区�
         addon_prefs.solid = 1
         return {'FINISHED'}
 
-#==========加载资源包操作==========
+#==========替换资源包操作==========
 class VIEW3D_OT_CrafterOpenResourcesPlans(bpy.types.Operator):#打开资源包列表文件夹
     bl_label = "Open Resources Plans"
     bl_idname = "crafter.open_resources_plans"
@@ -1486,10 +1532,10 @@ class VIEW3D_UL_CrafterResourcesInfo(bpy.types.UIList):
         #     layout.label(text=item_name)
         layout.label(text=item_name[:-4])
 
-class VIEW3D_OT_CrafterLoadResources(bpy.types.Operator):#加载资源包
-    bl_label = "Load Resources"
-    bl_idname = "crafter.load_resources"
-    bl_description = "Load resources"
+class VIEW3D_OT_CrafterReplaceResources(bpy.types.Operator):#替换资源包
+    bl_label = "Replace Resources"
+    bl_idname = "crafter.replace_resources"
+    bl_description = "Replace resources,but can only replace textures with the same name"
     bl_options = {"REGISTER", "UNDO"}
 
     @classmethod
@@ -1559,7 +1605,7 @@ class VIEW3D_OT_CrafterLoadResources(bpy.types.Operator):#加载资源包
                                     is_materialed = True
                                     group_COn = node
                     if is_materialed and (not is_original):
-                        load_normal_and_PBR_and_link_all(node_tex_base=node_tex_base, group_COn=group_COn, nodes=nodes, links=links)
+                        load_normal_and_PBR_and_link(node_tex_base=node_tex_base, group_CI=group_COn, nodes=nodes, links=links)
 
         return {'FINISHED'}
     def invoke(self, context, event):
@@ -1571,7 +1617,8 @@ class VIEW3D_OT_CrafterLoadResources(bpy.types.Operator):#加载资源包
     def draw(self, context):
         addon_prefs = context.preferences.addons[__addon_name__].preferences
         layout = self.layout
-
+        
+        layout.label(text=i18n("Resources"))
         row_Plans_List = layout.row()
         row_Plans_List.template_list("VIEW3D_UL_CrafterResources", "", addon_prefs, "Resources_Plans_List", addon_prefs, "Resources_Plans_List_index", rows=1)
         col_Plans_List_ops = row_Plans_List.column()
@@ -1579,6 +1626,7 @@ class VIEW3D_OT_CrafterLoadResources(bpy.types.Operator):#加载资源包
         col_Plans_List_ops.operator("crafter.reload_all",icon="FILE_REFRESH",text="")
 
         if len(addon_prefs.Resources_List) > 0:
+            layout.label(text=i18n("Resource"))
             row_Resources_List = layout.row()
             row_Resources_List.template_list("VIEW3D_UL_CrafterResourcesInfo", "", addon_prefs, "Resources_List", addon_prefs, "Resources_List_index", rows=1)
             if len(addon_prefs.Resources_List) > 1:
@@ -1620,39 +1668,21 @@ class VIEW3D_OT_CrafterSetPBRParser(bpy.types.Operator):#设置PBR解析器
     def execute(self, context: bpy.types.Context):
         addon_prefs = context.preferences.addons[__addon_name__].preferences
 
-        COs = []
-        for group in bpy.data.node_groups:
-            if group.name.startswith("CO-"):
-                COs.append(group.name)
-        for aCO in COs:
-            group_CO = bpy.data.node_groups[aCO]
-            nodes = group_CO.nodes
-            links = group_CO.links
-            for node in nodes:
-                if node.type == "GROUP_INPUT":
-                    node_input = node
-                    continue
-                if node.type == "GROUP":
-                    if node.node_tree.name != None:
-                        if (node.node_tree.name.startswith("C-")) and (node.node_tree.name != "C-biomeTex") :
-                            node_group_C_Group = node
-                            continue
-                        if node.node_tree.name.startswith("CI-"):
-                            group_CI = node
-            try:
-                node_group_C_Group.node_tree = bpy.data.node_groups["C-" + addon_prefs.PBR_Parser]
-            except:
-                pass
-            for input in group_CI.inputs:
-                try:
-                    links.new(input, node_group_C_Group.outputs[input.name])
-                except:
-                    pass
-            for input in node_group_C_Group.inputs:
-                try:
-                    links.new(input, node_input.outputs[input.name])
-                except:
-                    pass
+        node_C_PBR_Parser = bpy.data.node_groups["C-PBR_Parser"]
+        nodes = node_C_PBR_Parser.nodes
+        links = node_C_PBR_Parser.links
+        for node in nodes:
+            if node.type == "GROUP_OUTPUT":
+                node_output = node
+            elif node.type == "GROUP_INPUT":
+                node_input = node
+            elif node.type == "GROUP":
+                node_Parser = node
+        node_Parser.node_tree = bpy.data.node_groups["C-" + addon_prefs.PBR_Parser]
+        for input in node_Parser.inputs:
+            links.new(input, node_output.outputs[input.name])
+        for input in node_Parser.inputs:
+            links.new(input, node_input.outputs[input.name])
         PBR_value = [0.291769,0.039546,0,1]
         if addon_prefs.PBR_Parser == "old_continuum":
             PBR_value = [0.291769,0,0,1]
@@ -1660,18 +1690,14 @@ class VIEW3D_OT_CrafterSetPBRParser(bpy.types.Operator):#设置PBR解析器
             PBR_value = [0.5,0,0,1]
         elif addon_prefs.PBR_Parser == "SEUS_PBR":
             PBR_value = [0.5,0,0,1]
-        for material in bpy.data.materials:
-            if material.node_tree != None:
-                for node in material.node_tree.nodes:
-                    if node.type == "GROUP":
-                        if node.node_tree.name != None:
-                            if node.node_tree.name.startswith("CO-"):
-                                try:
-                                    node.inputs["PBR"].default_value = PBR_value
-                                except:
-                                    pass
-                                
-
+        for name_material in context.scene.Crafter_mcmts:
+            material = bpy.data.materials[name_material.name]
+            node_tree_material = material.node_tree
+            for node in node_tree_material.nodes:
+                if node.type == "GROUP":
+                    if node.node_tree.name != None:
+                        if node.node_tree.name == "C-PBR_Parser":
+                            node.inputs["PBR"].default_value = PBR_value
         return {'FINISHED'}
 
 class VIEW3D_OT_CrafterOpenMaterials(bpy.types.Operator):#打开材质列表文件夹
@@ -1736,7 +1762,8 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
         addon_prefs = context.preferences.addons[__addon_name__].preferences
 
         bpy.ops.crafter.reload_all()
-        bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
+        if bpy.context.mode == "OBJECT":
+            bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
         # 删除startswith(CO-)、startswith(CI-)节点组、startswith(C-)节点组
         for node in bpy.data.node_groups:
             if node.name.startswith("CO-") or node.name.startswith("CI-") or node.name.startswith("C-"):
@@ -1750,8 +1777,8 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
             bpy.data.materials.remove(bpy.data.materials["Crafter Materials Settings"], do_unlink=True)
         except:
             pass
-        # 导入CO-节点组
-        node_groups_use_fake_user = ["CO-","C-Moving_texture","C-lab_PBR_1.3","C-old_continuum","C-old_BSL","C-SEUS_PBR"]
+        # 导入C-节点组
+        node_groups_use_fake_user = ["C-PBR_Parser","C-Moving_texture","C-lab_PBR_1.3","C-old_continuum","C-old_BSL","C-SEUS_PBR"]
         with bpy.data.libraries.load(dir_blend_append, link=False) as (data_from, data_to):
             data_to.node_groups = [name for name in data_from.node_groups if name in node_groups_use_fake_user]
         for node_group in bpy.data.node_groups:
@@ -1773,7 +1800,6 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
         classification_folder_name = addon_prefs.Classification_Basis_List[addon_prefs.Classification_Basis_List_index].name
         classification_folder_dir = os.path.join(dir_classification_basis, classification_folder_name)
         # 初始化COs，classification_list,banlist
-        COs = ["CO-"]
         classification_list = {}
         banlist = []
         ban_keyw = []
@@ -1789,16 +1815,8 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
                             banlist.extend(data["ban"])
                         if "ban_keyw" in data:
                             ban_keyw.extend(data["ban_keyw"])
-                except Exception as e:
-                    print(e)
-        # 创建所有startswith(CO-)节点组
-        group_CO = bpy.data.node_groups['CO-']
-        for group_name in classification_list:
-            if group_name == "ban" or group_name == "ban_keyw":
-                continue
-            group_new = group_CO.copy()
-            group_new.name = "CO-" + group_name
-            COs.append("CO-" + group_name)
+                except:
+                    pass
         # 应用 Parsed_Normal_Strength
         bpy.ops.crafter.set_parsed_normal_strength()
         # 添加选中物体的材质到合集
@@ -1816,39 +1834,63 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
             node_tex_base = None
             #处理lod材质
             if material.name.startswith("color#"):
-                material.displacement_method = "DISPLACEMENT"
+                nodes_wait_remove = []
+                material.displacement_method = "BOTH"
                 for node in nodes:
-                    if node.type == "OUTPUT_MATERIAL" and node.is_active_output:
-                        node_output = node
-                    if node.type == "BSDF_PRINCIPLED":
-                        nodes.remove(node)
-                group_CO = nodes.new(type="ShaderNodeGroup")
-                group_CO.location = (node_output.location.x - 200, node_output.location.y)
+                    if node.type == "OUTPUT_MATERIAL":
+                        if node.target == "EEVEE":
+                            node_output_EEVEE = node
+                        if node.target == "ALL":
+                            node.target = "EEVEE"
+                            node_output_EEVEE = node
+                        if node.target == "CYCLES":
+                            nodes_wait_remove.append(node)
+                    if (node.type == "GROUP" and node.node_tree == None) or (node.type == "BSDF_PRINCIPLED"):
+                            nodes_wait_remove.append(node)
+                for node in nodes_wait_remove:
+                    nodes.remove(node)
+
+                # 添加Cycles输出节点
+                node_output_Cycles = nodes.new(type="ShaderNodeOutputMaterial")
+                node_output_Cycles.target = "CYCLES"
+                node_output_Cycles.location = (node_output_EEVEE.location.x, node_output_EEVEE.location.y - 160)
+                
+                # 添加startswith(CI-)节点组
+                group_CI = nodes.new(type="ShaderNodeGroup")
+                group_CI.location = (node_output_EEVEE.location.x - 200, node_output_EEVEE.location.y)
                 real_name = fuq_bl_dot_number(name_material.name)
                 if len(real_name) > 24:
                     last_mao_index = real_name.rfind(':')
                     real_block_name = real_name[last_mao_index+1:]
-                    find_CO_group(group_CO=group_CO, real_block_name=real_block_name,classification_list=classification_list)
+                    find_CI_group(group_CI=group_CI, real_block_name=real_block_name,classification_list=classification_list)
                 else:
-                    group_CO.node_tree = bpy.data.node_groups["CO-"]
-                group_CO.inputs["Base Color"].default_value = [float(material.name[6:10]),float(material.name[11:15]),float(material.name[16:20]),1]
-                for output in group_CO.outputs:
-                    links.new(output, node_output.inputs[output.name])
+                    group_CI.node_tree = bpy.data.node_groups["CI-"]
+                if "Base Color" in group_CI.inputs:
+                    group_CI.inputs["Base Color"].default_value = [float(material.name[6:10]),float(material.name[11:15]),float(material.name[16:20]),1]
+                # 连接CI节点
+                link_CI_output(group_CI=group_CI, node_output_EEVEE=node_output_EEVEE, node_output_Cycles=node_output_Cycles,links=links)
+                add_node_parser(group_CI=group_CI,nodes=nodes,links=links)
                 continue
             #获取基础贴图节点
+            nodes_wait_remove = []
+            real_block_name = None
             for node in nodes:
                 if node.type == "TEX_IMAGE" and node.image != None:
                     name_image = fuq_bl_dot_number(node.image.name)
                     if name_image.endswith("_n.png") or name_image.endswith("_s.png") or name_image.endswith("_a.png"):
                         bpy.data.images.remove(node.image)
-                        nodes.remove(node)
+                        nodes_wait_remove.append(node)
                     elif node_tex_base != None:
-                        nodes.remove(node)
+                        nodes_wait_remove.append(node)
                     elif name_image.endswith(".png"):
                         node.interpolation = "Closest"
                         node_tex_base = node
                         block_name = fuq_bl_dot_number(node_tex_base.image.name)
                         real_block_name = block_name[:-4]
+            if real_block_name == None:
+                continue
+            for node in nodes_wait_remove:
+                nodes.remove(node)
             # 注释部分为旧的通过材质名获得mod_name和type_name的方式，暂作保留
 
             # real_block_name = material.name
@@ -1872,107 +1914,42 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
             if ban or real_block_name in banlist:
                 continue
             # 设置材质置换方式为仅置换
-            material.displacement_method = "DISPLACEMENT"
+            material.displacement_method = "BOTH"
             #获得node_output 并 删去无内容节点组
+            nodes_wait_remove = []
             for node in nodes:
-                if node.type == "OUTPUT_MATERIAL" and node.is_active_output:
-                    node_output = node
+                if node.type == "OUTPUT_MATERIAL":
+                    if node.target == "EEVEE":
+                        node_output_EEVEE = node
+                    if node.target == "ALL":
+                        node.target = "EEVEE"
+                        node_output_EEVEE = node
+                    if node.target == "CYCLES":
+                        nodes_wait_remove.append(node)
                 if node.type == "GROUP" and node.node_tree == None:
-                    node_tree_material.nodes.remove(node)
+                        nodes_wait_remove.append(node)
+            for node in nodes_wait_remove:
+                nodes.remove(node)
+            # 添加Cycles输出节点
+            node_output_Cycles = nodes.new(type="ShaderNodeOutputMaterial")
+            node_output_Cycles.target = "CYCLES"
+            node_output_Cycles.location = (node_output_EEVEE.location.x, node_output_EEVEE.location.y - 160)
             # 删去原有着色器
             try:
-                from_node = node_output.inputs[0].links[0].from_node
+                from_node = node_output_EEVEE.inputs[0].links[0].from_node
                 if from_node.type == "BSDF_PRINCIPLED" and material.name != "Crafter Materials Settings":
-                    node_tree_material.nodes.remove(from_node)
+                    nodes.remove(from_node)
             except:
                 pass
-            # 重新添加startswith(CO-)节点组
-            group_COn = nodes.new(type="ShaderNodeGroup")
-            group_COn.location = (node_output.location.x - 200, node_output.location.y)
-            find_CO_group(group_CO=group_COn, real_block_name=real_block_name,classification_list=classification_list)
-            # 连接CO节点
-            for output in group_COn.outputs:
-                links.new(output, node_output.inputs[output.name])
-            if node_tex_base == None:
-                continue
-            load_normal_and_PBR_and_link_all(node_tex_base=node_tex_base, group_COn=group_COn, nodes=nodes, links=links)
-        #连接startswith(CO-)、startswith(CI-)节点组
-        for aCO in COs:
-            group_CO = bpy.data.node_groups[aCO]
-            nodes = group_CO.nodes
-            links = group_CO.links
-            for node in nodes:
-                if node.type == "GROUP_OUTPUT" and node.is_active_output:
-                    node_output = node
-                    continue
-                if node.type == "GROUP_INPUT":
-                    node_input = node
-                    continue
-                if node.type == "GROUP":
-                    if node.node_tree.name != None:
-                        if node.node_tree.name == "C-biomeTex":
-                            node_group_C_biomeTex = node
-                            continue
-                        if node.node_tree.name.startswith("C-"):
-                            node_group_Parse = node
-            group_CI = nodes.new(type='ShaderNodeGroup')
-            group_CI.location = (node_output.location.x - 200, node_output.location.y)
-            #尝试匹配CI-节点组
-            try:
-                group_CI.node_tree = bpy.data.node_groups["CI-" + aCO[3:]]
-            except:
-                group_CI.node_tree = bpy.data.node_groups["CI-"]
-            #尝试匹配解析器节点组
-            try:
-                node_group_Parse.node_tree = bpy.data.node_groups["C-" + addon_prefs.PBR_Parser]
-            except:
-                pass
-            #尝试匹配接口
-            for output in group_CI.outputs:
-                #匹配 CI-节点组 和 输出
-                try:
-                    links.new(output, node_output.inputs[output.name])
-                except:
-                    pass
-            for input in group_CI.inputs:
-                #匹配 CI-节点组 和 输入
-                try:
-                    links.new(input, node_input.outputs[input.name])
-                except:
-                    pass
-                #匹配 CI-节点组 和 解析器节点组
-                try:
-                    links.new(input, node_group_Parse.outputs[input.name])
-                except:
-                    pass
-                #匹配 CI-节点组 和 群系图节点组
-                try:
-                    links.new(input, node_group_C_biomeTex.outputs[input.name])
-                except:
-                    pass
-            for input in node_group_Parse.inputs:
-                #匹配 解析器节点组 和 输入
-                try:
-                    links.new(input, node_input.outputs[input.name])
-                except:
-                    pass
-        PBR_value = [0.291769,0.039546,0,1]
-        if addon_prefs.PBR_Parser == "old_continuum":
-            PBR_value = [0.291769,0,0,1]
-        elif addon_prefs.PBR_Parser == "old_BSL":
-            PBR_value = [0.5,0,0,1]
-        elif addon_prefs.PBR_Parser == "SEUS_PBR":
-            PBR_value = [0.5,0,0,1]
-        for material in bpy.data.materials:
-            if material.node_tree != None:
-                for node in material.node_tree.nodes:
-                    if node.type == "GROUP":
-                        if node.node_tree != None:
-                            if node.node_tree.name.startswith("CO-"):
-                                try:
-                                    node.inputs["PBR"].default_value = PBR_value
-                                except:
-                                    pass
+            # 添加startswith(CI-)节点组
+            group_CI = nodes.new(type="ShaderNodeGroup")
+            group_CI.location = (node_output_EEVEE.location.x - 200, node_output_EEVEE.location.y)
+            find_CI_group(group_CI=group_CI, real_block_name=real_block_name,classification_list=classification_list)
+            # 连接CI节点
+            link_CI_output(group_CI=group_CI, node_output_EEVEE=node_output_EEVEE, node_output_Cycles=node_output_Cycles,links=links)
+            node_C_PBR_Parser = add_node_parser(group_CI=group_CI,nodes=nodes,links=links)
+            load_normal_and_PBR_and_link(node_tex_base=node_tex_base, group_CI=group_CI, nodes=nodes, links=links, node_C_PBR_Parser = node_C_PBR_Parser)
+        bpy.ops.crafter.set_pbr_parser
         return {'FINISHED'}
 
     def invoke(self, context, event):
@@ -1991,12 +1968,14 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
         row_Parsed_Normal_Strength = layout.row()
         row_Parsed_Normal_Strength.prop(addon_prefs, "Parsed_Normal_Strength")
 
+        layout.label(text="Materials")
         row_Materials_List = layout.row()
         row_Materials_List.template_list("VIEW3D_UL_CrafterMaterials", "", addon_prefs, "Materials_List", addon_prefs, "Materials_List_index", rows=1)
         col_Materials_List_ops = row_Materials_List.column()
         col_Materials_List_ops.operator("crafter.open_materials",icon="FILE_FOLDER",text="")
         col_Materials_List_ops.operator("crafter.reload_all",icon="FILE_REFRESH",text="")
 
+        layout.label(text="Classification Basis")
         row_Classification_Basis = layout.row()
         row_Classification_Basis.template_list("VIEW3D_UL_CrafterClassificationBasis", "", addon_prefs, "Classification_Basis_List", addon_prefs, "Classification_Basis_List_index", rows=1)
         row_Classification_Basis_ops = row_Classification_Basis.column()
