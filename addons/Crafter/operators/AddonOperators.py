@@ -172,7 +172,9 @@ def link_CI_output(group_CI, node_output_EEVEE, node_output_Cycles, links):
     node_output_Cycles: Cycles输出节点
     nodes: 目标材质节点组
     links:目标材质连接组
+    return: 是否置换
     '''
+    Displacement = False
     if "EEVEE-Surface" in group_CI.outputs:
         links.new(group_CI.outputs["EEVEE-Surface"], node_output_EEVEE.inputs["Surface"])
     if "Cycles-Surface" in group_CI.outputs: 
@@ -183,14 +185,23 @@ def link_CI_output(group_CI, node_output_EEVEE, node_output_Cycles, links):
         links.new(group_CI.outputs["Cycles-Volume"], node_output_Cycles.inputs["Volume"])
     if "EEVEE-Displacement" in group_CI.outputs: 
         links.new(group_CI.outputs["EEVEE-Displacement"], node_output_EEVEE.inputs["Displacement"])
+        Displacement = True
     if "Cycles-Displacement" in group_CI.outputs: 
         links.new(group_CI.outputs["Cycles-Displacement"], node_output_Cycles.inputs["Displacement"])
+        Displacement = True
     if "EEVEE-Thickness" in group_CI.outputs: 
         links.new(group_CI.outputs["EEVEE-Thickness"], node_output_EEVEE.inputs["Thickness"])
     if "Cycles-Thickness" in group_CI.outputs: 
         links.new(group_CI.outputs["Cycles-Thickness"], node_output_Cycles.inputs["Thickness"])
+    return Displacement
 
 def add_node_parser(group_CI, nodes, links):
+    '''
+    gout_CI: 材质组节点
+    nodes: 目标材质节点组
+    links:目标材质连接组
+    return: node_C_PBR_Parser
+    '''
     node_C_PBR_Parser = nodes.new(type="ShaderNodeGroup")
     node_C_PBR_Parser.location = (group_CI.location.x - 200, group_CI.location.y - 160)
     node_C_PBR_Parser.node_tree = bpy.data.node_groups["C-PBR_Parser"]
@@ -1799,7 +1810,7 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
         # 获取分类依据地址
         classification_folder_name = addon_prefs.Classification_Basis_List[addon_prefs.Classification_Basis_List_index].name
         classification_folder_dir = os.path.join(dir_classification_basis, classification_folder_name)
-        # 初始化COs，classification_list,banlist
+        # 初始化 COs,classification_list,banlist, ban_keyw
         classification_list = {}
         banlist = []
         ban_keyw = []
@@ -1868,7 +1879,12 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
                 if "Base Color" in group_CI.inputs:
                     group_CI.inputs["Base Color"].default_value = [float(material.name[6:10]),float(material.name[11:15]),float(material.name[16:20]),1]
                 # 连接CI节点
-                link_CI_output(group_CI=group_CI, node_output_EEVEE=node_output_EEVEE, node_output_Cycles=node_output_Cycles,links=links)
+                Displacement = link_CI_output(group_CI=group_CI, node_output_EEVEE=node_output_EEVEE, node_output_Cycles=node_output_Cycles,links=links)
+                if Displacement:# 查看是否需要开启置换
+                    # 设置材质置换方式为仅置换
+                    material.displacement_method = "BOTH"
+                else:
+                    material.displacement_method = "BUMP"
                 add_node_parser(group_CI=group_CI,nodes=nodes,links=links)
                 continue
             #获取基础贴图节点
@@ -1913,8 +1929,6 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
                     break
             if ban or real_block_name in banlist:
                 continue
-            # 设置材质置换方式为仅置换
-            material.displacement_method = "BOTH"
             #获得node_output 并 删去无内容节点组
             nodes_wait_remove = []
             for node in nodes:
@@ -1946,7 +1960,12 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
             group_CI.location = (node_output_EEVEE.location.x - 200, node_output_EEVEE.location.y)
             find_CI_group(group_CI=group_CI, real_block_name=real_block_name,classification_list=classification_list)
             # 连接CI节点
-            link_CI_output(group_CI=group_CI, node_output_EEVEE=node_output_EEVEE, node_output_Cycles=node_output_Cycles,links=links)
+            Displacement = link_CI_output(group_CI=group_CI, node_output_EEVEE=node_output_EEVEE, node_output_Cycles=node_output_Cycles,links=links)
+            if Displacement:# 查看是否需要开启置换
+                # 设置材质置换方式为仅置换
+                material.displacement_method = "BOTH"
+            else:
+                material.displacement_method = "BUMP"
             node_C_PBR_Parser = add_node_parser(group_CI=group_CI,nodes=nodes,links=links)
             load_normal_and_PBR_and_link(node_tex_base=node_tex_base, group_CI=group_CI, nodes=nodes, links=links, node_C_PBR_Parser = node_C_PBR_Parser)
         bpy.ops.crafter.set_pbr_parser
