@@ -45,4 +45,3 @@ if __name__ == '__main__':
                   with_timestamp=args.with_timestamp,
                   with_version=args.with_version,
                   )
-
