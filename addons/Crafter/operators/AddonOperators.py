@@ -13,7 +13,7 @@ from ....common.i18n.i18n import i18n
 from bpy.props import StringProperty, IntProperty, BoolProperty, IntVectorProperty, EnumProperty, CollectionProperty, FloatProperty
 from ..__init__ import dir_cafter_data, dir_resourcepacks_plans, dir_materials, dir_classification_basis, dir_blend_append, dir_init_main, dir_backgrounds
 
-# crafter_resources_icons = bpy.utils.previews.new()
+list_liomeTex = ["dryfoliage","fog","foliage","grass","sky","water","waterFog"]
 #==========通用操作==========
 def open_folder(folder_path: str):
     '''
@@ -258,22 +258,19 @@ def load_normal_and_PBR_and_link(node_tex_base, group_CI, nodes, links, node_C_P
         add_node_moving_texture_without_list(node_tex, nodes, links)
 
 def add_C_time(obj):
-    if not "C-time" in bpy.data.node_groups:
+    if not "Crafter-time" in bpy.data.node_groups:
         with bpy.data.libraries.load(dir_blend_append, link=False) as (data_from, data_to):
-            for nodegroup in data_from.node_groups:
-                if nodegroup == "C-time":
-                    print("found")
-            data_to.node_groups = ["C-time"]
+            data_to.node_groups = ["Crafter-time"]
     # 检查是否已存在该节点修改器
     has_modifier = any(
         mod.type == 'NODES' and 
-        mod.node_group == bpy.data.node_groups["C-time"]
+        mod.node_group == bpy.data.node_groups["Crafter-time"]
         for mod in obj.modifiers)
 
     if not has_modifier:
         # 添加几何节点修改器
-        new_mod = obj.modifiers.new("C-time", 'NODES')
-        new_mod.node_group = bpy.data.node_groups["C-time"]
+        new_mod = obj.modifiers.new("Crafter-time", 'NODES')
+        new_mod.node_group = bpy.data.node_groups["Crafter-time"]
 
 def reload_Undivided_Vsersions(context: bpy.types.Context,dir_versions):#刷新无版本隔离列表
 
@@ -1783,8 +1780,9 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
 
         # 添加选中物体的材质到合集
         for obj in context.selected_objects:
-            add_to_mcmts_collection(object=obj,context=context)
-            add_C_time(obj=obj)
+            if obj.type == "MESH":
+                add_to_mcmts_collection(object=obj,context=context)
+                add_C_time(obj=obj)
         # 遍历材质合集
         for name_material in context.scene.Crafter_mcmts:
             material = bpy.data.materials[name_material.name]
