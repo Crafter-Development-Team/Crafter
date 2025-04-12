@@ -15,7 +15,7 @@ from .properties import ResourcePlan, ResourcePlansInfo, Material ,McMt
 # Add-on info
 bl_info = {
     "name": "Crafter",
-    "author": "Crafter Production Team [ 白给 若有来生 少年忠城 WangXinRui ]",
+    "author": "Crafter Production Team",
     "blender": (4, 2, 0),
     "version": (0, 1, 7),
     "description": "目标是成为从Minecraft到Blender全流程的Blender插件",

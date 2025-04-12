@@ -13,7 +13,6 @@ from ....common.i18n.i18n import i18n
 from bpy.props import StringProperty, IntProperty, BoolProperty, IntVectorProperty, EnumProperty, CollectionProperty, FloatProperty
 from ..__init__ import dir_cafter_data, dir_resourcepacks_plans, dir_materials, dir_classification_basis, dir_blend_append, dir_init_main, dir_backgrounds
 
-list_liomeTex = ["dryfoliage","fog","foliage","grass","sky","water","waterFog"]
 #==========通用操作==========
 def open_folder(folder_path: str):
     '''
@@ -1221,7 +1220,10 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         for file in os.listdir(dir_importer):
             if file.endswith(".obj"):
                 os.remove(os.path.join(dir_importer, file))
-
+        # 删去之前导出的材质
+        dir_textures = os.path.join(dir_importer, "textures")
+        if os.path.exists(dir_textures):
+            os.remove(dir_textures)
         #生成obj
         start_time = time.perf_counter()#记录开始时间
 
@@ -1271,6 +1273,27 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
                                 real_name_dic[real_material_name] = material.name
                         add_to_mcmts_collection(object=obj,context=context)
                         add_C_time(obj=obj)
+                    # 添加群系着色纹理
+                    if not "Crafter-biomeTex" in bpy.data.node_groups:# 若不存在则导入群系着色纹理节点
+                        node_groups_use_fake_user = ["Crafter-biomeTex"]
+                        with bpy.data.libraries.load(dir_blend_append, link=False) as (data_from, data_to):
+                            data_to.node_groups = [name for name in data_from.node_groups if name in node_groups_use_fake_user]
+                        for node_group in node_groups_use_fake_user:
+                            bpy.data.node_groups[node_group].use_fake_user = True
+                    for name_material in real_name_dic.values():
+                        material = bpy.data.materials[name_material]
+                        # 寻找base color贴图
+                        nodes = material.node_tree.nodes
+                        for node in nodes:
+                            if node.type == "TEX_IMAGE":
+                                node_base = node
+                                break
+                        else:
+                            continue
+                        node_liomeTex = nodes.new("ShaderNodeGroup")
+                        node_liomeTex.location = (node_base.location.x +360, node_base.location.y - 550)
+                        node_liomeTex.node_tree = bpy.data.node_groups["Crafter-biomeTex"]
+                    # 统计时间
                     used_time = time.perf_counter() - start_time
                     self.report({'INFO'}, i18n("At") + " " + str(used_time)[:6] + "s,"+ file + i18n("imported"))
             if not have_obj:
@@ -1739,9 +1762,8 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
         node_groups_use_fake_user = ["C-PBR_Parser","C-Moving_texture","C-lab_PBR_1.3","C-old_continuum","C-old_BSL","C-SEUS_PBR"]
         with bpy.data.libraries.load(dir_blend_append, link=False) as (data_from, data_to):
             data_to.node_groups = [name for name in data_from.node_groups if name in node_groups_use_fake_user]
-        for node_group in bpy.data.node_groups:
-            if node_group.name in node_groups_use_fake_user:
-                node_group.use_fake_user = True
+        for node_group in node_groups_use_fake_user:
+            bpy.data.node_groups[node_group].use_fake_user = True
         # 导入Crafter Materials Settings物体、材质、startswith(CI-)
         blend_material_dir = os.path.join(dir_materials, addon_prefs.Materials_List[addon_prefs.Materials_List_index].name + ".blend")
         with bpy.data.libraries.load(blend_material_dir, link=False) as (data_from, data_to):
@@ -1831,7 +1853,6 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
                 # 连接CI节点
                 Displacement = link_CI_output(group_CI=group_CI, node_output_EEVEE=node_output_EEVEE, node_output_Cycles=node_output_Cycles,links=links)
                 if Displacement:# 查看是否需要开启置换
-                    # 设置材质置换方式为仅置换
                     material.displacement_method = "BOTH"
                 else:
                     material.displacement_method = "BUMP"
