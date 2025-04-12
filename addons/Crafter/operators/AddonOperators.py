@@ -257,74 +257,23 @@ def load_normal_and_PBR_and_link(node_tex_base, group_CI, nodes, links, node_C_P
         links.new(node_tex.outputs["Alpha"], node_C_PBR_Parser.inputs["PBR Alpha"])
         add_node_moving_texture_without_list(node_tex, nodes, links)
 
-def merge_obj_files(source_dir: str, output_file: str):
-    """
-    合并指定目录下所有.obj文件到单一文件
-    :param source_dir: 源目录路径
-    :param output_file: 输出文件路径
-    """
-    # 初始化数据容器
-    all_vertices = []
-    all_normals = []
-    all_faces = []
-    
-    # 顶点/法线偏移量统计
-    vertex_offset = 0
-    normal_offset = 0
+def add_C_time(obj):
+    if not "C-time" in bpy.data.node_groups:
+        with bpy.data.libraries.load(dir_blend_append, link=False) as (data_from, data_to):
+            for nodegroup in data_from.node_groups:
+                if nodegroup == "C-time":
+                    print("found")
+            data_to.node_groups = ["C-time"]
+    # 检查是否已存在该节点修改器
+    has_modifier = any(
+        mod.type == 'NODES' and 
+        mod.node_group == bpy.data.node_groups["C-time"]
+        for mod in obj.modifiers)
 
-    # 遍历目录中的OBJ文件
-    obj_dir = Path(source_dir)
-    for obj_file in obj_dir.glob("*.obj"):
-        with open(obj_file, 'r') as f:
-            current_vertices = []
-            current_normals = []
-            
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith('#'):
-                    continue  # 跳过注释和空行
-                
-                parts = line.split()
-                if not parts:
-                    continue
-                
-                # 分类处理不同类型数据
-                if parts[0] == 'v':
-                    current_vertices.append(' '.join(parts[1:]))
-                elif parts[0] == 'vn':
-                    current_normals.append(' '.join(parts[1:]))
-                elif parts[0] == 'f':
-                    # 调整面索引的偏移量
-                    adjusted_face = []
-                    for vertex in parts[1:]:
-                        v_info = vertex.split('//')
-                        if len(v_info) == 2:
-                            v_idx = int(v_info[0]) + vertex_offset
-                            n_idx = int(v_info[1]) + normal_offset
-                            adjusted_face.append(f"{v_idx}//{n_idx}")
-                    all_faces.append('f ' + ' '.join(adjusted_face))
-            
-            # 更新全局数据
-            all_vertices.extend(current_vertices)
-            all_normals.extend(current_normals)
-            
-            # 累加偏移量
-            vertex_offset += len(current_vertices)
-            normal_offset += len(current_normals)
-
-    # 写入合并文件
-    with open(output_file, 'w') as out_f:
-        # 写入顶点数据
-        out_f.write("# Merged Vertices\n")
-        out_f.write('\n'.join([f"v {v}" for v in all_vertices]) + '\n')
-        
-        # 写入法线数据
-        out_f.write("\n# Merged Normals\n")
-        out_f.write('\n'.join([f"vn {n}" for n in all_normals]) + '\n')
-        
-        # 写入面数据
-        out_f.write("\n# Merged Faces\n")
-        out_f.write('\n'.join(all_faces) + '\n')
+    if not has_modifier:
+        # 添加几何节点修改器
+        new_mod = obj.modifiers.new("C-time", 'NODES')
+        new_mod.node_group = bpy.data.node_groups["C-time"]
 
 def reload_Undivided_Vsersions(context: bpy.types.Context,dir_versions):#刷新无版本隔离列表
 
@@ -1314,17 +1263,17 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
                     post_import_objects = set(bpy.data.objects)
                     new_objects = post_import_objects - pre_import_objects# 计算新增对象
                     imported_objects = list(new_objects)
-                    for object in imported_objects:
-                        for i in range(len(object.data.materials)):
-                            material = object.data.materials[i]
+                    for obj in imported_objects:
+                        for i in range(len(obj.data.materials)):
+                            material = obj.data.materials[i]
                             real_material_name = fuq_bl_dot_number(material.name)
                             if real_material_name in real_name_dic:
-                                object.data.materials[i] = bpy.data.materials[real_name_dic[real_material_name]]
+                                obj.data.materials[i] = bpy.data.materials[real_name_dic[real_material_name]]
                                 material_should_delete.append(material.name)
                             else:
                                 real_name_dic[real_material_name] = material.name
-                        add_to_mcmts_collection(object=object,context=context)
-                    
+                        add_to_mcmts_collection(object=obj,context=context)
+                        add_C_time(obj=obj)
                     used_time = time.perf_counter() - start_time
                     self.report({'INFO'}, i18n("At") + " " + str(used_time)[:6] + "s,"+ file + i18n("imported"))
             if not have_obj:
@@ -1773,8 +1722,9 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
         addon_prefs = context.preferences.addons[__addon_name__].preferences
 
         bpy.ops.crafter.reload_all()
-        if bpy.context.mode == "OBJECT":
-            bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
+        if len(context.selected_objects) != 0:
+            bpy.ops.object.mode_set(mode='OBJECT')
+        bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
         # 删除startswith(CO-)、startswith(CI-)节点组、startswith(C-)节点组
         for node in bpy.data.node_groups:
             if node.name.startswith("CO-") or node.name.startswith("CI-") or node.name.startswith("C-"):
@@ -1830,9 +1780,11 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
                     pass
         # 应用 Parsed_Normal_Strength
         bpy.ops.crafter.set_parsed_normal_strength()
+
         # 添加选中物体的材质到合集
-        for object in context.selected_objects:
-            add_to_mcmts_collection(object=object,context=context)
+        for obj in context.selected_objects:
+            add_to_mcmts_collection(object=obj,context=context)
+            add_C_time(obj=obj)
         # 遍历材质合集
         for name_material in context.scene.Crafter_mcmts:
             material = bpy.data.materials[name_material.name]
