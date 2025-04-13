@@ -1340,7 +1340,13 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         node_group_biomeTex_copy.name = copyname
         for node in node_group_biomeTex_copy.nodes:
             if node.type == "TEX_IMAGE":
-                node.image = bpy.data.images.load(os.path.join(dir_biomeTex_num, node.image.name))
+                node.image = bpy.data.images.load(os.path.join(dir_biomeTex_num, fuq_bl_dot_number(node.image.name)))
+            if node.type == "GROUP":
+                print(node.name)
+                node.inputs["min X"].default_value = min(addon_prefs.XYZ_1[0],addon_prefs.XYZ_2[0])
+                node.inputs["min Y"].default_value = min(0 - addon_prefs.XYZ_1[2],0 - addon_prefs.XYZ_2[2]) - 1
+                node.inputs["max X"].default_value = 1 + max(addon_prefs.XYZ_1[0],addon_prefs.XYZ_2[0])
+                node.inputs["max Y"].default_value = max(0 - addon_prefs.XYZ_1[2],0 - addon_prefs.XYZ_2[2])
 
         # 查找所需节点
         for name_material in real_name_dic.values():
