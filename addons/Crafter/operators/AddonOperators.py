@@ -7,12 +7,14 @@ import platform
 import json
 import zipfile
 from pathlib import Path
+import shutil
 
 from ..config import __addon_name__
 from ....common.i18n.i18n import i18n
 from bpy.props import StringProperty, IntProperty, BoolProperty, IntVectorProperty, EnumProperty, CollectionProperty, FloatProperty
 from ..__init__ import dir_cafter_data, dir_resourcepacks_plans, dir_materials, dir_classification_basis, dir_blend_append, dir_init_main, dir_backgrounds
 
+donot = ["Crafter Materials Settings"]
 #==========通用操作==========
 def open_folder(folder_path: str):
     '''
@@ -103,9 +105,9 @@ def add_to_mcmts_collection(object,context):
         list_name_object_material = []
         for object_material in object.data.materials:
             list_name_object_material.append(object_material.name)
-        if object.name != "Crafter Materials Settings" and object.type == "MESH" and object.data.materials:
+        if (object.name not in donot) and object.type == "MESH" and object.data.materials:
             for name_material in list_name_object_material:
-                if (name_material not in context.scene.Crafter_mcmts) and (name_material != "Crafter Materials Settings"):
+                if (name_material not in context.scene.Crafter_mcmts) and (name_material not in donot):
                     new_mcmt = context.scene.Crafter_mcmts.add()
                     new_mcmt.name = name_material
         for i in range(len(context.scene.Crafter_mcmts)-1,-1,-1):
@@ -124,9 +126,9 @@ def add_to_crafter_mcmts_collection(object,context):
         list_name_object_material = []
         for object_material in object.data.materials:
             list_name_object_material.append(object_material.name)
-        if object.name != "Crafter Materials Settings" and object.type == "MESH" and object.data.materials:
+        if (object.name not in donot) and object.type == "MESH" and object.data.materials:
             for name_material in list_name_object_material:
-                if (name_material not in context.scene.Crafter_crafter_mcmts) and (name_material != "Crafter Materials Settings"):
+                if (name_material not in context.scene.Crafter_crafter_mcmts) and (name_material not in donot):
                     new_mcmt = context.scene.Crafter_crafter_mcmts.add()
                     new_mcmt.name = name_material
         for i in range(len(context.scene.Crafter_crafter_mcmts)-1,-1,-1):
@@ -386,51 +388,24 @@ class VIEW3D_OT_CrafterReloadResources(bpy.types.Operator):#刷新资源包列�
         dir_crafter_json = os.path.join(dir_resourcepacks, "crafter.json")
 
         addon_prefs.Resources_List.clear()
+        json_crafter_copy =[]
         if "crafter.json" in list_dir_resourcepacks:
             with open(dir_crafter_json, "r", encoding="utf-8") as file:
-                crafter_json = json.load(file)
-            crafter_json_copy =crafter_json.copy()
-            crafter_json = []
-            for folder in list_dir_resourcepacks:
-                if folder.endswith(".zip"):
-                    dir_resourcepack = os.path.join(dir_resourcepacks, folder[:-4])
-                    os.makedirs(dir_resourcepack, exist_ok=True)
-                    try:
-                        unzip(os.path.join(dir_resourcepacks, folder), dir_resourcepack)
-                    except Exception as e:
-                        print(e)
-                    os.remove(os.path.join(dir_resourcepacks, folder))
-                    crafter_json.append(folder[:-4])
-            for resourcepack in crafter_json_copy:
-                if  os.path.isdir(os.path.join(dir_resourcepacks, resourcepack)) and resourcepack not in crafter_json:
-                    crafter_json.append(resourcepack)
-            with open(dir_crafter_json, "w", encoding="utf-8") as file:
-                json.dump(crafter_json, file, ensure_ascii=False, indent=4)
-            for resourcepack in crafter_json:
-                # dir_resourcepack = os.path.join(dir_resourcepacks, resourcepack)
-                # crafter_resources_icons.clear()
-                resourcespack_name = addon_prefs.Resources_List.add()
-                resourcespack_name.name = resourcepack
-                # if "pack.png" in os.listdir(dir_resourcepack):
-                #     crafter_resources_icons.load("crafter_resources" + resourcepack,os.path.join(dir_resourcepack,"pack.png"),"IMAGE")
-                #     for icon in crafter_resources_icons:
-        else:
-            crafter_json = []
-            for folder in list_dir_resourcepacks:
-                if os.path.isdir(os.path.join(dir_resourcepacks, folder)):
-                    crafter_json.append(folder)
-                if folder.endswith(".zip"):
-                    dir_resourcepack = os.path.join(dir_resourcepacks, folder[:-4])
-                    os.makedirs(dir_resourcepack, exist_ok=True)
-                    try:
-                        unzip(os.path.join(dir_resourcepacks, folder), dir_resourcepack)
-                    except Exception as e:
-                        print(e)
-                    os.remove(os.path.join(dir_resourcepacks, folder))
-                    crafter_json.append(folder[:-4])
-            with open(dir_crafter_json, "w", encoding="utf-8") as file:
-                json.dump(crafter_json, file, ensure_ascii=False, indent=4)
-            bpy.ops.crafter.reload_resources()
+                json_crafter = json.load(file)
+            json_crafter_copy =json_crafter.copy()
+        json_crafter = []
+        for folder in list_dir_resourcepacks:
+            if folder.endswith(".zip") and (not folder[:-4] in json_crafter_copy):
+                json_crafter.append(folder[:-4])
+        for resourcepack in json_crafter_copy:
+            if os.path.exists(os.path.join(dir_resourcepacks, resourcepack + ".zip")):
+                json_crafter.append(resourcepack)
+        for resourcepack in json_crafter:
+            resourcepack_name = addon_prefs.Resources_List.add()
+            resourcepack_name.name = resourcepack
+
+        with open(dir_crafter_json, "w", encoding="utf-8") as file:
+            json.dump(json_crafter, file, ensure_ascii=False, indent=4)
 
         return {'FINISHED'}
 
@@ -1062,30 +1037,51 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             row_undivided.template_list("VIEW3D_UL_CrafterDividedVersions","",addon_prefs,"Undivided_Vsersions_List",addon_prefs,"Undivided_Vsersions_List_index",rows=1,)
 
         # 资源包列表
-        if len(addon_prefs.Game_Resources_List) + len(addon_prefs.Game_unuse_Resources_List) > 0:
-            layout.label(text="Resources List")
-            row_resources_use = layout.row()
-            col_use_list = row_resources_use.column()
-            col_use_list.template_list("VIEW3D_UL_CrafterGameResources", "", addon_prefs, "Game_Resources_List", addon_prefs, "Game_Resources_List_index", rows=1)
-            col_use_ops = row_resources_use.column(align=True)
-            if len (addon_prefs.Game_Resources_List) > 0:
-                col_use_ops.operator("crafter.ban_game_resource", text="", icon="REMOVE")
-            if len (addon_prefs.Game_Resources_List) > 1:
-                col_use_ops.separator()
-                col_use_ops.operator("crafter.up_game_resource", text="", icon="TRIA_UP")
-                col_use_ops.operator("crafter.down_game_resource", text="", icon="TRIA_DOWN")
+        row_resources = layout.row()
+        row_resources.prop(addon_prefs, "Game_Resources")
+        if addon_prefs.Game_Resources:
+            if len(addon_prefs.Game_Resources_List) + len(addon_prefs.Game_unuse_Resources_List) > 0:
+                layout.label(text="Resources List")
+                row_resources_use = layout.row()
+                col_use_list = row_resources_use.column()
+                col_use_list.template_list("VIEW3D_UL_CrafterGameResources", "", addon_prefs, "Game_Resources_List", addon_prefs, "Game_Resources_List_index", rows=1)
+                col_use_ops = row_resources_use.column(align=True)
+                if len (addon_prefs.Game_Resources_List) > 0:
+                    col_use_ops.operator("crafter.ban_game_resource", text="", icon="REMOVE")
+                if len (addon_prefs.Game_Resources_List) > 1:
+                    col_use_ops.separator()
+                    col_use_ops.operator("crafter.up_game_resource", text="", icon="TRIA_UP")
+                    col_use_ops.operator("crafter.down_game_resource", text="", icon="TRIA_DOWN")
 
-            row_resources_unuse = layout.row()
-            col_unuse_list = row_resources_unuse.column()
-            col_unuse_list.template_list("VIEW3D_UL_CrafterGameUnuseResources", "", addon_prefs, "Game_unuse_Resources_List", addon_prefs, "Game_unuse_Resources_List_index", rows=1)
-            col_unuse_ops = row_resources_unuse.column()
-            if len (addon_prefs.Game_unuse_Resources_List) > 0:
-                col_unuse_ops.operator("crafter.use_game_resource", text="", icon="ADD")
+                row_resources_unuse = layout.row()
+                col_unuse_list = row_resources_unuse.column()
+                col_unuse_list.template_list("VIEW3D_UL_CrafterGameUnuseResources", "", addon_prefs, "Game_unuse_Resources_List", addon_prefs, "Game_unuse_Resources_List_index", rows=1)
+                col_unuse_ops = row_resources_unuse.column()
+                if len (addon_prefs.Game_unuse_Resources_List) > 0:
+                    col_unuse_ops.operator("crafter.use_game_resource", text="", icon="ADD")
+        else:
+            layout.label(text="Resources List")
+            row_Plans_List = layout.row()
+            row_Plans_List.template_list("VIEW3D_UL_CrafterResources", "", addon_prefs, "Resources_Plans_List", addon_prefs, "Resources_Plans_List_index", rows=1)
+            col_Plans_List_ops = row_Plans_List.column()
+            col_Plans_List_ops.operator("crafter.open_resources_plans",icon="FILE_FOLDER",text="")
+            col_Plans_List_ops.operator("crafter.reload_all",icon="FILE_REFRESH",text="")
+
+            if len(addon_prefs.Resources_List) > 0:
+                layout.label(text=i18n("Resource"))
+                row_Resources_List = layout.row()
+                row_Resources_List.template_list("VIEW3D_UL_CrafterResourcesInfo", "", addon_prefs, "Resources_List", addon_prefs, "Resources_List_index", rows=1)
+                if len(addon_prefs.Resources_List) > 1:
+                    col_Resources_List_ops = row_Resources_List.column(align=True)
+                    col_Resources_List_ops.operator("crafter.up_resource",icon="TRIA_UP",text="")
+                    col_Resources_List_ops.operator("crafter.down_resource",icon="TRIA_DOWN",text="")
+
 
     def invoke(self, context, event):
         addon_prefs = context.preferences.addons[__addon_name__].preferences
 
         # 获取世界路径，检测路径合法性
+        bpy.ops.crafter.reload_all()
         worldPath = os.path.normpath(addon_prefs.World_Path)
         dir_saves = os.path.dirname(worldPath)
         dir_level_dat = os.path.join(worldPath, "level.dat")
@@ -1170,6 +1166,7 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
     def execute(self, context: bpy.types.Context):
         addon_prefs = context.preferences.addons[__addon_name__].preferences
 
+        imported_time = str(context.scene.Crafter_import_time)
         if len(context.selected_objects) != 0:
             bpy.ops.object.mode_set(mode='OBJECT')
         if self.version == "":
@@ -1191,9 +1188,18 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         save = self.save
         dot_minecraftPath = self.dot_minecraftPath
 
-        for resourcepacksPath in addon_prefs.Game_Resources_List:
-            resourcepacksPaths.append(resourcepacksPath.name)
-        
+        if addon_prefs.Game_Resources:
+            for resourcepacksPath in addon_prefs.Game_Resources_List:
+                resourcepacksPaths.append(resourcepacksPath.name)
+        else:
+            dir_resourcepacks = os.path.join(dir_resourcepacks_plans, addon_prefs.Resources_Plans_List[addon_prefs.Resources_Plans_List_index].name)
+            dir_crafter_json = os.path.join(dir_resourcepacks, "crafter.json")
+
+            addon_prefs.Resources_List.clear()
+            with open(dir_crafter_json, "r", encoding="utf-8") as file:
+                json_crafter = json.load(file)
+            for resource in json_crafter:
+                resourcepacksPaths.append(os.path.join(dir_resourcepacks, resource + ".zip"))
         #写入conifg.json
         point_cloud_mode = addon_prefs.Point_Cloud_Mode
         if point_cloud_mode:
@@ -1303,26 +1309,40 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
                 # 统计时间
                 used_time = time.perf_counter() - start_time
                 self.report({'INFO'}, i18n("At") + " " + str(used_time)[:6] + "s,"+ file + i18n("imported"))
+        for material in material_should_delete:
+            bpy.data.materials.remove(bpy.data.materials[material])
         if not have_obj:
             self.report({'ERROR'}, "WorldImporter didn't export obj!")
             return {"CANCELLED"}
         
-
-        # 导入Crafter-Moving_texture节点组
-        if not "Crafter-Moving_texture" in bpy.data.node_groups:# 若不存在则导入C-节点组
+        # 若不存在，则导入Crafter-Moving_texture节点组
+        if not "Crafter-Moving_texture" in bpy.data.node_groups:
             with bpy.data.libraries.load(dir_blend_append, link=False) as (data_from, data_to):
                 data_to.node_groups = ["Crafter-Moving_texture"]
             bpy.data.node_groups["Crafter-Moving_texture"].use_fake_user = True
-
-        # 添加群系着色纹理,PBR、法线纹理
-        if not "Crafter-biomeTex" in bpy.data.node_groups:# 若不存在则导入群系着色纹理节点
+        # 若不存在，则导入群系着色纹理节点
+        if not "Crafter-biomeTex" in bpy.data.node_groups:
             node_groups_use_fake_user = ["Crafter-biomeTex"]
             with bpy.data.libraries.load(dir_blend_append, link=False) as (data_from, data_to):
                 data_to.node_groups = [name for name in data_from.node_groups if name in node_groups_use_fake_user]
             for node_group in node_groups_use_fake_user:
-                bpy.data.node_groups[node_group].use_fake_user = True            
-        for material in material_should_delete:
-            bpy.data.materials.remove(bpy.data.materials[material])
+                bpy.data.node_groups[node_group].use_fake_user = True
+        # 复制并修改Crafter-biomeTex
+        dir_biomeTex = os.path.join(dir_importer, "biomeTex")
+        dir_biomeTex_num = os.path.join(dir_biomeTex, imported_time)
+        os.makedirs(dir_biomeTex_num)
+        for file in os.listdir(dir_biomeTex): #复制群系颜色至新文件夹
+            if file.endswith(".png"):
+                shutil.copy(os.path.join(dir_biomeTex, file), os.path.join(dir_biomeTex_num, file))
+        node_group_biomeTex = bpy.data.node_groups["Crafter-biomeTex"]
+        copyname = "Crafter-biomeTex_" + imported_time
+        node_group_biomeTex_copy = node_group_biomeTex.copy()
+        node_group_biomeTex_copy.name = copyname
+        for node in node_group_biomeTex_copy.nodes:
+            if node.type == "TEX_IMAGE":
+                node.image = bpy.data.images.load(os.path.join(dir_biomeTex_num, node.image.name))
+
+        # 查找所需节点
         for name_material in real_name_dic.values():
             material = bpy.data.materials[name_material]
             nodes = material.node_tree.nodes
@@ -1343,9 +1363,10 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
                         node.interpolation = "Closest"
             for node in nodes_wait_remove:
                 nodes.remove(node)
+            # 添加群系着色纹理,PBR、法线纹理
             node_liomeTex = nodes.new("ShaderNodeGroup")
             node_liomeTex.location = (node_output_EEVEE.location.x - 400, node_output_EEVEE.location.y - 550)
-            node_liomeTex.node_tree = bpy.data.node_groups["Crafter-biomeTex"]
+            node_liomeTex.node_tree = node_group_biomeTex_copy
             if node_tex_base != None:
                 load_normal_and_PBR(node_tex_base=node_tex_base, nodes=nodes, links=links,)
         bpy.ops.file.pack_all()
@@ -1438,7 +1459,8 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         # 归零index
         addon_prefs.Latest_World_List_index = 0
         addon_prefs.History_World_Settings_List_index = 0
-
+        #增加Crafter_import_time计数
+        context.scene.Crafter_import_time += 1
         return {'FINISHED'}
 
 class VIEW3D_OT_CrafterImportSolidArea(bpy.types.Operator):#导入可编辑区域==========未完善==========
@@ -1577,12 +1599,18 @@ class VIEW3D_OT_CrafterReplaceResources(bpy.types.Operator):#替换资源包
         bpy.ops.crafter.reload_all()
         dir_resourcepacks = os.path.join(dir_resourcepacks_plans, addon_prefs.Resources_Plans_List[addon_prefs.Resources_Plans_List_index].name)
         dir_crafter_json = os.path.join(dir_resourcepacks, "crafter.json")
+        # 加载json
         with open(dir_crafter_json, 'r', encoding='utf-8') as file:
             crafter_json = json.load(file)
         images = []
         for resource in crafter_json:
             dir_resourcepack = os.path.join(dir_resourcepacks, resource)
-            dir_assets =os.path.join(dir_resourcepack, "assets")
+            if not os.path.exists(dir_resourcepack):
+                try:
+                    unzip(dir_resourcepacks + ".zip", dir_resourcepack)
+                except Exception as e:
+                    print(e)
+            dir_assets = os.path.join(dir_resourcepack, "assets")
             files_list = []
             for root, dirs, files in os.walk(dir_assets):
                 for file in files:
@@ -1593,46 +1621,55 @@ class VIEW3D_OT_CrafterReplaceResources(bpy.types.Operator):#替换资源包
         is_original = False
         if len(crafter_json) == 0:
             is_original = True
-        for object in context.selected_objects:
-            if object.name == "Crafter Materials Settings":
-                continue
-            if object.type == "MESH":
-                for material in object.data.materials:
-                    node_tree_material = material.node_tree
-                    nodes = node_tree_material.nodes
-                    links = node_tree_material.links
-                    is_materialed = False
-                    for node in nodes:
-                        if node.type == 'TEX_IMAGE':
-                            if node.image == None:
-                                nodes.remove(node)
-                            else:
-                                name_image = fuq_bl_dot_number(node.image.name)
-                                if name_image.endswith("_n.png") or name_image.endswith("_s.png") or name_image.endswith("_a.png"):
-                                    # 移除pbr、法向材质节点
-                                    bpy.data.images.remove(node.image)
-                                    nodes.remove(node)
-                                elif name_image.endswith(".png"):
-                                    node.interpolation = "Closest"
-                                    if not is_original:
-                                        node_tex_base = node
-                                        found_texture = False
-                                        i = 0
-                                        while i < len(images) and not found_texture:
-                                            j = 0
-                                            while j < len(images[i]) and not found_texture:
-                                                if name_image == images[i][j][0]:
-                                                    node.image = bpy.data.images.load(images[i][j][1])
-                                                    found_texture = True
-                                                j += 1
-                                            i += 1
-                        elif node.type == 'GROUP':
-                            if node.node_tree != None:
-                                if node.node_tree.name.startswith("CO-"):
-                                    is_materialed = True
-                                    group_COn = node
-                    if is_materialed and (not is_original):
-                        load_normal_and_PBR(node_tex_base=node_tex_base, nodes=nodes, links=links,)
+        
+        for obj in context.selected_objects:
+            if obj.type == "MESH":
+                add_to_mcmts_collection(object=obj,context=context)
+                add_C_time(obj=obj)
+        for name_material in context.scene.Crafter_mcmts:
+            material = bpy.data.materials[name_material.name]
+            node_tree_material = material.node_tree
+            nodes = node_tree_material.nodes
+            links = node_tree_material.links
+            is_materialed = False
+            for node in nodes:
+                if node.type == 'TEX_IMAGE':
+                    if node.image == None:
+                        nodes.remove(node)
+                    else:
+                        name_image = fuq_bl_dot_number(node.image.name)
+                        if name_image.endswith("_n.png") or name_image.endswith("_s.png") or name_image.endswith("_a.png"):
+                            # 移除pbr、法向材质节点
+                            bpy.data.images.remove(node.image)
+                            nodes.remove(node)
+                        elif name_image.endswith(".png"):
+                            node.interpolation = "Closest"
+                            if not is_original:
+                                node_tex_base = node
+                                found_texture = False
+                                i = 0
+                                while i < len(images) and not found_texture:
+                                    j = 0
+                                    while j < len(images[i]) and not found_texture:
+                                        if name_image == images[i][j][0]:
+                                            node.image = bpy.data.images.load(images[i][j][1])
+                                            found_texture = True
+                                        j += 1
+                                    i += 1
+                elif node.type == 'GROUP':
+                    if node.node_tree != None:
+                        if node.node_tree.name.startswith("CI-"):
+                            is_materialed = True
+                            group_CI = node
+                        if node.node_tree.name.startswith("C-PBR_Parser"):
+                            node_C_PBR_Parser = node
+            if is_materialed and (not is_original):
+                node_tex_normal, node_tex_PBR = load_normal_and_PBR(node_tex_base=node_tex_base, nodes=nodes, links=links,)
+                link_base_normal_and_PBR(node_tex_base=node_tex_base, group_CI=group_CI, links=links, node_C_PBR_Parser=node_C_PBR_Parser,node_tex_normal=node_tex_normal, node_tex_PBR=node_tex_PBR)
+                
+        for obj in context.selected_objects:
+            if obj.type == "MESH":
+                add_to_crafter_mcmts_collection(object=obj,context=context)
 
         return {'FINISHED'}
     def invoke(self, context, event):
@@ -1939,8 +1976,8 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
             #获得node_output 并 删去无内容节点组
             nodes_wait_remove = []
             real_block_name = None
-            node_normal = None
-            node_PBR = None
+            node_tex_normal = None
+            node_tex_PBR = None
             for node in nodes:
                 if node.type == "TEX_IMAGE" and node.image != None:
                     name_image = fuq_bl_dot_number(node.image.name)
@@ -1993,7 +2030,7 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
             # 删去原有着色器
             try:
                 from_node = node_output_EEVEE.inputs[0].links[0].from_node
-                if from_node.type == "BSDF_PRINCIPLED" and material.name != "Crafter Materials Settings":
+                if from_node.type == "BSDF_PRINCIPLED" and material.name not in donot:
                     nodes.remove(from_node)
             except:
                 pass
@@ -2014,6 +2051,11 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):#加载材质
                 node_tex_normal, node_tex_PBR = load_normal_and_PBR(node_tex_base=node_tex_base, nodes=nodes, links=links,)
             link_base_normal_and_PBR(node_tex_base=node_tex_base, group_CI=group_CI, links=links, node_C_PBR_Parser=node_C_PBR_Parser,node_tex_normal=node_tex_normal, node_tex_PBR=node_tex_PBR)
         bpy.ops.crafter.set_pbr_parser
+        # 添加选中物体的材质到合集
+        for obj in context.selected_objects:
+            if obj.type == "MESH":
+                add_to_crafter_mcmts_collection(object=obj,context=context)
+
         return {'FINISHED'}
 
     def invoke(self, context, event):

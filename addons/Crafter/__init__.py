@@ -30,12 +30,10 @@ _addon_properties = {
     bpy.types.Scene: {
         "Crafter_mcmts": CollectionProperty(type=McMt, name="McMt"),
         "Crafter_crafter_mcmts": CollectionProperty(type=McMt, name="Crafter_McMt"),
-        # "Crafter_rain":FloatProperty(name="Rain",
-        #                            description="rain",
-        #                            subtype="FACTOR",
-        #                            min=0,
-        #                            max=1,
-        #                            default=0),
+        "Crafter_import_time":IntProperty(name="import_time",
+                                          description="import time",
+                                          min=0,
+                                          default=0),
     },
     bpy.types.Object:{
         "Crafter_import_by": BoolProperty(name="import by Crafter",

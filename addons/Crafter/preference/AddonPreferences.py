@@ -127,6 +127,8 @@ class CrafterAddonPreferences(AddonPreferences):
     shell: BoolProperty(name="Shell ",
                         description="Enable this option when reporting a bug and include the shell output content",
                         default=False,)# type: ignore
+    Game_Resources: BoolProperty(name="Game Resources",
+                                  default=True,)# type: ignore
 #==========加载资源包属性==========
     Resources_Plans_List: CollectionProperty(name="Resources Plans",type=ResourcePlan)#type: ignore
     Resources_Plans_List_index: IntProperty(name="Resources",

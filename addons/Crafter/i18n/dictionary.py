@@ -38,6 +38,7 @@ dictionary = {
         "LOD1 Distance":"LOD1距离",
         "LOD2 Distance":"LOD2距离",
         "LOD3 Distance":"LOD3距离",
+        "Game Resources":"游戏资源包",
             #==========替换资源包==========
         "Replace Resources":"替换资源包",
         "Resources":"资源包预设",
