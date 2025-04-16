@@ -280,9 +280,17 @@ def link_base_normal_and_PBR(node_tex_base, group_CI, links, node_C_PBR_Parser, 
     if node_tex_normal != None:
         links.new(node_tex_normal.outputs["Color"], node_C_PBR_Parser.inputs["Normal"])
         links.new(node_tex_normal.outputs["Alpha"], node_C_PBR_Parser.inputs["Normal Alpha"])
+        if "Normal" in group_CI.inputs:
+            links.new(node_tex_normal.outputs["Color"], group_CI.inputs["Normal"])
+        if "Normal Alpha" in group_CI.inputs:
+            links.new(node_tex_normal.outputs["Alpha"], group_CI.inputs["Normal Alpha"])
     if node_tex_PBR != None:
         links.new(node_tex_PBR.outputs["Color"], node_C_PBR_Parser.inputs["PBR"])
         links.new(node_tex_PBR.outputs["Alpha"], node_C_PBR_Parser.inputs["PBR Alpha"])
+        if "PBR" in group_CI.inputs:
+            links.new(node_tex_PBR.outputs["Color"], group_CI.inputs["PBR"])
+        if "PBR Alpha" in group_CI.inputs:
+            links.new(node_tex_PBR.outputs["Alpha"], group_CI.inputs["PBR Alpha"])
 
 def add_C_time(obj):
     if not "Crafter-time" in bpy.data.node_groups:
