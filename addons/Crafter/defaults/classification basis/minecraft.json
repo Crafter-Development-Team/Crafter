@@ -10,6 +10,16 @@
             "water_still"
         ]
     },
+    "spruce_leaves":{
+        "keyw":[
+            "spruce_leaves"
+        ]
+    },
+    "birch_leaves":{
+        "keyw":[
+            "birch_leaves"
+        ]
+    },
     "sss_tran":{
         "keyw":[
             "bamboo_stalk",
@@ -37,9 +47,7 @@
             "jungle_leaves",
             "acacia_leaves",
             "dark_oak_leaves",
-            "mangrove_leaves",
-            "spruce_leaves",
-            "birch_leaves"
+            "mangrove_leaves"
         ]
     },
     "color":{
