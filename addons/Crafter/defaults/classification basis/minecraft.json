@@ -10,6 +10,17 @@
             "water_still"
         ]
     },
+    "grass_block_top":{
+        "keyw":[
+            "grass_block_top",
+            "grass_block_side_overlay"
+        ]
+    },
+    "grass_block_side":{
+        "keyw":[
+            "grass_block_side"
+        ]
+    },
     "spruce_leaves":{
         "keyw":[
             "spruce_leaves"
@@ -48,12 +59,6 @@
             "acacia_leaves",
             "dark_oak_leaves",
             "mangrove_leaves"
-        ]
-    },
-    "color":{
-        "keyw":[
-            "grass_block_top",
-            "grass_block_side_overlay"
         ]
     },
     "tran_move":{
