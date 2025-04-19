@@ -54,9 +54,9 @@ _addon_properties = {
 # }
 
 #==========初始化cafter_data地址==========
-dir_extension = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-dir_extensions = os.path.dirname(dir_extension)
 dir_init_main = os.path.dirname(os.path.abspath(__file__))
+dir_extension = os.path.dirname(os.path.dirname(dir_init_main))
+dir_extensions = os.path.dirname(dir_extension)
 dir_defaults = os.path.join(dir_init_main, "defaults")
 dir_defaults_materials = os.path.join(dir_defaults, "materials")
 dir_defaults_classification_basis = os.path.join(dir_defaults, "classification basis")

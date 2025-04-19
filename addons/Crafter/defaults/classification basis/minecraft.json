@@ -20,6 +20,26 @@
             "grass_block_side"
         ]
     },
+    "grass_tran_move":{
+        "keyw":[
+            "melon_stem",
+            "attached_melon_stem",
+            "pumpkin_stem",
+            "attached_pumpkin_stem",
+            "fern",
+            "large_fern_top",
+            "large_fern_bottom",
+            "short_grass",
+            "tall_grass_top",
+            "tall_grass_bottom",
+            "bush",
+            "lily_pad"
+        ],
+        "full":[
+            "grass",
+            "vine"
+        ]
+    },
     "dryfoliage_tran":{
         "keyw":[
             "leaf_litter"
@@ -141,26 +161,6 @@
     "tran":{
         "keyw":[
             "sugar_cane"
-        ]
-    },
-    "color_tran_move":{
-        "keyw":[
-            "melon_stem",
-            "attached_melon_stem",
-            "pumpkin_stem",
-            "attached_pumpkin_stem",
-            "fern",
-            "large_fern_top",
-            "large_fern_bottom",
-            "short_grass",
-            "tall_grass_top",
-            "tall_grass_bottom",
-            "bush",
-            "lily_pad"
-        ],
-        "full":[
-            "grass",
-            "vine"
         ]
     },
     "no_rain":{
