@@ -199,20 +199,21 @@ def link_CI_output(group_CI, node_output_EEVEE, node_output_Cycles, links):
     Displacement = False
     if "EEVEE-Surface" in group_CI.outputs:
         links.new(group_CI.outputs["EEVEE-Surface"], node_output_EEVEE.inputs["Surface"])
-    if "Cycles-Surface" in group_CI.outputs: 
-        links.new(group_CI.outputs["Cycles-Surface"], node_output_Cycles.inputs["Surface"])
     if "EEVEE-Volume" in group_CI.outputs: 
         links.new(group_CI.outputs["EEVEE-Volume"], node_output_EEVEE.inputs["Volume"])
-    if "Cycles-Volume" in group_CI.outputs: 
-        links.new(group_CI.outputs["Cycles-Volume"], node_output_Cycles.inputs["Volume"])
     if "EEVEE-Displacement" in group_CI.outputs: 
         links.new(group_CI.outputs["EEVEE-Displacement"], node_output_EEVEE.inputs["Displacement"])
         Displacement = True
+    if "EEVEE-Thickness" in group_CI.outputs: 
+        links.new(group_CI.outputs["EEVEE-Thickness"], node_output_EEVEE.inputs["Thickness"])
+        
+    if "Cycles-Surface" in group_CI.outputs: 
+        links.new(group_CI.outputs["Cycles-Surface"], node_output_Cycles.inputs["Surface"])
+    if "Cycles-Volume" in group_CI.outputs: 
+        links.new(group_CI.outputs["Cycles-Volume"], node_output_Cycles.inputs["Volume"])
     if "Cycles-Displacement" in group_CI.outputs: 
         links.new(group_CI.outputs["Cycles-Displacement"], node_output_Cycles.inputs["Displacement"])
         Displacement = True
-    if "EEVEE-Thickness" in group_CI.outputs: 
-        links.new(group_CI.outputs["EEVEE-Thickness"], node_output_EEVEE.inputs["Thickness"])
     if "Cycles-Thickness" in group_CI.outputs: 
         links.new(group_CI.outputs["Cycles-Thickness"], node_output_Cycles.inputs["Thickness"])
     return Displacement
