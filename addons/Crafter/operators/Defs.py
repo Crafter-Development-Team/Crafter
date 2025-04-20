@@ -205,7 +205,8 @@ def link_CI_output(group_CI, node_output_EEVEE, node_output_Cycles, links):
         links.new(group_CI.outputs["EEVEE-Displacement"], node_output_EEVEE.inputs["Displacement"])
         Displacement = True
     if "EEVEE-Thickness" in group_CI.outputs: 
-        links.new(group_CI.outputs["EEVEE-Thickness"], node_output_EEVEE.inputs["Thickness"])
+        if "Thickness" in node_output_EEVEE.inputs:
+            links.new(group_CI.outputs["EEVEE-Thickness"], node_output_EEVEE.inputs["Thickness"])
         
     if "Cycles-Surface" in group_CI.outputs: 
         links.new(group_CI.outputs["Cycles-Surface"], node_output_Cycles.inputs["Surface"])
@@ -215,7 +216,8 @@ def link_CI_output(group_CI, node_output_EEVEE, node_output_Cycles, links):
         links.new(group_CI.outputs["Cycles-Displacement"], node_output_Cycles.inputs["Displacement"])
         Displacement = True
     if "Cycles-Thickness" in group_CI.outputs: 
-        links.new(group_CI.outputs["Cycles-Thickness"], node_output_Cycles.inputs["Thickness"])
+        if "Thickness" in node_output_Cycles.inputs:
+            links.new(group_CI.outputs["Cycles-Thickness"], node_output_Cycles.inputs["Thickness"])
     return Displacement
 
 def add_node_parser(group_CI, nodes, links):

@@ -118,6 +118,16 @@
             "leaf_litter"
         ]
     },
+    "sss_tran_move": {
+        "keyw":[
+            "azalea_leaves",
+            "flowering_azalea_leaves",
+            "cherry_leaves",
+            "pale_oak_leaves",
+            "mangrove_roots_top",
+            "mangrove_roots_side"
+        ]
+    },
     "foliage_sss_tran_move":{
         "ban_keyw":[
             "pale_oak_leaves"
@@ -146,16 +156,6 @@
             "cactus_side",
             "cactus_top",
             "cocoa_stage"
-        ]
-    },
-    "sss_tran_move": {
-        "keyw":[
-            "azalea_leaves",
-            "flowering_azalea_leaves",
-            "cherry_leaves",
-            "pale_oak_leaves",
-            "mangrove_roots_top",
-            "mangrove_roots_side"
         ]
     },
     "tran":{
