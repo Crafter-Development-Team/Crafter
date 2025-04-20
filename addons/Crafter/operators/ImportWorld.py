@@ -397,6 +397,8 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
 
         # 查找所需节点
         for name_material in real_name_dic.values():
+            if name_material.startswith("color#") and len(fuq_bl_dot_number(name_material)) < 22 :
+                continue
             material = bpy.data.materials[name_material]
             nodes = material.node_tree.nodes
             links = material.node_tree.links
@@ -422,6 +424,7 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             node_liomeTex.node_tree = node_group_biomeTex_copy
             if node_tex_base != None:
                 load_normal_and_PBR(node_tex_base=node_tex_base, nodes=nodes, links=links,)
+                nodes.active = node_tex_base
         bpy.ops.file.pack_all()
             
         #完成导入
