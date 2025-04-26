@@ -93,7 +93,8 @@
             "tall_seagrass_bottom",
             "cave_vines",
             "bamboo_large_leaves",
-            "bamboo_small_leaves"
+            "bamboo_small_leaves",
+            "hanging_roots"
         ]
     },
     "grass_tran_move":{

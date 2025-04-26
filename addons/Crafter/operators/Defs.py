@@ -8,6 +8,7 @@ import json
 import zipfile
 from pathlib import Path
 import shutil
+import ctypes
 
 from ..config import __addon_name__
 from ....common.i18n.i18n import i18n
@@ -16,6 +17,23 @@ from .. import dir_cafter_data, dir_resourcepacks_plans, dir_materials, dir_clas
 
 donot = ["Crafter Materials Settings"]
 len_color_jin = 20
+
+
+# def run_as_admin(exe_path, args=None, show_window=True):
+#     """以管理员权限运行指定exe程序"""
+#     params = ' '.join(args) if args else ''
+#     show_cmd = ctypes.c_int(1 if show_window else 0)
+#     ret = ctypes.windll.shell32.ShellExecuteW(
+#         None,                   # 父窗口句柄
+#         "runas",                # 操作类型：请求提权
+#         exe_path,               # 要执行的可执行文件路径
+#         params,                 # 命令行参数
+#         None,                   # 工作目录（None表示当前目录）
+#         show_cmd.value          # 显示方式：1=正常窗口，0=隐藏
+#     )
+#     if ret <= 32:
+#         raise RuntimeError(f"执行失败，错误代码: {ret}")
+#     return ret
 
 def open_folder(folder_path: str):
     '''

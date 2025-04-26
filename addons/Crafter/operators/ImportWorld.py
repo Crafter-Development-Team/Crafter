@@ -5,6 +5,7 @@ import subprocess
 import json
 import shutil
 import ctypes
+from ctypes import wintypes
 
 from ..config import __addon_name__
 from ....common.i18n.i18n import i18n
@@ -371,44 +372,111 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
 
 # ==================================================================================
 
-        class SHELLEXECUTEINFOW(ctypes.Structure):
-            _fields_ = [
-                ("cbSize", ctypes.c_ulong),
-                ("fMask", ctypes.c_ulong),
-                ("hwnd", ctypes.c_void_p),
-                ("lpVerb", ctypes.c_wchar_p),
-                ("lpFile", ctypes.c_wchar_p),
-                ("lpParameters", ctypes.c_wchar_p),
-                ("lpDirectory", ctypes.c_wchar_p),
-                ("nShow", ctypes.c_int),
-                ("hInstApp", ctypes.c_void_p),
-                ("lpIDList", ctypes.c_void_p),
-                ("lpClass", ctypes.c_wchar_p),
-                ("hKeyClass", ctypes.c_void_p),
-                ("dwHotKey", ctypes.c_ulong),
-                ("hIcon", ctypes.c_void_p),
-                ("hProcess", ctypes.c_void_p)
-            ]
+        # class SHELLEXECUTEINFOW(ctypes.Structure):
+        #     _fields_ = [
+        #         ("cbSize", ctypes.c_ulong),
+        #         ("fMask", ctypes.c_ulong),
+        #         ("hwnd", ctypes.c_void_p),
+        #         ("lpVerb", ctypes.c_wchar_p),
+        #         ("lpFile", ctypes.c_wchar_p),
+        #         ("lpParameters", ctypes.c_wchar_p),
+        #         ("lpDirectory", ctypes.c_wchar_p),
+        #         ("nShow", ctypes.c_int),
+        #         ("hInstApp", ctypes.c_void_p),
+        #         ("lpIDList", ctypes.c_void_p),
+        #         ("lpClass", ctypes.c_wchar_p),
+        #         ("hKeyClass", ctypes.c_void_p),
+        #         ("dwHotKey", ctypes.c_ulong),
+        #         ("hIcon", ctypes.c_void_p),
+        #         ("hProcess", ctypes.c_void_p)
+        #     ]
 
-        sei = SHELLEXECUTEINFOW()
-        sei.cbSize = ctypes.sizeof(SHELLEXECUTEINFOW)
-        sei.fMask = 0x00000040  # SEE_MASK_NOCLOSEPROCESS
-        sei.lpVerb = 'runas'
-        sei.lpFile = dir_exe_importer
-        sei.lpDirectory = dir_importer
-        sei.nShow = addon_prefs.shell
+        # sei = SHELLEXECUTEINFOW()
+        # sei.cbSize = ctypes.sizeof(SHELLEXECUTEINFOW)
+        # sei.fMask = 0x00000040  # SEE_MASK_NOCLOSEPROCESS
+        # sei.lpVerb = 'runas'
+        # sei.lpFile = dir_exe_importer
+        # sei.lpDirectory = dir_importer
+        # sei.nShow = addon_prefs.shell
 
-        # 执行并等待
-        if ctypes.windll.shell32.ShellExecuteExW(ctypes.byref(sei)):
-            ctypes.windll.kernel32.WaitForSingleObject(sei.hProcess, -1)
+        # # 执行并等待
+        # if ctypes.windll.shell32.ShellExecuteExW(ctypes.byref(sei)):
+        #     ctypes.windll.kernel32.WaitForSingleObject(sei.hProcess, -1)
+        #     ctypes.windll.kernel32.CloseHandle(sei.hProcess)
+        # else:
+        #     self.report({'ERROR'}, "Failed to start WorldImporter.exe")
+        #     return {"CANCELLED"}
+
+        # run_as_admin(dir_exe_importer)
+
+
+# ==================================================================================
+        def run_as_admin_and_wait(exe_path, work_dir=None,shell = False):
+            # 定义SHELLEXECUTEINFOW结构体
+            class SHELLEXECUTEINFOW(ctypes.Structure):
+                _fields_ = [
+                    ("cbSize", wintypes.DWORD),
+                    ("fMask", ctypes.c_ulong),
+                    ("hwnd", wintypes.HWND),
+                    ("lpVerb", wintypes.LPCWSTR),
+                    ("lpFile", wintypes.LPCWSTR),
+                    ("lpParameters", wintypes.LPCWSTR),
+                    ("lpDirectory", wintypes.LPCWSTR),
+                    ("nShow", ctypes.c_int),
+                    ("hInstApp", wintypes.HINSTANCE),
+                    ("lpIDList", ctypes.c_void_p),
+                    ("lpClass", wintypes.LPCWSTR),
+                    ("hKeyClass", wintypes.HKEY),
+                    ("dwHotKey", wintypes.DWORD),
+                    ("hIcon", wintypes.HANDLE),
+                    ("hProcess", wintypes.HANDLE)
+                ]
+
+            # 配置结构体参数
+            sei = SHELLEXECUTEINFOW()
+            sei.cbSize = ctypes.sizeof(SHELLEXECUTEINFOW)
+            sei.fMask = 0x00000040  # SEE_MASK_NOCLOSEPROCESS
+            sei.lpVerb = 'runas'    # 管理员权限
+            sei.lpFile = exe_path.replace("\\", "\\\\")  # 处理Windows路径转义
+            sei.lpDirectory = work_dir.replace("\\", "\\\\") if work_dir else None
+            sei.nShow = shell  # SW_SHOWNORMAL
+
+            # 调用ShellExecuteExW
+            if not ctypes.windll.shell32.ShellExecuteExW(ctypes.byref(sei)):
+                error_code = ctypes.GetLastError()
+                error_msg = ctypes.FormatError(error_code)
+                print(f"启动失败 (错误 0x{error_code:X}): {error_msg}")
+                return False
+
+            # 等待进程结束
+            WAIT_TIMEOUT = 0x00000102
+            WAIT_OBJECT_0 = 0x0
+            while True:
+                wait_result = ctypes.windll.kernel32.WaitForSingleObject(sei.hProcess, 100)  # 100ms间隔
+                if wait_result == WAIT_OBJECT_0:
+                    break
+                elif wait_result == WAIT_TIMEOUT:
+                    continue
+                else:
+                    ctypes.windll.kernel32.CloseHandle(sei.hProcess)
+                    print(f"等待进程超时")
+                    return False
+
+            # 获取退出码
+            exit_code = wintypes.DWORD()
+            ctypes.windll.kernel32.GetExitCodeProcess(sei.hProcess, ctypes.byref(exit_code))
             ctypes.windll.kernel32.CloseHandle(sei.hProcess)
-        else:
-            self.report({'ERROR'}, "Failed to start WorldImporter.exe")
-            return {"CANCELLED"}
+            
+            print(f"进程已退出，代码: {exit_code.value}")
+            return exit_code.value == 0, 
 
-
-        used_time = time.perf_counter() - start_time
-        self.report({'INFO'}, i18n("At") + " " + str(used_time)[:6] + "s,"+ i18n("WorldImporter.exe finished"))
+        # 在execute方法中的使用示例
+        success = run_as_admin_and_wait(
+            dir_exe_importer,
+            dir_importer,
+            shell = addon_prefs.shell
+        )
+# ==================================================================================
 
         #导入obj
         have_obj = False
