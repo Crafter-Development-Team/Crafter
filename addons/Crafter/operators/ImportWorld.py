@@ -4,6 +4,7 @@ import time
 import subprocess
 import json
 import shutil
+import ctypes
 
 from ..config import __addon_name__
 from ....common.i18n.i18n import i18n
@@ -211,6 +212,8 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
     def execute(self, context: bpy.types.Context):
         addon_prefs = context.preferences.addons[__addon_name__].preferences
 
+        start_time = time.perf_counter()#记录开始时间
+
         imported_time = str(context.scene.Crafter_import_time)
         if len(context.selected_objects) != 0:
             bpy.ops.object.mode_set(mode='OBJECT')
@@ -303,24 +306,107 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             if file.endswith(".obj"):
                 os.remove(os.path.join(dir_importer, file))
         #生成obj
-        start_time = time.perf_counter()#记录开始时间
 
-        try:
-            # 在新的进程中运行WorldImporter.exe
-            CREATE_NEW_PROCESS_GROUP = 0x00000200
-            DETACHED_PROCESS = 0x00000008
-            process = subprocess.Popen(
-                [dir_exe_importer],
-                cwd=dir_importer,
-                creationflags=CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS,
-                shell=addon_prefs.shell
-            )
-            self.report({'INFO'}, f"WorldImporter.exe started in a new process")
-            #等待进程结束
-            process.wait()
-        except Exception as e:
-            self.report({'ERROR'}, f"Error: {e}")
+# ==================================================================================
+        #旧的exe唤起命令，在exe从cpp14升级到cpp20后无效
+
+        # try:
+        #     # 在新的进程中运行WorldImporter.exe
+        #     CREATE_NEW_PROCESS_GROUP = 0x00000200
+        #     DETACHED_PROCESS = 0x00000008
+        #     process = subprocess.Popen(
+        #         [dir_exe_importer],
+        #         cwd=dir_importer,
+        #         creationflags=CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS,
+        #         shell=addon_prefs.shell
+        #     )
+        #     self.report({'INFO'}, f"WorldImporter.exe started in a new process")
+        #     #等待进程结束
+        #     process.wait()
+        # except Exception as e:
+        #     self.report({'ERROR'}, f"Error: {e}")
+        #     return {"CANCELLED"}
+
+# ==================================================================================
+        # 定义SHELLEXECUTEINFO结构体
+        # class SHELLEXECUTEINFO(ctypes.Structure):
+        #     _fields_ = [
+        #         ('cbSize', wintypes.DWORD),
+        #         ('fMask', wintypes.ULONG),
+        #         ('hwnd', wintypes.HWND),
+        #         ('lpVerb', wintypes.LPCWSTR),
+        #         ('lpFile', wintypes.LPCWSTR),
+        #         ('lpParameters', wintypes.LPCWSTR),
+        #         ('lpDirectory', wintypes.LPCWSTR),
+        #         ('nShow', ctypes.c_int),
+        #         ('hInstApp', wintypes.HINSTANCE),
+        #         ('lpIDList', ctypes.c_void_p),
+        #         ('lpClass', wintypes.LPCWSTR),
+        #         ('hKeyClass', wintypes.HKEY),
+        #         ('dwHotKey', wintypes.DWORD),
+        #         ('hMonitor', wintypes.HANDLE),
+        #         ('hProcess', wintypes.HANDLE)
+        #     ]
+
+
+        # # 配置结构体参数
+        # sei = SHELLEXECUTEINFO()
+        # sei.cbSize = ctypes.sizeof(SHELLEXECUTEINFO)
+        # sei.fMask = 0x00000040  # SEE_MASK_NOCLOSEPROCESS
+        # sei.lpVerb = 'runas'
+        # sei.lpFile = dir_exe_importer
+        # sei.lpDirectory = dir_importer
+        # sei.nShow = addon_prefs.shell  # 隐藏窗口
+
+        # # 调用ShellExecuteEx
+        # if not ctypes.windll.shell32.ShellExecuteExW(ctypes.byref(sei)):
+        #     self.report({'ERROR'}, "Failed to start process")
+        #     return {"CANCELLED"}
+
+        # # 等待进程结束
+        # ctypes.windll.kernel32.WaitForSingleObject(sei.hProcess, 0xFFFFFFFF)
+        # ctypes.windll.kernel32.CloseHandle(sei.hProcess)
+
+        # # 继续执行后续代码...
+
+# ==================================================================================
+
+        class SHELLEXECUTEINFOW(ctypes.Structure):
+            _fields_ = [
+                ("cbSize", ctypes.c_ulong),
+                ("fMask", ctypes.c_ulong),
+                ("hwnd", ctypes.c_void_p),
+                ("lpVerb", ctypes.c_wchar_p),
+                ("lpFile", ctypes.c_wchar_p),
+                ("lpParameters", ctypes.c_wchar_p),
+                ("lpDirectory", ctypes.c_wchar_p),
+                ("nShow", ctypes.c_int),
+                ("hInstApp", ctypes.c_void_p),
+                ("lpIDList", ctypes.c_void_p),
+                ("lpClass", ctypes.c_wchar_p),
+                ("hKeyClass", ctypes.c_void_p),
+                ("dwHotKey", ctypes.c_ulong),
+                ("hIcon", ctypes.c_void_p),
+                ("hProcess", ctypes.c_void_p)
+            ]
+
+        sei = SHELLEXECUTEINFOW()
+        sei.cbSize = ctypes.sizeof(SHELLEXECUTEINFOW)
+        sei.fMask = 0x00000040  # SEE_MASK_NOCLOSEPROCESS
+        sei.lpVerb = 'runas'
+        sei.lpFile = dir_exe_importer
+        sei.lpDirectory = dir_importer
+        sei.nShow = addon_prefs.shell
+
+        # 执行并等待
+        if ctypes.windll.shell32.ShellExecuteExW(ctypes.byref(sei)):
+            ctypes.windll.kernel32.WaitForSingleObject(sei.hProcess, -1)
+            ctypes.windll.kernel32.CloseHandle(sei.hProcess)
+        else:
+            self.report({'ERROR'}, "Failed to start WorldImporter.exe")
             return {"CANCELLED"}
+
+
         used_time = time.perf_counter() - start_time
         self.report({'INFO'}, i18n("At") + " " + str(used_time)[:6] + "s,"+ i18n("WorldImporter.exe finished"))
 
@@ -342,7 +428,13 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
                 for obj in imported_objects:
                     for i in range(len(obj.data.materials)):
                         material = obj.data.materials[i]
-                        real_material_name = fuq_bl_dot_number(material.name)
+                        if material.name.startswith("color#"):
+                            if len(material.name) > len_color_jin:
+                                real_material_name = fuq_bl_dot_number(material.name)
+                            else:
+                                real_material_name = material.name
+                        else:
+                            real_material_name = fuq_bl_dot_number(material.name)
                         if real_material_name in real_name_dic:
                             obj.data.materials[i] = bpy.data.materials[real_name_dic[real_material_name]]
                             material_should_delete.append(material.name)
@@ -397,7 +489,7 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
 
         # 查找所需节点
         for name_material in real_name_dic.values():
-            if name_material.startswith("color#") and len(fuq_bl_dot_number(name_material)) < 22 :
+            if name_material.startswith("color#"):
                 continue
             material = bpy.data.materials[name_material]
             nodes = material.node_tree.nodes

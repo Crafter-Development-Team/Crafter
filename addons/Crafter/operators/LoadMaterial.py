@@ -108,6 +108,7 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):
             node_tex_base = None
             #处理lod材质
             if material.name.startswith("color#"):
+                node_biomeTex = None
                 nodes_wait_remove = []
                 material.displacement_method = "BOTH"
                 for node in nodes:
@@ -139,7 +140,7 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):
                 group_CI = nodes.new(type="ShaderNodeGroup")
                 group_CI.location = (node_output_EEVEE.location.x - 200, node_output_EEVEE.location.y)
                 real_name = fuq_bl_dot_number(name_material.name)
-                if len(real_name) > 24:
+                if len(real_name) > len_color_jin:
                     last_mao_index = real_name.rfind(':')
                     real_block_name = real_name[last_mao_index+1:]
                     find_CI_group(group_CI=group_CI, real_block_name=real_block_name,classification_list=classification_list)
@@ -177,6 +178,7 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):
             real_block_name = None
             node_tex_normal = None
             node_tex_PBR = None
+            node_biomeTex = None
             for node in nodes:
                 if node.type == "TEX_IMAGE" and node.image != None:
                     name_image = fuq_bl_dot_number(node.image.name)
@@ -249,6 +251,8 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):
             if not imported_by_crafter:
                 node_tex_normal, node_tex_PBR = load_normal_and_PBR(node_tex_base=node_tex_base, nodes=nodes, links=links,)
             link_base_normal_and_PBR(node_tex_base=node_tex_base, group_CI=group_CI, links=links, node_C_PBR_Parser=node_C_PBR_Parser,node_tex_normal=node_tex_normal, node_tex_PBR=node_tex_PBR)
+            if node_tex_base != None:
+                nodes.active = node_tex_base
         bpy.ops.crafter.set_pbr_parser
         # 添加选中物体的材质到合集
         for obj in context.selected_objects:

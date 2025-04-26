@@ -15,6 +15,7 @@ from bpy.props import StringProperty, IntProperty, BoolProperty, IntVectorProper
 from .. import dir_cafter_data, dir_resourcepacks_plans, dir_materials, dir_classification_basis, dir_blend_append, dir_init_main, dir_backgrounds
 
 donot = ["Crafter Materials Settings"]
+len_color_jin = 20
 
 def open_folder(folder_path: str):
     '''
@@ -311,9 +312,10 @@ def add_C_time(obj):
         new_mod.node_group = bpy.data.node_groups["Crafter-time"]
 
 def link_biome_tex(node_biomeTex, group_CI, links):
-    for output in node_biomeTex.outputs:
-        if output.name in group_CI.inputs:
-            links.new(output, group_CI.inputs[output.name])
+    if not node_biomeTex == None:
+        for output in node_biomeTex.outputs:
+            if output.name in group_CI.inputs:
+                links.new(output, group_CI.inputs[output.name])
 
 def reload_Undivided_Vsersions(context: bpy.types.Context,dir_versions):#刷新无版本隔离列表
 
