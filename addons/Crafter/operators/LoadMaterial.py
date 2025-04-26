@@ -25,7 +25,8 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):
         addon_prefs = context.preferences.addons[__addon_name__].preferences
 
         bpy.ops.crafter.reload_all()
-        bpy.ops.object.mode_set(mode='OBJECT')
+        if context.active_object:
+            bpy.ops.object.mode_set(mode='OBJECT')
         bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
         # 删除startswith(CO-)、startswith(CI-)节点组、startswith(C-)节点组
         for node in bpy.data.node_groups:

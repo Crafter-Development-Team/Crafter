@@ -215,7 +215,8 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         start_time = time.perf_counter()#记录开始时间
 
         imported_time = str(context.scene.Crafter_import_time)
-        bpy.ops.object.mode_set(mode='OBJECT')
+        if context.active_object:
+            bpy.ops.object.mode_set(mode='OBJECT')
         if self.version == "":
             undivided = True
             dir_version = addon_prefs.Undivided_Vsersions_List[addon_prefs.Undivided_Vsersions_List_index].name
