@@ -91,7 +91,9 @@
             "seagrass",
             "tall_seagrass_top",
             "tall_seagrass_bottom",
-            "cave_vines"
+            "cave_vines",
+            "bamboo_large_leaves",
+            "bamboo_small_leaves"
         ]
     },
     "grass_tran_move":{
