@@ -31,6 +31,7 @@ dictionary = {
         "As Chunk":"分块",
         "Chunk Size":"分块大小",
         "Underwater LOD":"水下LOD",
+        "Greedy Mesh":"面合并",
         "LOD Auto Center":"LOD自动中心",
         "LOD Center X":"LOD中心X",
         "LOD Center Z":"LOD中心Z",

@@ -106,6 +106,8 @@ class CrafterAddonPreferences(AddonPreferences):
                             default=True,)# type: ignore
     useUnderwaterLOD: BoolProperty(name="Underwater LOD",
                                    default=False,)# type: ignore
+    useGreedyMesh: BoolProperty(name="Greedy Mesh",
+                                default=True,)# type: ignore
     isLODAutoCenter: BoolProperty(name="LOD Auto Center",
                                   default=True,)# type: ignore
     LODCenterX: IntProperty(name="LOD Center X",
