@@ -1,10 +1,10 @@
 import os
 
 import bpy
-from bpy.props import StringProperty, IntProperty, BoolProperty, IntVectorProperty, EnumProperty, CollectionProperty, FloatProperty
+from bpy.props import *
 from bpy.types import AddonPreferences
 from ..config import __addon_name__
-from ..properties import ResourcePlan, ResourcePlansInfo, Material, ClassificationBasisl,Background,HistoryWorldRoot,HistoryWorldVersion,HistoryWorldSave,HistoryWorldSetting,LatestWorld,Resource,UndividedVersion
+from ..properties import *
 
 
 class CrafterAddonPreferences(AddonPreferences):
@@ -131,6 +131,10 @@ class CrafterAddonPreferences(AddonPreferences):
                         default=False,)# type: ignore
     Game_Resources: BoolProperty(name="Game Resources",
                                   default=True,)# type: ignore
+    Auto_Load_Material: BoolProperty(name="Load Material",
+                                      default=True,)# type: ignore
+    Auto_Load_Environment: BoolProperty(name="Load Environment",
+                                        default=False,)# type: ignore
 #==========加载资源包属性==========
     Resources_Plans_List: CollectionProperty(name="Resources Plans",type=ResourcePlan)#type: ignore
     Resources_Plans_List_index: IntProperty(name="Resources",
@@ -168,9 +172,9 @@ class CrafterAddonPreferences(AddonPreferences):
     Classification_Basis_List: CollectionProperty(name="Classification Basis",type=ClassificationBasisl)# type: ignore
     Classification_Basis_List_index: IntProperty(name="Classification Basis",default=0)# type: ignore
 
-#==========加载背景属性==========
-    Backgrounds_List: CollectionProperty(name="Backgrounds",type=Background)# type: ignore
-    Backgrounds_List_index: IntProperty(name="Background",
+#==========加载环境属性==========
+    Environments_List: CollectionProperty(name="Environments",type=Environment)# type: ignore
+    Environments_List_index: IntProperty(name="Environment",
                                       default=0,
                                       update=lambda self, context: self.reload_all(context))# type: ignore
 #==========偏好设置面板==========

@@ -5,9 +5,9 @@ dictionary = {
         "Plans":"方案",
         #==========面板==========
             #==========加载==========
-                #==========加载背景==========
-        "Background":"背景",
-        "Load Background":"加载背景",
+                #==========加载环境==========
+        "Environment":"环境",
+        "Load Environment":"加载环境",
             #==========导入世界==========
         "Import World":"导入世界",
         "Import Editable Area":"导入可编辑区域",
@@ -92,7 +92,7 @@ dictionary = {
         "Parsed Normal":"已解析法向",
         "Porosity":"孔隙率",
         #==========提示==========
-        "No Selected Background!":"无选中背景!",
+        "No Selected Environment!":"无选中环境!",
         "Can't find any versions!":"找不到任何版本!",
         "It's not a world path!":"这不是一个世界路径!",
         "Please set the save file into the Minecraft game folder!":"请将存档文件放入Minecraft游戏文件夹!",

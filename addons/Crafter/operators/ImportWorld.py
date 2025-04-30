@@ -10,7 +10,7 @@ from ctypes import wintypes
 from ..config import __addon_name__
 from ....common.i18n.i18n import i18n
 from bpy.props import StringProperty, IntProperty, BoolProperty, IntVectorProperty, EnumProperty, CollectionProperty, FloatProperty
-from ..__init__ import dir_cafter_data, dir_resourcepacks_plans, dir_materials, dir_classification_basis, dir_blend_append, dir_init_main, dir_backgrounds
+from ..__init__ import dir_cafter_data, dir_resourcepacks_plans, dir_materials, dir_classification_basis, dir_blend_append, dir_init_main
 from .Defs import *
 
 # ==================== 导入世界 ====================
@@ -42,12 +42,14 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         col_1.prop(addon_prefs, "useChunkPrecision")
         col_1.prop(addon_prefs, "strictDeduplication")
         col_1.prop(addon_prefs, "allowDoubleFace")
+        col_1.prop(addon_prefs, "Auto_Load_Material")
         col_1.prop(addon_prefs, "exportLightBlock")
 
         col_2 = row.column()
         col_2.prop(addon_prefs, "keepBoundary")
         col_2.prop(addon_prefs, "cullCave")
         col_2.prop(addon_prefs, "shell")
+        col_2.prop(addon_prefs, "Auto_Load_Environment")
         col_2.prop(addon_prefs, "useGreedyMesh")
 
         if addon_prefs.exportLightBlock:
@@ -535,6 +537,11 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         addon_prefs.History_World_Settings_List_index = 0
         #增加Crafter_import_time计数
         context.scene.Crafter_import_time += 1
+
+        if addon_prefs.Auto_Load_Material:
+            bpy.ops.crafter.load_material()
+        if  addon_prefs.Auto_Load_Environment:
+            bpy.ops.crafter.load_environment()
         return {'FINISHED'}
 
 class VIEW3D_OT_CrafterImportSolidArea(bpy.types.Operator):#导入可编辑区域 ==========未完善==========

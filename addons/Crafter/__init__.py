@@ -17,7 +17,7 @@ bl_info = {
     "name": "Crafter",
     "author": "Crafter Development Team",
     "blender": (4, 2, 0),
-    "version": (0, 2, 5),
+    "version": (0, 3, 0),
     "description": "目标是成为从Minecraft到Blender全流程的Blender插件",
     "warning": "",
     "doc_url": "https://github.com/Crafter-Production-Team/Crafter?tab=readme-ov-file#crafter",
@@ -68,7 +68,7 @@ dir_original = os.path.join(dir_resourcepacks_plans, "original")
 dir_materials = os.path.join(dir_cafter_data, "materials")
 dir_classification_basis = os.path.join(dir_cafter_data, "classification basis")
 dir_classification_basis_default = os.path.join(dir_classification_basis, "default")
-dir_backgrounds = os.path.join(dir_cafter_data, "backgrounds")
+dir_environments = os.path.join(dir_cafter_data, "environments")
 
 #==========注册==========
 def register():
@@ -88,7 +88,7 @@ def register():
     os.makedirs(dir_materials, exist_ok=True)
     os.makedirs(dir_classification_basis, exist_ok=True)
     os.makedirs(dir_classification_basis_default, exist_ok=True)
-    os.makedirs(dir_backgrounds, exist_ok=True)
+    os.makedirs(dir_environments, exist_ok=True)
     #==========初始化默认方案==========
     for filename in os.listdir(dir_defaults_materials):
         src_file = os.path.join(dir_defaults_materials, filename)

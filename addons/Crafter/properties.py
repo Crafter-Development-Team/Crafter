@@ -29,5 +29,5 @@ class Material(bpy.types.PropertyGroup):
 class ClassificationBasisl(bpy.types.PropertyGroup):
     Classification_Basisl: StringProperty(name="Classification Basisl",)# type: ignore
 #==========加载背景属性==========
-class Background(bpy.types.PropertyGroup):
-    Background: StringProperty(name="Background",)# type: ignore
+class Environment(bpy.types.PropertyGroup):
+    Environment: StringProperty(name="Environment",)# type: ignore

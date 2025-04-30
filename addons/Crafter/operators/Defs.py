@@ -13,11 +13,11 @@ from ctypes import wintypes
 
 from ..config import __addon_name__
 from ....common.i18n.i18n import i18n
-from bpy.props import StringProperty, IntProperty, BoolProperty, IntVectorProperty, EnumProperty, CollectionProperty, FloatProperty
-from .. import dir_cafter_data, dir_resourcepacks_plans, dir_materials, dir_classification_basis, dir_blend_append, dir_init_main, dir_backgrounds
+from bpy.props import *
+from ..__init__ import dir_cafter_data, dir_resourcepacks_plans, dir_materials, dir_classification_basis, dir_blend_append, dir_init_main, dir_environments
 
 donot = ["Crafter Materials Settings"]
-len_color_jin = 20
+len_color_jin = 21
 
 def run_as_admin_and_wait(exe_path, work_dir=None,shell = False):
     # 定义SHELLEXECUTEINFOW结构体

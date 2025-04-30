@@ -5,7 +5,7 @@ import json
 from ..config import __addon_name__
 from ....common.i18n.i18n import i18n
 from bpy.props import *
-from ..__init__ import dir_cafter_data, dir_resourcepacks_plans, dir_materials, dir_classification_basis, dir_blend_append, dir_init_main, dir_backgrounds
+from ..__init__ import dir_cafter_data, dir_resourcepacks_plans, dir_materials, dir_classification_basis, dir_blend_append, dir_init_main, dir_environments
 from .Defs import *
 
 # ==================== 加载材质 ====================
@@ -25,6 +25,8 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):
         addon_prefs = context.preferences.addons[__addon_name__].preferences
 
         bpy.ops.crafter.reload_all()
+        if not (-1 < addon_prefs.Materials_List_index and addon_prefs.Materials_List_index < len(addon_prefs.Materials_List)):
+            return {"CANCELLED"}
         if context.active_object:
             bpy.ops.object.mode_set(mode='OBJECT')
         bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)

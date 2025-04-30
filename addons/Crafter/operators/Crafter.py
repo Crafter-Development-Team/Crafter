@@ -15,5 +15,5 @@ class VIEW3D_OT_CrafterReloadAll(bpy.types.Operator):
         bpy.ops.crafter.reload_resources()
         bpy.ops.crafter.reload_materials()
         bpy.ops.crafter.reload_classification_basis()
-        bpy.ops.crafter.reload_background()
+        bpy.ops.crafter.reload_environment()
         return {'FINISHED'}

@@ -5,7 +5,7 @@ import json
 from ..config import __addon_name__
 from ....common.i18n.i18n import i18n
 from bpy.props import StringProperty, IntProperty, BoolProperty, IntVectorProperty, EnumProperty, CollectionProperty, FloatProperty
-from .. import dir_cafter_data, dir_resourcepacks_plans, dir_materials, dir_classification_basis, dir_blend_append, dir_init_main, dir_backgrounds
+from .. import dir_cafter_data, dir_resourcepacks_plans, dir_materials, dir_classification_basis, dir_blend_append, dir_init_main, dir_environments
 from .Defs import *
 
 # ==================== 替换资源包 ====================
@@ -24,8 +24,10 @@ class VIEW3D_OT_CrafterReplaceResources(bpy.types.Operator):
     def execute(self, context: bpy.types.Context):
         addon_prefs = context.preferences.addons[__addon_name__].preferences
         
-        bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
         bpy.ops.crafter.reload_all()
+        if not (-1 < addon_prefs.Resources_Plans_List_index and addon_prefs.Resources_Plans_List_index < len(addon_prefs.Resources_Plans_List)):
+            return {'CANCELLED'}
+        bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
         dir_resourcepacks = os.path.join(dir_resourcepacks_plans, addon_prefs.Resources_Plans_List[addon_prefs.Resources_Plans_List_index].name)
         dir_crafter_json = os.path.join(dir_resourcepacks, "crafter.json")
         # 加载json
