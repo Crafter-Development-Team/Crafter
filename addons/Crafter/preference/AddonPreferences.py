@@ -135,6 +135,18 @@ class CrafterAddonPreferences(AddonPreferences):
                                       default=True,)# type: ignore
     Auto_Load_Environment: BoolProperty(name="Load Environment",
                                         default=False,)# type: ignore
+    Custom_Path: BoolProperty(name="Custom Path",
+                                  default=False,)# type: ignore
+    is_Game_Path: BoolProperty(name="Game Path",
+                                  default=False,)# type: ignore
+    Custom_Jar_Path: StringProperty(name="Jar Path",
+                                        subtype="FILE_PATH",
+                                        default="Jar Path")# type: ignore
+    use_Custom_mods_Path: BoolProperty(name="Custom Mods",
+                                        default=False,)# type: ignore
+    Custom_mods_Path: StringProperty(name="Mods Path",
+                                        subtype="DIR_PATH",
+                                        default="Mods Path")# type: ignore
 #==========加载资源包属性==========
     Resources_Plans_List: CollectionProperty(name="Resources Plans",type=ResourcePlan)#type: ignore
     Resources_Plans_List_index: IntProperty(name="Resources",

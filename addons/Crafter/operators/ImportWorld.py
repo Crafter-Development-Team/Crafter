@@ -36,6 +36,25 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         addon_prefs = context.preferences.addons[__addon_name__].preferences
         layout = self.layout
 
+        if not addon_prefs.is_Game_Path:
+            layout.label(text="Your world path is not in game folder,select jar.")
+        else:
+            layout.prop(addon_prefs, "Custom_Path")
+        if (not addon_prefs.is_Game_Path) or addon_prefs.Custom_Path:
+            layout.prop(addon_prefs, "Custom_Jar_Path")
+            if not os.path.exists(addon_prefs.Custom_Jar_Path):
+                layout.label(icon="ERROR",text="Path not found!")
+            elif not addon_prefs.Custom_Jar_Path.endswith(".jar"):
+                layout.label(icon="ERROR",text="It's not a jar file!")
+            layout.prop(addon_prefs, "use_Custom_mods_Path")
+            if addon_prefs.use_Custom_mods_Path:
+                row_Custom_mods_Path = layout.row()
+                row_Custom_mods_Path.prop(addon_prefs, "Custom_mods_Path")
+                if not os.path.exists(addon_prefs.Custom_mods_Path):
+                    layout.label(icon="ERROR",text="Path not found!")
+                elif not os.path.isdir(addon_prefs.Custom_mods_Path):
+                    layout.label(icon="ERROR",text="It's not a folder!")
+
         row = layout.row()
 
         col_1 = row.column()
@@ -142,6 +161,7 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         #初始化路径
         jarPath = ""
         versionName = ""
+        addon_prefs.is_Game_Path = True
         # 计算游戏文件路径
         dir_saves = os.path.dirname(worldPath)
         dir_back_saves = os.path.dirname(dir_saves)
@@ -156,18 +176,19 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             reload_Undivided_Vsersions(context=context,dir_versions=dir_versions)
             dir_resourcepacks = os.path.join(dir_dot_minecraft,"resourcepacks")
             dir_mods = os.path.join(dir_dot_minecraft,"mods")
-
         else:
             versionPath = dir_back_saves
             versionName = os.path.basename(versionPath)
             jarPath = os.path.join(versionPath, versionName+".jar")
             if not os.path.exists(jarPath):
-                self.report({'ERROR'}, "Please set the save file into the Minecraft game folder!")
-                return {"CANCELLED"}
-            dir_mods = os.path.join(versionPath, "mods")
-            dir_resourcepacks = os.path.join(versionPath, "resourcepacks")
-            dir_versions = os.path.dirname(versionPath)
-            dir_dot_minecraft = os.path.dirname(dir_versions)
+                addon_prefs.is_Game_Path = False
+                self.worldPath = worldPath
+                return context.window_manager.invoke_props_dialog(self)
+            else:
+                dir_mods = os.path.join(versionPath, "mods")
+                dir_resourcepacks = os.path.join(versionPath, "resourcepacks")
+                dir_versions = os.path.dirname(versionPath)
+                dir_dot_minecraft = os.path.dirname(dir_versions)
         #储存信息到self
         self.worldPath = worldPath
         self.jarPath = jarPath
@@ -177,7 +198,10 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         self.version = versionName
         self.dot_minecraftPath = dir_dot_minecraft
         # 获取资源包
-        list_resourcepacks = os.listdir(dir_resourcepacks)
+        if os.path.exists(dir_resourcepacks):
+            list_resourcepacks = os.listdir(dir_resourcepacks)
+        else:
+            list_resourcepacks = []
         dir_json_resourcepacks = os.path.join(dir_cafter_data, "resourcepacks.json")
         
         if os.path.exists(dir_json_resourcepacks):
@@ -221,25 +245,50 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         imported_time = str(context.scene.Crafter_import_time)
         if context.active_object:
             bpy.ops.object.mode_set(mode='OBJECT')
-        if self.version == "":
-            undivided = True
-            dir_version = addon_prefs.Undivided_Vsersions_List[addon_prefs.Undivided_Vsersions_List_index].name
-            version = os.path.basename(dir_version)
-            jarPath = os.path.join(dir_version, version + ".jar")
+        if (not addon_prefs.is_Game_Path) or addon_prefs.Custom_Path:
 
+            addon_prefs.Game_Resources_List.clear()
+            worldPath = self.worldPath
+            if not os.path.exists(addon_prefs.Custom_Jar_Path):
+                self.report({'ERROR'}, "Path not found!")
+                return {"CANCELLED"}
+            elif not addon_prefs.Custom_Jar_Path.endswith(".jar"):
+                self.report({'ERROR'}, "It's not a jar file!")
+                return {"CANCELLED"}
+            jarPath = addon_prefs.Custom_Jar_Path
+            versionJsonPath = jarPath[:-3]+"json"
+            if addon_prefs.use_Custom_mods_Path:
+                if not os.path.exists(addon_prefs.Custom_mods_Path):
+                    self.report({'ERROR'}, "Path not found!")
+                    return {"CANCELLED"}
+                if not os.path.isdir(addon_prefs.Custom_mods_Path):
+                    self.report({'ERROR'}, "It's not a folder!")
+                    return {"CANCELLED"}
+                modsPath = addon_prefs.Custom_mods_Path
+            else:
+                modsPath = "None"
         else:
-            undivided = False
-            jarPath = self.jarPath
-            version = self.version
-        worldPath = self.worldPath
-        modsPath = self.modsPath
-        dir_version = os.path.dirname(jarPath)
-        versionJsonPath = os.path.join(dir_version, version + ".json")
+            if self.version == "":
+                undivided = True
+                dir_version = addon_prefs.Undivided_Vsersions_List[addon_prefs.Undivided_Vsersions_List_index].name
+                version = os.path.basename(dir_version)
+                jarPath = os.path.join(dir_version, version + ".jar")
+
+            else:
+                undivided = False
+                jarPath = self.jarPath
+                version = self.version
+            worldPath = self.worldPath
+            modsPath = self.modsPath
+            if not os.path.exists(modsPath):
+                modsPath = "None"
+            dir_version = os.path.dirname(jarPath)
+            versionJsonPath = os.path.join(dir_version, version + ".json")
+
+            save = self.save
+            dot_minecraftPath = self.dot_minecraftPath
+
         resourcepacksPaths = []
-
-        save = self.save
-        dot_minecraftPath = self.dot_minecraftPath
-
         if addon_prefs.Game_Resources:
             for resourcepacksPath in addon_prefs.Game_Resources_List:
                 resourcepacksPaths.append(resourcepacksPath.name)
@@ -472,66 +521,69 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
                 json_history_worlds = json.load(file)
         else:
             json_history_worlds = {}
-        # 根据是否隔离，按不同方式保存历史记录
-        if undivided:
-            json_history_worlds.setdefault(dot_minecraftPath, [{}])
-            undivided_list = json_history_worlds[dot_minecraftPath][0].setdefault(save,{})
-            json_history_settings = undivided_list.setdefault("settings", [])
-            undivided_list["version"] = version
+        if (not addon_prefs.is_Game_Path) or addon_prefs.Custom_Path:
+            pass
         else:
-            json_history_worlds.setdefault(dot_minecraftPath, {})
-            json_history_worlds[dot_minecraftPath].setdefault(version, {})
-            json_history_worlds[dot_minecraftPath][version].setdefault(save, [])
-            json_history_settings = json_history_worlds[dot_minecraftPath][version][save]
-        world_settings_now = [list(addon_prefs.XYZ_1), list(addon_prefs.XYZ_2)]
-        if len(json_history_settings) == 0:
-            json_history_settings.append(None)
-            json_history_settings[0] = world_settings_now
-        else:
-            for i in range (len(json_history_settings)):
-                if json_history_settings[i] == world_settings_now:
-                    for j in range (i,0,-1):
-                        json_history_settings[j] = json_history_settings[j - 1]
-                    json_history_settings[0] = world_settings_now
-                    break
+            # 根据是否隔离，按不同方式保存历史记录
+            if undivided:
+                json_history_worlds.setdefault(dot_minecraftPath, [{}])
+                undivided_list = json_history_worlds[dot_minecraftPath][0].setdefault(save,{})
+                json_history_settings = undivided_list.setdefault("settings", [])
+                undivided_list["version"] = version
             else:
-                if len(json_history_settings) < 10:
-                    json_history_settings.append(None)
-                for i in range (len(json_history_settings) - 1,0,-1):
-                    json_history_settings[i] = json_history_settings[i - 1]
+                json_history_worlds.setdefault(dot_minecraftPath, {})
+                json_history_worlds[dot_minecraftPath].setdefault(version, {})
+                json_history_worlds[dot_minecraftPath][version].setdefault(save, [])
+                json_history_settings = json_history_worlds[dot_minecraftPath][version][save]
+            world_settings_now = [list(addon_prefs.XYZ_1), list(addon_prefs.XYZ_2)]
+            if len(json_history_settings) == 0:
+                json_history_settings.append(None)
                 json_history_settings[0] = world_settings_now
-                
-        # 保存到json文件
-        with open(dir_json_history_worlds, 'w', encoding='utf-8') as file:
-            json.dump(json_history_worlds, file, indent=4)
-
-        # 保存最近世界
-        world_now = f"{save}|{version}|{dot_minecraftPath}"
-        dir_json_latest_worlds = os.path.join(dir_cafter_data, "latest_worlds.json")
-        if os.path.exists(dir_json_latest_worlds):
-            with open(dir_json_latest_worlds, 'r', encoding='utf-8') as file:
-                json_latest_worlds = json.load(file)
-        else:
-            json_latest_worlds = []
-        if len(json_latest_worlds) == 0:
-            json_latest_worlds.append(None)
-            json_latest_worlds[0] = world_now
-        else:
-            for i in range (len(json_latest_worlds)):
-                if json_latest_worlds[i] == world_now:
-                    for j in range (i,0,-1):
-                        json_latest_worlds[j] = json_latest_worlds[j - 1]
-                    json_latest_worlds[0] = world_now
-                    break
             else:
-                if len(json_latest_worlds) < 5:
-                    json_latest_worlds.append(None)
-                for i in range (len(json_latest_worlds) - 1,0,-1):
-                    json_latest_worlds[i] = json_latest_worlds[i - 1]
+                for i in range (len(json_history_settings)):
+                    if json_history_settings[i] == world_settings_now:
+                        for j in range (i,0,-1):
+                            json_history_settings[j] = json_history_settings[j - 1]
+                        json_history_settings[0] = world_settings_now
+                        break
+                else:
+                    if len(json_history_settings) < 10:
+                        json_history_settings.append(None)
+                    for i in range (len(json_history_settings) - 1,0,-1):
+                        json_history_settings[i] = json_history_settings[i - 1]
+                    json_history_settings[0] = world_settings_now
+                    
+            # 保存到json文件
+            with open(dir_json_history_worlds, 'w', encoding='utf-8') as file:
+                json.dump(json_history_worlds, file, indent=4)
+
+            # 保存最近世界
+            world_now = f"{save}|{version}|{dot_minecraftPath}"
+            dir_json_latest_worlds = os.path.join(dir_cafter_data, "latest_worlds.json")
+            if os.path.exists(dir_json_latest_worlds):
+                with open(dir_json_latest_worlds, 'r', encoding='utf-8') as file:
+                    json_latest_worlds = json.load(file)
+            else:
+                json_latest_worlds = []
+            if len(json_latest_worlds) == 0:
+                json_latest_worlds.append(None)
                 json_latest_worlds[0] = world_now
-        # 保存到json文件
-        with open(dir_json_latest_worlds, 'w', encoding='utf-8') as file:
-            json.dump(json_latest_worlds, file, indent=4)
+            else:
+                for i in range (len(json_latest_worlds)):
+                    if json_latest_worlds[i] == world_now:
+                        for j in range (i,0,-1):
+                            json_latest_worlds[j] = json_latest_worlds[j - 1]
+                        json_latest_worlds[0] = world_now
+                        break
+                else:
+                    if len(json_latest_worlds) < 5:
+                        json_latest_worlds.append(None)
+                    for i in range (len(json_latest_worlds) - 1,0,-1):
+                        json_latest_worlds[i] = json_latest_worlds[i - 1]
+                    json_latest_worlds[0] = world_now
+            # 保存到json文件
+            with open(dir_json_latest_worlds, 'w', encoding='utf-8') as file:
+                json.dump(json_latest_worlds, file, indent=4)
         # 归零index
         addon_prefs.Latest_World_List_index = 0
         addon_prefs.History_World_Settings_List_index = 0

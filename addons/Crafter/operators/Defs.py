@@ -10,6 +10,7 @@ from pathlib import Path
 import shutil
 import ctypes
 from ctypes import wintypes
+import textwrap
 
 from ..config import __addon_name__
 from ....common.i18n.i18n import i18n
@@ -18,6 +19,25 @@ from ..__init__ import dir_cafter_data, dir_resourcepacks_plans, dir_materials, 
 
 donot = ["Crafter Materials Settings"]
 len_color_jin = 21
+
+def draw_multiline_label( text, parent,context):
+    # 获取当前面板宽度和UI缩放比例
+    panel_width = context.region.width
+    
+    # 计算有效字符宽度（考虑UI缩放对字体大小的影响）
+    chars_per_line = max(10, int(panel_width / 50))  # 防下限
+    
+    # 使用textwrap分割文本
+    wrapper = textwrap.TextWrapper(
+        width=chars_per_line,
+        break_long_words=True,
+        replace_whitespace=False
+    )
+    lines = wrapper.wrap(text=text)
+    
+    # 动态生成多行标签
+    for line in lines:
+        parent.label(text=line)
 
 def run_as_admin_and_wait(exe_path, work_dir=None,shell = False):
     # 定义SHELLEXECUTEINFOW结构体
