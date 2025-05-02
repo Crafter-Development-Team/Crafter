@@ -134,7 +134,8 @@
     },
     "foliage_sss_tran_move":{
         "ban_keyw":[
-            "pale_oak_leaves"
+            "pale_oak_leaves",
+            "flower"
         ],
         "keyw":[
             "oak_leaves",

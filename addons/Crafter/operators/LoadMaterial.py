@@ -259,7 +259,7 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):
         for obj in context.selected_objects:
             if obj.type == "MESH":
                 add_to_crafter_mcmts_collection(object=obj,context=context)
-        bpy.ops.crafter.set_pbr_parser
+        bpy.ops.crafter.set_pbr_parser()
 
         return {'FINISHED'}
 
