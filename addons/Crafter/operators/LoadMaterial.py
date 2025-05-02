@@ -255,11 +255,11 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):
             link_base_normal_and_PBR(node_tex_base=node_tex_base, group_CI=group_CI, links=links, node_C_PBR_Parser=node_C_PBR_Parser,node_tex_normal=node_tex_normal, node_tex_PBR=node_tex_PBR)
             if node_tex_base != None:
                 nodes.active = node_tex_base
-        bpy.ops.crafter.set_pbr_parser
         # 添加选中物体的材质到合集
         for obj in context.selected_objects:
             if obj.type == "MESH":
                 add_to_crafter_mcmts_collection(object=obj,context=context)
+        bpy.ops.crafter.set_pbr_parser
 
         return {'FINISHED'}
 
@@ -318,8 +318,8 @@ class VIEW3D_OT_CrafterSetPBRParser(bpy.types.Operator):
             elif node.type == "GROUP":
                 node_Parser = node
         node_Parser.node_tree = bpy.data.node_groups["C-" + addon_prefs.PBR_Parser]
-        for input in node_Parser.inputs:
-            links.new(input, node_output.outputs[input.name])
+        for output in node_Parser.outputs:
+            links.new(output, node_output.inputs[output.name])
         for input in node_Parser.inputs:
             links.new(input, node_input.outputs[input.name])
         PBR_value = [0.291769,0.039546,0,1]
