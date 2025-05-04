@@ -36,24 +36,25 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         addon_prefs = context.preferences.addons[__addon_name__].preferences
         layout = self.layout
 
+        col_custom = layout.column()
         if not addon_prefs.is_Game_Path:
-            layout.label(text="Your world path is not in game folder,select jar.")
+            col_custom.label(text="Your world path is not in game folder,select jar.")
         else:
-            layout.prop(addon_prefs, "Custom_Path")
+            col_custom.prop(addon_prefs, "Custom_Path")
         if (not addon_prefs.is_Game_Path) or addon_prefs.Custom_Path:
-            layout.prop(addon_prefs, "Custom_Jar_Path")
+            col_custom.prop(addon_prefs, "Custom_Jar_Path")
             if not os.path.exists(addon_prefs.Custom_Jar_Path):
-                layout.label(icon="ERROR",text="Path not found!")
+                col_custom.label(icon="ERROR",text="Path not found!")
             elif not addon_prefs.Custom_Jar_Path.endswith(".jar"):
-                layout.label(icon="ERROR",text="It's not a jar file!")
-            layout.prop(addon_prefs, "use_Custom_mods_Path")
+                col_custom.label(icon="ERROR",text="It's not a jar file!")
+            col_custom.prop(addon_prefs, "use_Custom_mods_Path")
             if addon_prefs.use_Custom_mods_Path:
-                row_Custom_mods_Path = layout.row()
-                row_Custom_mods_Path.prop(addon_prefs, "Custom_mods_Path")
+                col_custom = layout.row()
+                col_custom.prop(addon_prefs, "Custom_mods_Path")
                 if not os.path.exists(addon_prefs.Custom_mods_Path):
-                    layout.label(icon="ERROR",text="Path not found!")
+                    col_custom.label(icon="ERROR",text="Path not found!")
                 elif not os.path.isdir(addon_prefs.Custom_mods_Path):
-                    layout.label(icon="ERROR",text="It's not a folder!")
+                    col_custom.label(icon="ERROR",text="It's not a folder!")
 
         row = layout.row()
 

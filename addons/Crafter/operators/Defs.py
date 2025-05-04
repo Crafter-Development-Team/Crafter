@@ -20,6 +20,13 @@ from ..__init__ import dir_cafter_data, dir_resourcepacks_plans, dir_materials, 
 donot = ["Crafter Materials Settings"]
 len_color_jin = 21
 
+def reloadwindow():
+    bpy.ops.wm.redraw_timer(type="DRAW_WIN_SWAP")
+
+def reportinfo(self, text):
+    self.report({'INFO'}, text)
+    reloadwindow()
+
 def draw_multiline_label( text, parent,context):
     # 获取当前面板宽度和UI缩放比例
     panel_width = context.region.width
