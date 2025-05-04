@@ -279,8 +279,8 @@ class VIEW3D_UL_CrafterResources(bpy.types.UIList):# 资源包 预设 列表
 class VIEW3D_UL_CrafterResourcesInfo(bpy.types.UIList):# 资源包 预设详情 列表
      def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
         addon_prefs = context.preferences.addons[__addon_name__].preferences
-        dir_resourcepacks = os.path.join(dir_resourcepacks_plans, addon_prefs.Resources_Plans_List[addon_prefs.Resources_Plans_List_index].name)
-        dir_resourcepack = os.path.join(dir_resourcepacks, item.name)
+        # dir_resourcepacks = os.path.join(dir_resourcepacks_plans, addon_prefs.Resources_Plans_List[addon_prefs.Resources_Plans_List_index].name)
+        # dir_resourcepack = os.path.join(dir_resourcepacks, item.name)
         
         item_name = ""
         i = 0
@@ -294,7 +294,7 @@ class VIEW3D_UL_CrafterResourcesInfo(bpy.types.UIList):# 资源包 预设详情 
         #     layout.label(text=item_name,icon="crafter_resources" + item.name)
         # else:
         #     layout.label(text=item_name)
-        layout.label(text=item_name[:-4])
+        layout.label(text=item_name)
 
 
 
