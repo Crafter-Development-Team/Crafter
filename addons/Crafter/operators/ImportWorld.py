@@ -239,9 +239,8 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         return context.window_manager.invoke_props_dialog(self)
     
     def execute(self, context: bpy.types.Context):
+        zero_time = time.perf_counter()#记录开始时间
         addon_prefs = context.preferences.addons[__addon_name__].preferences
-
-        start_time = time.perf_counter()#记录开始时间
 
         imported_time = str(context.scene.Crafter_import_time)
         if context.active_object:
@@ -360,6 +359,8 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         for file in os.listdir(dir_importer):
             if file.endswith(".obj"):
                 os.remove(os.path.join(dir_importer, file))
+                
+        prepared_time = time.perf_counter()
         #生成obj
 
 # ==================================================================================
@@ -377,11 +378,9 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         #         creationflags=CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS,
         #         shell=addon_prefs.shell
         #     )
-        #     self.report({'INFO'}, f"WorldImporter.exe started in a new process")
         #     #等待进程结束
         #     process.wait()
         # except Exception as e:
-        #     self.report({'ERROR'}, f"Error: {e}")
         #     return {"CANCELLED"}
 
 # ==================================================================================
@@ -392,17 +391,16 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         have_obj = False
         real_name_dic = {}
         material_should_delete = []
+        before_objects = set(bpy.data.objects)# 记录当前场景最初对象
         for file in os.listdir(dir_importer):
             if file.endswith(".obj"):
-                pre_import_objects = set(bpy.data.objects)#纪录当前场景中的所有对象
+                pre_import_objects = set(bpy.data.objects)# 记录当前场景中的所有对象
                 
                 bpy.ops.wm.obj_import(filepath=os.path.join(dir_importer, file))
                 bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
                 have_obj = True
                 
-                post_import_objects = set(bpy.data.objects)
-                new_objects = post_import_objects - pre_import_objects# 计算新增对象
-                imported_objects = list(new_objects)
+                imported_objects = list(set(bpy.data.objects) - pre_import_objects)# 计算新增对象
                 for obj in imported_objects:
                     for i in range(len(obj.data.materials)):
                         material = obj.data.materials[i]
@@ -421,9 +419,9 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
                     add_to_mcmts_collection(object=obj,context=context)
                     add_to_crafter_mcmts_collection(object=obj,context=context)
                     add_C_time(obj=obj)
-                # 统计时间
-                used_time = time.perf_counter() - start_time
-                self.report({'INFO'}, i18n("At") + " " + str(used_time)[:6] + "s,"+ file + i18n("imported"))
+                    # 定位到视图
+                    view_2_active_object(context)
+
         for material in material_should_delete:
             bpy.data.materials.remove(bpy.data.materials[material])
         if not have_obj:
@@ -498,21 +496,13 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         bpy.ops.file.pack_all()
             
         #完成导入
-        used_time = time.perf_counter() - start_time
-        self.report({'INFO'}, i18n("Importing finished.Time used:") + str(used_time)[:6] + "s")
-        # 自动定位到视图
-        for window in context.window_manager.windows:
-            for area in window.screen.areas:
-                if area.type == 'VIEW_3D':
-                    # 需要同时覆盖window/area/region三个上下文参数
-                    for region in area.regions:
-                        if region.type == 'WINDOW':  # 只处理主区域
-                            try:
-                                with context.temp_override(window=window, area=area, region=region):
-                                    bpy.ops.view3d.view_selected()
-                            except:
-                                pass
-                            break
+        world_imported_time = time.perf_counter()
+        # 定位到视图
+        new_objects = list(set(bpy.data.objects) - before_objects)
+        for object in new_objects:
+            if object.type == "MESH":
+                object.select_set(True)
+        view_2_active_object(context)
                             
         # 保存历史世界
         dir_json_history_worlds = os.path.join(dir_cafter_data, "history_worlds.json")
@@ -591,10 +581,21 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         #增加Crafter_import_time计数
         context.scene.Crafter_import_time += 1
 
+        report_text = i18n("Import time: ") + str(world_imported_time - prepared_time)[:6] + "s"
+
         if addon_prefs.Auto_Load_Material:
+            material_start_time = time.perf_counter()
             bpy.ops.crafter.load_material()
+            material_used_time = time.perf_counter() - material_start_time
+            report_text = report_text + i18n(", Material time: ") + str(material_used_time)[:6] + "s"
         if  addon_prefs.Auto_Load_Environment:
+            environment_start_time = time.perf_counter()
             bpy.ops.crafter.load_environment()
+            environment_used_time = time.perf_counter() - environment_start_time
+            report_text = report_text + i18n(", Environment time: ") + str(environment_used_time)[:6] + "s"
+
+        self.report({'INFO'},report_text)
+
         return {'FINISHED'}
 
 class VIEW3D_OT_CrafterImportSolidArea(bpy.types.Operator):#导入可编辑区域 ==========未完善==========

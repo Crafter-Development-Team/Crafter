@@ -104,12 +104,10 @@ dictionary = {
         "It's not a world path!":"这不是一个世界路径!",
         "Please set the save file into the Minecraft game folder!":"请将存档文件放入Minecraft游戏文件夹!",
         "WorldImporter didn't export obj!":"WorldImporter没有导出obj!",
-        "Importing finished.Time used:":"导入完成。耗时:",
         "Haven't history worlds":"无历史世界记录",
-        "WorldImporter.exe started in a new process":"WorldImporter.exe已在新进程启动",
-        "At":"在",
-        "WorldImporter.exe finished":"WorldImporter.exe结束运行",
-        "imported":"导入完毕",
+        "Import time: ":"导入用时: ",
+        ", Material time: ":", 材质用时: ",
+        ", Environment time: ":", 环境用时: ",
     }
 }
 

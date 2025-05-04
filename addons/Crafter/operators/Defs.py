@@ -23,8 +23,19 @@ len_color_jin = 21
 def reloadwindow():
     bpy.ops.wm.redraw_timer(type="DRAW_WIN_SWAP")
 
-def reportinfo(self, text):
-    self.report({'INFO'}, text)
+def view_2_active_object(context):
+    for window in context.window_manager.windows:
+        for area in window.screen.areas:
+            if area.type == 'VIEW_3D':
+                # 需要同时覆盖window/area/region三个上下文参数
+                for region in area.regions:
+                    if region.type == 'WINDOW':  # 只处理主区域
+                        try:
+                            with context.temp_override(window=window, area=area, region=region):
+                                bpy.ops.view3d.view_selected()
+                        except:
+                            pass
+                        break
     reloadwindow()
 
 def draw_multiline_label( text, parent,context):
