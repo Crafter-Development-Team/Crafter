@@ -231,6 +231,9 @@ class VIEW3D_OT_CrafterReloadResourcesPlans(bpy.types.Operator):#刷新 资源�
             if os.path.isdir(os.path.join(dir_resourcepacks_plans, folder)):
                 plan_name = addon_prefs.Resources_Plans_List.add()
                 plan_name.name = folder
+        if addon_prefs.Resources_Plans_List_index < 0 or addon_prefs.Resources_Plans_List_index >= len(addon_prefs.Resources_Plans_List):
+            addon_prefs.Resources_Plans_List_index = 0
+
         return {'FINISHED'}
 
 class VIEW3D_OT_CrafterReloadResources(bpy.types.Operator):#刷新 资源包 列表
@@ -267,6 +270,9 @@ class VIEW3D_OT_CrafterReloadResources(bpy.types.Operator):#刷新 资源包 列
 
         with open(dir_crafter_json, "w", encoding="utf-8") as file:
             json.dump(json_crafter, file, ensure_ascii=False, indent=4)
+
+        if addon_prefs.Resources_List_index < 0 or addon_prefs.Resources_List_index >= len(addon_prefs.Resources_List):
+            addon_prefs.Resources_List_index = 0
 
         return {'FINISHED'}
 

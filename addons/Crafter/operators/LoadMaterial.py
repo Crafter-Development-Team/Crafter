@@ -420,6 +420,9 @@ class VIEW3D_OT_CrafterReloadMaterials(bpy.types.Operator):#刷新材质列表
             if extension == ".blend":
                 material_name = addon_prefs.Materials_List.add()
                 material_name.name = base
+        if addon_prefs.Materials_List_index < 0 or addon_prefs.Materials_List_index >= len(addon_prefs.Materials_List):
+            addon_prefs.Materials_List_index = 0
+            
         return {'FINISHED'}
 
 class VIEW3D_OT_CrafterReloadClassificationBasis(bpy.types.Operator):#刷新分类依据菜单
@@ -440,6 +443,8 @@ class VIEW3D_OT_CrafterReloadClassificationBasis(bpy.types.Operator):#刷新分�
             if os.path.isdir(os.path.join(dir_classification_basis, folder)):
                 plan_name = addon_prefs.Classification_Basis_List.add()
                 plan_name.name = folder
+        if addon_prefs.Classification_Basis_List_index < 0 or addon_prefs.Classification_Basis_List_index >= len(addon_prefs.Classification_Basis_List):
+            addon_prefs.Classification_Basis_List_index = 0
 
         return {'FINISHED'}
 
