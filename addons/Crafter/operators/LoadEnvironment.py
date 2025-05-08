@@ -94,7 +94,7 @@ class VIEW3D_OT_CrafterReloadEnvironments(bpy.types.Operator):# 刷新 环境 �
             if extension == ".blend":
                 material_name = addon_prefs.Environments_List.add()
                 material_name.name = base
-        if addon_prefs.Environments_List_index < 0 or addon_prefs.Environments_List_index >= len(addon_prefs.Environments_List):
+        if (addon_prefs.Environments_List_index < 0 or addon_prefs.Environments_List_index >= len(addon_prefs.Environments_List)) and addon_prefs.Environments_List_index != 0:
             addon_prefs.Environments_List_index = 0
 
         return {'FINISHED'}
