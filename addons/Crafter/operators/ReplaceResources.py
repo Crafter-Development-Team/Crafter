@@ -4,7 +4,7 @@ import json
 
 from ..config import __addon_name__
 from ....common.i18n.i18n import i18n
-from bpy.props import StringProperty, IntProperty, BoolProperty, IntVectorProperty, EnumProperty, CollectionProperty, FloatProperty
+from bpy.props import *
 from .. import dir_cafter_data, dir_resourcepacks_plans, dir_materials, dir_classification_basis, dir_blend_append, dir_init_main, dir_environments
 from .Defs import *
 
@@ -254,8 +254,11 @@ class VIEW3D_OT_CrafterReloadResources(bpy.types.Operator):#刷新 资源包 列
         addon_prefs.Resources_List.clear()
         json_crafter_copy =[]
         if "crafter.json" in list_dir_resourcepacks:
-            with open(dir_crafter_json, "r", encoding="utf-8") as file:
-                json_crafter = json.load(file)
+            try:
+                with open(dir_crafter_json, "r", encoding="utf-8") as file:
+                    json_crafter = json.load(file)
+            except:
+                json_crafter = []
             json_crafter_copy =json_crafter.copy()
         json_crafter = []
         for folder in list_dir_resourcepacks:
