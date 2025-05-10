@@ -138,10 +138,47 @@
             "flower"
         ],
         "keyw":[
-            "oak_leaves",
-            "jungle_leaves",
-            "acacia_leaves",
+        ]
+    },
+    "oak_leaves":{
+        "ban_keyw":[
+            "pale_oak_leaves",
             "dark_oak_leaves",
+            "flower"
+        ],
+        "keyw":[
+            "oak_leaves"
+        ]
+    },
+    "jungle_leaves":{
+        "ban_keyw":[
+            "flower"
+        ],
+        "keyw":[
+            "jungle_leaves"
+        ]
+    },
+    "acacia_leaves":{
+        "ban_keyw":[
+            "flower"
+        ],
+        "keyw":[
+            "acacia_leaves"
+        ]
+    },
+    "dark_oak_leaves":{
+        "ban_keyw":[
+            "flower"
+        ],
+        "keyw":[
+            "dark_oak_leaves"
+        ]
+    },
+    "mangrove_leaves":{
+        "ban_keyw":[
+            "flower"
+        ],
+        "keyw":[
             "mangrove_leaves"
         ]
     },
