@@ -109,12 +109,12 @@
             "short_grass",
             "tall_grass_top",
             "tall_grass_bottom",
-            "bush",
             "lily_pad"
         ],
         "full":[
             "grass",
-            "vine"
+            "vine",
+            "bush"
         ]
     },
     "dryfoliage_tran":{
