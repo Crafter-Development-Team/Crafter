@@ -14,16 +14,7 @@ class CrafterAddonPreferences(AddonPreferences):
     # https://docs.blender.org/api/current/bpy.props.html
     # The name can't be dynamically translated during blender programming running as they are defined
     # when the class is registered, i.e. we need to restart blender for the property name to be correctly translated.
-#====================希望用户再次打开还能保留的属性【要开自动保存】====================
-#==========功能显示属性==========
-    Plans: BoolProperty(name="Plans",
-                        default=True,)# type: ignore
-    Import_World: BoolProperty(name="Import World",
-                               default=True,)# type: ignore
-    Load_Resources: BoolProperty(name="Load Resources",
-                                   default=True,)# type: ignore
-    Load_Materials: BoolProperty(name="Load Materials",
-                                 default=True,)# type: ignore
+
 #==========导入世界属性==========
     World_Path: StringProperty(name="World path",
                                default="World path",
@@ -86,7 +77,7 @@ class CrafterAddonPreferences(AddonPreferences):
     strictDeduplication: BoolProperty(name="Strict Surface Pruning",
                                       default=True,)# type: ignore
     cullCave: BoolProperty(name="Cull Cave",
-                           default=True,)# type: ignore
+                           default=False,)# type: ignore
     exportLightBlock: BoolProperty(name="Export Light Block",
                                    default=True,)# type: ignore
     exportLightBlockOnly: BoolProperty(name="Only Export Light Block",
@@ -183,6 +174,26 @@ class CrafterAddonPreferences(AddonPreferences):
     Materials_List_index: IntProperty(name="Material",default=0)# type: ignore
     Classification_Basis_List: CollectionProperty(name="Classification Basis",type=ClassificationBasisl)# type: ignore
     Classification_Basis_List_index: IntProperty(name="Classification Basis",default=0)# type: ignore
+    Default_Metallic: FloatProperty(name="Metallic",
+                                    subtype="FACTOR",
+                                    default=0.0,
+                                    min=0.0,
+                                    max=1.0,)# type: ignore
+    Default_Roughness: FloatProperty(name="Roughness",
+                                    subtype="FACTOR",
+                                    default=0.5,
+                                    min=0.0,
+                                    max=1.0,)# type: ignore
+    Default_IOR: FloatProperty(name="IOR",
+                                subtype="FACTOR",
+                                default=1.5,
+                                min=1.0,
+                                max=10.0,)# type: ignore
+    Default_Emission_Strength: FloatProperty(name="Emission Strength",
+                                          subtype="FACTOR",
+                                          default=0.0,
+                                          min=0.0,
+                                          max=1.0,)# type: ignore
 
 #==========加载环境属性==========
     Environments_List: CollectionProperty(name="Environments",type=Environment)# type: ignore
@@ -192,10 +203,11 @@ class CrafterAddonPreferences(AddonPreferences):
 #==========偏好设置面板==========
     def draw(self, context: bpy.types.Context):
         layout = self.layout
-        layout.prop(self, "Plans")
-        layout.prop(self, "Import_World")
-        layout.prop(self, "Load_Resources")
-        layout.prop(self, "Load_Materials")
+        col_default_PBR  = layout.column()
+        col_default_PBR.prop(self, "Default_Metallic")
+        col_default_PBR.prop(self, "Default_Roughness")
+        col_default_PBR.prop(self, "Default_IOR")
+        col_default_PBR.prop(self, "Default_Emission_Strength")
 #==========修改变量操作==========
     def update_texture_interpolation(self, context):
         bpy.ops.crafter.set_texture_interpolation()
