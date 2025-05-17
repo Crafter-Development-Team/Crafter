@@ -106,6 +106,10 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):
                 continue
             nodes = node_tree_material.nodes
             links = node_tree_material.links
+
+            # 设置材质设置
+            material.volume_intersection_method = 'ACCURATE'
+            material.displacement_method = "BOTH"
             
             node_tex_base = None
             #处理lod材质
@@ -151,11 +155,7 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):
                 if "Base Color" in group_CI.inputs:
                     group_CI.inputs["Base Color"].default_value = [float(material.name[6:10]),float(material.name[11:15]),float(material.name[16:20]),1]
                 # 连接CI节点
-                Displacement = link_CI_output(group_CI=group_CI, node_output_EEVEE=node_output_EEVEE, node_output_Cycles=node_output_Cycles,links=links)
-                if Displacement:# 查看是否需要开启置换
-                    material.displacement_method = "BOTH"
-                else:
-                    material.displacement_method = "BUMP"
+                link_CI_output(group_CI=group_CI, node_output_EEVEE=node_output_EEVEE, node_output_Cycles=node_output_Cycles,links=links)
                 link_biome_tex(node_biomeTex=node_biomeTex, group_CI=group_CI, links=links)
                 add_node_parser(group_CI=group_CI,nodes=nodes,links=links)
                 continue
@@ -242,12 +242,7 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):
             group_CI.location = (node_output_EEVEE.location.x - 200, node_output_EEVEE.location.y)
             find_CI_group(group_CI=group_CI, real_block_name=real_block_name,classification_list=classification_list)
             # 连接CI节点
-            Displacement = link_CI_output(group_CI=group_CI, node_output_EEVEE=node_output_EEVEE, node_output_Cycles=node_output_Cycles,links=links)
-            if Displacement:# 查看是否需要开启置换
-                # 设置材质置换方式为仅置换
-                material.displacement_method = "BOTH"
-            else:
-                material.displacement_method = "BUMP"
+            link_CI_output(group_CI=group_CI, node_output_EEVEE=node_output_EEVEE, node_output_Cycles=node_output_Cycles,links=links)
             link_biome_tex(node_biomeTex=node_biomeTex, group_CI=group_CI, links=links)
             node_C_PBR_Parser = add_node_parser(group_CI=group_CI,nodes=nodes,links=links)
             if not imported_by_crafter:

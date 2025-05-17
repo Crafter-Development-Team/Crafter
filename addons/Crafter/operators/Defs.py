@@ -294,16 +294,13 @@ def link_CI_output(group_CI, node_output_EEVEE, node_output_Cycles, links):
     node_output_Cycles: Cycles输出节点
     nodes: 目标材质节点组
     links:目标材质连接组
-    return: 是否置换
     '''
-    Displacement = False
     if "EEVEE-Surface" in group_CI.outputs:
         links.new(group_CI.outputs["EEVEE-Surface"], node_output_EEVEE.inputs["Surface"])
     if "EEVEE-Volume" in group_CI.outputs: 
         links.new(group_CI.outputs["EEVEE-Volume"], node_output_EEVEE.inputs["Volume"])
     if "EEVEE-Displacement" in group_CI.outputs: 
         links.new(group_CI.outputs["EEVEE-Displacement"], node_output_EEVEE.inputs["Displacement"])
-        Displacement = True
     if "EEVEE-Thickness" in group_CI.outputs: 
         if "Thickness" in node_output_EEVEE.inputs:
             links.new(group_CI.outputs["EEVEE-Thickness"], node_output_EEVEE.inputs["Thickness"])
@@ -314,11 +311,9 @@ def link_CI_output(group_CI, node_output_EEVEE, node_output_Cycles, links):
         links.new(group_CI.outputs["Cycles-Volume"], node_output_Cycles.inputs["Volume"])
     if "Cycles-Displacement" in group_CI.outputs: 
         links.new(group_CI.outputs["Cycles-Displacement"], node_output_Cycles.inputs["Displacement"])
-        Displacement = True
     if "Cycles-Thickness" in group_CI.outputs: 
         if "Thickness" in node_output_Cycles.inputs:
             links.new(group_CI.outputs["Cycles-Thickness"], node_output_Cycles.inputs["Thickness"])
-    return Displacement
 
 def add_node_parser(group_CI, nodes, links):
     '''

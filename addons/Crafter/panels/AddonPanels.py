@@ -23,7 +23,7 @@ from ..__init__ import dir_resourcepacks_plans
 
 #     @classmethod
 #     def poll(cls, context: bpy.types.Context):
-#             return context.preferences.addons[__addon_name__].preferences.Plans
+#             return True
     
 @reg_order(1)#==========导入世界面板==========
 class VIEW3D_PT_CrafterImportWorld(bpy.types.Panel):
@@ -55,7 +55,7 @@ class VIEW3D_PT_CrafterImportWorld(bpy.types.Panel):
 
     @classmethod
     def poll(cls, context: bpy.types.Context):
-            return context.preferences.addons[__addon_name__].preferences.Import_World
+            return True
 
 
 @reg_order(2)#==========加载面板==========
@@ -96,5 +96,5 @@ class VIEW3D_PT_CrafterImport(bpy.types.Panel):
         row_Environments.operator("crafter.load_environment",text="Load")
     @classmethod
     def poll(cls, context: bpy.types.Context):
-        return context.preferences.addons[__addon_name__].preferences.Load_Resources
+        return True
 

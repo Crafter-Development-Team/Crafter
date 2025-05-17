@@ -49,9 +49,9 @@ class VIEW3D_OT_CrafterReplaceResources(bpy.types.Operator):
                         file_path = os.path.join(root, file)
                         files_list.append((file, file_path))
             images.append(files_list)
-        is_original = False
+        is_No_Resourcepacks = False
         if len(crafter_json) == 0:
-            is_original = True
+            is_No_Resourcepacks = True
         
         for obj in context.selected_objects:
             if obj.type == "MESH":
@@ -75,7 +75,7 @@ class VIEW3D_OT_CrafterReplaceResources(bpy.types.Operator):
                             nodes.remove(node)
                         elif name_image.endswith(".png"):
                             node.interpolation = "Closest"
-                            if not is_original:
+                            if not is_No_Resourcepacks:
                                 node_tex_base = node
                                 found_texture = False
                                 i = 0
@@ -94,7 +94,7 @@ class VIEW3D_OT_CrafterReplaceResources(bpy.types.Operator):
                             group_CI = node
                         if node.node_tree.name.startswith("C-PBR_Parser"):
                             node_C_PBR_Parser = node
-            if is_materialed and (not is_original):
+            if is_materialed and (not is_No_Resourcepacks):
                 node_tex_normal, node_tex_PBR = load_normal_and_PBR(node_tex_base=node_tex_base, nodes=nodes, links=links,)
                 link_base_normal_and_PBR(node_tex_base=node_tex_base, group_CI=group_CI, links=links, node_C_PBR_Parser=node_C_PBR_Parser,node_tex_normal=node_tex_normal, node_tex_PBR=node_tex_PBR)
                 
