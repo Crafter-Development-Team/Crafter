@@ -165,7 +165,7 @@ def add_node_moving_texture(node_tex, nodes, links):
     return:动态纹理节点
     '''
     dir_image = os.path.dirname(node_tex.image.filepath)
-    dir_mcmeta = os.path.join(bpy.path.abspath(dir_image), node_tex.image.name + ".mcmeta")
+    dir_mcmeta = os.path.join(bpy.path.abspath(dir_image), fuq_bl_dot_number(node_tex.image.name) + ".mcmeta")
     if os.path.exists(dir_mcmeta):
         node_Moving_texture = nodes.new(type="ShaderNodeGroup")
         node_Moving_texture.location = (node_tex.location.x - 200, node_tex.location.y)
