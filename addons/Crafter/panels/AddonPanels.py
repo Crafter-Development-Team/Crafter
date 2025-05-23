@@ -87,13 +87,13 @@ class VIEW3D_PT_CrafterImport(bpy.types.Panel):
         row_Resources.label(text=i18n("Materials") + ":" + material)
         row_Resources.operator("crafter.load_material",text="Load")
         #==========加载环境面板==========
-        row_Environments = layout.row()
-        if -1 < addon_prefs.Environments_List_index and addon_prefs.Environments_List_index < len(addon_prefs.Environments_List):
-            environment = addon_prefs.Environments_List[addon_prefs.Environments_List_index].name
-        else:
-            environment = ""
-        row_Environments.label(text=i18n("Environment") + ":" + environment)
-        row_Environments.operator("crafter.load_environment",text="Load")
+        # row_Environments = layout.row()
+        # if -1 < addon_prefs.Environments_List_index and addon_prefs.Environments_List_index < len(addon_prefs.Environments_List):
+        #     environment = addon_prefs.Environments_List[addon_prefs.Environments_List_index].name
+        # else:
+        #     environment = ""
+        # row_Environments.label(text=i18n("Environment") + ":" + environment)
+        # row_Environments.operator("crafter.load_environment",text="Load")
     @classmethod
     def poll(cls, context: bpy.types.Context):
         return True

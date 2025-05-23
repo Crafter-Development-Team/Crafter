@@ -94,7 +94,7 @@ class CrafterAddonPreferences(AddonPreferences):
                                default=4,
                                min=1)#type: ignore
     activeLOD: BoolProperty(name="LOD",
-                            default=True,)# type: ignore
+                            default=False,)# type: ignore
     useUnderwaterLOD: BoolProperty(name="Underwater LOD",
                                    default=False,)# type: ignore
     useGreedyMesh: BoolProperty(name="Greedy Mesh",
@@ -124,8 +124,6 @@ class CrafterAddonPreferences(AddonPreferences):
                                   default=True,)# type: ignore
     Auto_Load_Material: BoolProperty(name="Load Material",
                                       default=True,)# type: ignore
-    Auto_Load_Environment: BoolProperty(name="Load Environment",
-                                        default=False,)# type: ignore
     Custom_Path: BoolProperty(name="Custom Path",
                                   default=False,)# type: ignore
     is_Game_Path: BoolProperty(name="Game Path",

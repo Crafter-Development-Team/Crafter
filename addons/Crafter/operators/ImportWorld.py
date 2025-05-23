@@ -69,7 +69,6 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         col_2.prop(addon_prefs, "keepBoundary")
         col_2.prop(addon_prefs, "cullCave")
         col_2.prop(addon_prefs, "shell")
-        col_2.prop(addon_prefs, "Auto_Load_Environment")
         col_2.prop(addon_prefs, "useGreedyMesh")
 
         if addon_prefs.exportLightBlock:
@@ -588,11 +587,6 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             bpy.ops.crafter.load_material()
             material_used_time = time.perf_counter() - material_start_time
             report_text = report_text + i18n(", Material time: ") + str(material_used_time)[:6] + "s"
-        if  addon_prefs.Auto_Load_Environment:
-            environment_start_time = time.perf_counter()
-            bpy.ops.crafter.load_environment()
-            environment_used_time = time.perf_counter() - environment_start_time
-            report_text = report_text + i18n(", Environment time: ") + str(environment_used_time)[:6] + "s"
 
         self.report({'INFO'},report_text)
 
