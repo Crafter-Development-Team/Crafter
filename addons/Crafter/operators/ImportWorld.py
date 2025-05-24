@@ -179,7 +179,8 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         else:
             versionPath = dir_back_saves
             versionName = os.path.basename(versionPath)
-            jarPath = os.path.join(versionPath, versionName+".jar")
+            jarPath = dir_version_2_dir_jar(versionPath)
+            print(jarPath)
             if not os.path.exists(jarPath):
                 addon_prefs.is_Game_Path = False
                 self.worldPath = worldPath
@@ -348,8 +349,6 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         dir_json_config = os.path.join(dir_config, "config.json")
 
         with open(dir_json_config, 'w', encoding='utf-8') as config:
-            # for key, value in worldconfig.items():
-            #     config.write(f"{key} = {value}\n")
             json.dump(worldconfig, config, indent=4)
 
         # 删去之前导出的obj
@@ -492,7 +491,10 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             if node_tex_base != None:
                 load_normal_and_PBR(node_tex_base=node_tex_base, nodes=nodes, links=links,)
                 nodes.active = node_tex_base
-        bpy.ops.file.pack_all()
+        try:
+            bpy.ops.file.pack_all()
+        except Exception as e:
+            print(e)
             
         #完成导入
         world_imported_time = time.perf_counter()
@@ -634,7 +636,7 @@ class VIEW3D_OT_UseCrafterHistoryWorlds(bpy.types.Operator):
                 json_latest_worlds = json.load(file)
         else:
             json_latest_worlds = []
-        
+        #补全history_worlds.json
         with open(dir_json_history_worlds, 'r', encoding='utf-8') as file:
             json_history_worlds = json.load(file)
         if type(json_history_worlds) == list:
@@ -656,7 +658,7 @@ class VIEW3D_OT_UseCrafterHistoryWorlds(bpy.types.Operator):
                         if os.path.isdir(os.path.join(root, "saves", save)):
                             json_history_worlds[root][0].setdefault(save, {})
             else:
-                dir_versions = os.path.join(root, "versions")
+                dir_versions = dir_root_2_dir_versions(dir_root=root)
                 # 添加版本
                 for version in os.listdir(dir_versions):
                     if os.path.exists(os.path.join(dir_versions, version, version + ".jar")):
@@ -746,7 +748,8 @@ class VIEW3D_OT_UseCrafterHistoryWorlds(bpy.types.Operator):
             if os.path.exists(dir_undivided_saves):
                 dir_save = os.path.join(dir_undivided_saves,addon_prefs.History_World_Saves_List[addon_prefs.History_World_Saves_List_index].name)
             else:
-                dir_version = os.path.join(dir_root,"versions",addon_prefs.History_World_Versions_List[addon_prefs.History_World_Versions_List_index].name)
+                dir_verisons = os.path.join(dir_root,dir_root_2_dir_versions(dir_root))
+                dir_version = os.path.join(dir_verisons,addon_prefs.History_World_Versions_List[addon_prefs.History_World_Versions_List_index].name)
                 dir_save = os.path.join(dir_version,"saves",addon_prefs.History_World_Saves_List[addon_prefs.History_World_Saves_List_index].name)
             addon_prefs.World_Path = dir_save
             if len(addon_prefs.History_World_Settings_List) > 0:

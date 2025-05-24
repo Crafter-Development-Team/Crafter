@@ -20,6 +20,31 @@ from ..__init__ import dir_cafter_data, dir_resourcepacks_plans, dir_materials, 
 donot = ["Crafter Materials Settings"]
 len_color_jin = 21
 
+def dir_root_2_dir_versions(dir_root):
+    list_folder_minecraft = os.listdir(dir_root)
+    if "Instances" in list_folder_minecraft:
+        dir_versions = os.path.join(dir_root, "Instances")
+    elif "versions" in list_folder_minecraft:
+        dir_versions = os.path.join(dir_root, "versions")
+    return dir_versions
+
+def dir_version_2_dir_jar(dir_version):
+    dir_versions = os.path.dirname(dir_version)
+    name_versions = os.path.basename(dir_versions)
+    if name_versions == "versions":
+        name_version = os.path.basename(dir_version)
+        dir_jar = os.path.join(dir_version, name_version+".jar")
+    elif name_versions == "Instances":
+        dir_Instance = os.path.join(dir_version, "minecraftinstance.json")
+        with open(dir_Instance, "r", encoding="utf-8") as file:
+            json_instance = json.load(file)
+        json_versionjson = json.loads(json_instance["baseModLoader"]["versionJson"])
+        name_folder = json_versionjson["id"]
+        name_jar = name_folder + ".jar"
+        dir_minecraft = os.path.dirname(dir_versions)
+        dir_jar = os.path.join(dir_minecraft, "Install", "versions", name_folder, name_jar)
+    return dir_jar
+
 def reloadwindow():
     bpy.ops.wm.redraw_timer(type="DRAW_WIN_SWAP")
 
