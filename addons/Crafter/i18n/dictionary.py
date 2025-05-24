@@ -47,7 +47,7 @@ dictionary = {
             #==========替换资源包==========
         "Replace Resources":"替换资源包",
         "Resources":"资源包预设",
-        "No_Resourcepacks":"无资源包",
+        "Vanilla":"原版",
         "Open Resources Plans":"打开资源包预设列表文件夹",
         "Reload Resources Plans":"刷新资源预设列表",
         "Resource":"资源包",
