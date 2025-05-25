@@ -43,6 +43,11 @@ def dir_version_2_dir_jar(dir_version):
         name_jar = name_folder + ".jar"
         dir_minecraft = os.path.dirname(dir_versions)
         dir_jar = os.path.join(dir_minecraft, "Install", "versions", name_folder, name_jar)
+    # elif name_versions == "profiles":
+    #     pass
+    else:
+        name_version = os.path.basename(dir_version)
+        dir_jar = os.path.join(dir_version, name_version+".jar")
     return dir_jar
 
 def reloadwindow():
