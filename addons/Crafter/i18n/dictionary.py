@@ -34,6 +34,8 @@ dictionary = {
         "Allow Double Face":"允许重叠面",
         "As Chunk":"分块",
         "Chunk Size":"分块大小",
+        "Chunk Number to Release":"释放内存区块数",
+        "LOD Number":"LOD数量",
         "Underwater LOD":"水下LOD",
         "Greedy Mesh":"面合并",
         "LOD Auto Center":"LOD自动中心",

@@ -93,6 +93,9 @@ class CrafterAddonPreferences(AddonPreferences):
     partitionSize: IntProperty(name="Chunk Size",
                                default=4,
                                min=1)#type: ignore
+    maxTasksPerBatch: IntProperty(name="Chunk Number to Release",
+                                  default=32768,
+                                  min=1)# type: ignore
     activeLOD: BoolProperty(name="LOD",
                             default=False,)# type: ignore
     useUnderwaterLOD: BoolProperty(name="Underwater LOD",

@@ -66,6 +66,7 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         col_1.prop(addon_prefs, "exportLightBlock")
 
         col_2 = row.column()
+        col_2.prop(addon_prefs, "maxTasksPerBatch")
         col_2.prop(addon_prefs, "keepBoundary")
         col_2.prop(addon_prefs, "cullCave")
         col_2.prop(addon_prefs, "shell")
@@ -330,6 +331,7 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             "allowDoubleFace":addon_prefs.allowDoubleFace,
             "exportFullModel":not addon_prefs.exportFullModel,
             "partitionSize":addon_prefs.partitionSize,
+            "maxTasksPerBatch":addon_prefs.maxTasksPerBatch,
             "activeLOD":addon_prefs.activeLOD,
             "useUnderwaterLOD":addon_prefs.useUnderwaterLOD,
             "useGreedyMesh":addon_prefs.useGreedyMesh,
