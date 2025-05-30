@@ -77,7 +77,7 @@ class VIEW3D_PT_CrafterImport(bpy.types.Panel):
         else:
             resource = ""
         row_Resources.label(text=i18n("Resources") + ":" + resource)
-        row_Resources.operator("crafter.replace_resources",text="Load")
+        row_Resources.operator("crafter.replace_resources",text="Replace")
         #==========加载材质面板==========
         row_Resources = layout.row()
         if -1 < addon_prefs.Materials_List_index and addon_prefs.Materials_List_index < len(addon_prefs.Materials_List):
