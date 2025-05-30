@@ -180,7 +180,6 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             versionPath = dir_back_saves
             versionName = os.path.basename(versionPath)
             jarPath = dir_version_2_dir_jar(versionPath)
-            print(jarPath)
             if not os.path.exists(jarPath):
                 addon_prefs.is_Game_Path = False
                 self.worldPath = worldPath
@@ -661,7 +660,7 @@ class VIEW3D_OT_UseCrafterHistoryWorlds(bpy.types.Operator):
                 dir_versions = dir_root_2_dir_versions(dir_root=root)
                 # 添加版本
                 for version in os.listdir(dir_versions):
-                    if os.path.exists(os.path.join(dir_versions, version, version + ".jar")):
+                    if os.path.exists(os.path.join(dir_versions, version, "saves")):
                         json_history_worlds[root].setdefault(version, {})
                 for version in list(json_history_worlds[root]):
                     #版本不存在则移除该version

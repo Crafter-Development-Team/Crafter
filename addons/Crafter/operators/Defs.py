@@ -1,13 +1,10 @@
 import bpy
 import os
-import time
 import subprocess
-import threading
 import platform
 import json
 import zipfile
-from pathlib import Path
-import shutil
+import sqlite3
 import ctypes
 from ctypes import wintypes
 import textwrap
@@ -24,6 +21,8 @@ def dir_root_2_dir_versions(dir_root):
     list_folder_minecraft = os.listdir(dir_root)
     if "Instances" in list_folder_minecraft:
         dir_versions = os.path.join(dir_root, "Instances")
+    elif "profiles" in list_folder_minecraft:
+        dir_versions = os.path.join(dir_root, "profiles")
     elif "versions" in list_folder_minecraft:
         dir_versions = os.path.join(dir_root, "versions")
     return dir_versions
@@ -43,8 +42,26 @@ def dir_version_2_dir_jar(dir_version):
         name_jar = name_folder + ".jar"
         dir_minecraft = os.path.dirname(dir_versions)
         dir_jar = os.path.join(dir_minecraft, "Install", "versions", name_folder, name_jar)
-    # elif name_versions == "profiles":
-    #     pass
+    elif name_versions == "profiles":
+        name_version = os.path.basename(dir_version)
+        dir_ModrinthApp = os.path.dirname(dir_versions)
+        dir_db_app = os.path.join(dir_ModrinthApp, "app.db")
+        dir_meta = os.path.join(dir_ModrinthApp, "meta")
+        dir_versions_meta = os.path.join(dir_meta, "versions")
+
+        db_app = sqlite3.connect(dir_db_app)
+        cursor = db_app.cursor()
+        cursor.execute("SELECT * FROM profiles")
+        rows = cursor.fetchall()
+        for row in rows:
+            if row[0] == name_version:
+                if row[6] == None:
+                    name_jar = row[4]
+                else:
+                    name_jar = row[4] + "-" + row[6]
+                break
+        dir_jar = os.path.join(dir_versions_meta, name_jar, name_jar + ".jar")
+        print(dir_jar)
     else:
         name_version = os.path.basename(dir_version)
         dir_jar = os.path.join(dir_version, name_version+".jar")
