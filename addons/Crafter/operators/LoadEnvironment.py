@@ -60,7 +60,7 @@ class VIEW3D_OT_CrafterLoadEnvironment(bpy.types.Operator):
 class VIEW3D_OT_CrafterOpenEnvironments(bpy.types.Operator):
     bl_label = "Open Environments"
     bl_idname = "crafter.open_environments"
-    bl_description = " "
+    bl_description = ""
     
     @classmethod
     def poll(cls, context: bpy.types.Context):
@@ -79,7 +79,7 @@ class VIEW3D_OT_CrafterOpenEnvironments(bpy.types.Operator):
 class VIEW3D_OT_CrafterReloadEnvironments(bpy.types.Operator):# 刷新 环境 列表
     bl_label = "Reload Environments"
     bl_idname = "crafter.reload_environment"
-    bl_description = " "
+    bl_description = ""
     
     @classmethod
     def poll(cls, context: bpy.types.Context):

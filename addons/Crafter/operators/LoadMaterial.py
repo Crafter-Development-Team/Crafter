@@ -293,7 +293,7 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):
 class VIEW3D_OT_CrafterSetPBRParser(bpy.types.Operator):
     bl_label = "Set PBR Parser"
     bl_idname = "crafter.set_pbr_parser"
-    bl_description = " "
+    bl_description = ""
     
     @classmethod
     def poll(cls, context: bpy.types.Context):
@@ -347,7 +347,7 @@ class VIEW3D_OT_CrafterSetPBRParser(bpy.types.Operator):
 class VIEW3D_OT_CrafterOpenMaterials(bpy.types.Operator):
     bl_label = "Open Materials"
     bl_idname = "crafter.open_materials"
-    bl_description = " "
+    bl_description = ""
     
     @classmethod
     def poll(cls, context: bpy.types.Context):
@@ -364,7 +364,7 @@ class VIEW3D_OT_CrafterOpenMaterials(bpy.types.Operator):
 class VIEW3D_OT_CrafterOpenClassificationBasis(bpy.types.Operator):
     bl_label = "Open Classification Basis"
     bl_idname = "crafter.open_classification_basis"
-    bl_description = " "
+    bl_description = ""
     bl_options = {'REGISTER'}
     
     @classmethod
@@ -382,7 +382,7 @@ class VIEW3D_OT_CrafterOpenClassificationBasis(bpy.types.Operator):
 class VIEW3D_OT_CrafterSetParsedNormalStrength(bpy.types.Operator):
     bl_label = "Set Parsed Normal Strength"
     bl_idname = "crafter.set_parsed_normal_strength"
-    bl_description = " "
+    bl_description = ""
     
     @classmethod
     def poll(cls, context: bpy.types.Context):
@@ -408,7 +408,7 @@ class VIEW3D_OT_CrafterSetParsedNormalStrength(bpy.types.Operator):
 class VIEW3D_OT_CrafterReloadMaterials(bpy.types.Operator):#刷新材质列表
     bl_label = "Reload Materials"
     bl_idname = "crafter.reload_materials"
-    bl_description = " "
+    bl_description = ""
     
     @classmethod
     def poll(cls, context: bpy.types.Context):
@@ -431,7 +431,7 @@ class VIEW3D_OT_CrafterReloadMaterials(bpy.types.Operator):#刷新材质列表
 class VIEW3D_OT_CrafterReloadClassificationBasis(bpy.types.Operator):#刷新分类依据菜单
     bl_label = "Reload Classification Basis"
     bl_idname = "crafter.reload_classification_basis"
-    bl_description = " "
+    bl_description = ""
     bl_options = {'REGISTER'}
     
     @classmethod

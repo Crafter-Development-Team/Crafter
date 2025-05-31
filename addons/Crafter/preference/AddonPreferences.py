@@ -19,7 +19,7 @@ class CrafterAddonPreferences(AddonPreferences):
     World_Path: StringProperty(name="World path",
                                default="World path",
                                subtype="DIR_PATH",
-                               update=lambda self, context: context.area.tag_redraw()) # type: ignore
+                               update=lambda self, context: self.update_world_path(context)) # type: ignore
     XYZ_1: IntVectorProperty(name="XYZ-1",
                              default=(0,0,0),
                              description="Starting coordinates",
@@ -28,6 +28,10 @@ class CrafterAddonPreferences(AddonPreferences):
                              default=(0,0,0),
                              description="Ending coordinates",
                              update=lambda self, context: context.area.tag_redraw())# type: ignore
+    Dimensions_List: CollectionProperty(name="Dimensions List",
+                                                    type=HistoryWorldVersion)#type: ignore
+    Dimensions_List_index: IntProperty(name="Dimensions",
+                                                   default=0)# type: ignore
     Point_Cloud_Mode: BoolProperty(name="Point Cloud Mode",
                                    default=False,)# type: ignore
     Latest_World_List: CollectionProperty(name="Latest Worlds List",
@@ -210,12 +214,18 @@ class CrafterAddonPreferences(AddonPreferences):
         col_default_PBR.prop(self, "Default_IOR")
         col_default_PBR.prop(self, "Default_Emission_Strength")
 #==========修改变量操作==========
-    def update_texture_interpolation(self, context):
-        bpy.ops.crafter.set_texture_interpolation()
-        return None
-    
+
+    def update_world_path(self, context):
+        context.area.tag_redraw
+        bpy.ops.crafter.reload_dimensions()
+        return  None
+
     def reload_all(self, context):
         bpy.ops.crafter.reload_all()
+        return None
+    
+    def update_texture_interpolation(self, context):
+        bpy.ops.crafter.set_texture_interpolation()
         return None
     
     def update_PBR_Parser(self, context):

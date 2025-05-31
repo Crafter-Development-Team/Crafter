@@ -38,6 +38,8 @@ class VIEW3D_PT_CrafterImportWorld(bpy.types.Panel):
 
         layout.prop(addon_prefs, "World_Path")
 
+        layout.template_list("VIEW3D_UL_CrafterDimensionsList", "", addon_prefs, "Dimensions_List", addon_prefs, "Dimensions_List_index",rows=1)
+
         row_XYZ1 = layout.row()
         row_XYZ1.prop(addon_prefs, "XYZ_1")
         row_XYZ2 = layout.row()
@@ -98,3 +100,8 @@ class VIEW3D_PT_CrafterImport(bpy.types.Panel):
     def poll(cls, context: bpy.types.Context):
         return True
 
+# ==================== UIList ====================
+
+class VIEW3D_UL_CrafterDimensionsList(bpy.types.UIList):# 历史世界 存档 列表
+     def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
+        layout.label(text=item.name)
