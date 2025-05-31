@@ -4,6 +4,7 @@ import time
 import subprocess
 import json
 import shutil
+import nbt
 import ctypes
 from ctypes import wintypes
 
