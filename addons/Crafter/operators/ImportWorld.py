@@ -168,6 +168,8 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         addon_prefs.is_Game_Path = True
         # 计算游戏文件路径
         dir_saves = os.path.dirname(worldPath)
+        print("========================================")
+        print(dir_saves)
         dir_back_saves = os.path.dirname(dir_saves)
 
         if os.path.basename(dir_back_saves) == ".minecraft":

@@ -48,10 +48,6 @@ def dir_version_2_dir_jar(dir_version):
     dir_versions = os.path.dirname(dir_version)
     name_versions = os.path.basename(dir_versions)
     if name_versions == "Instances":
-        for file in os.listdir(dir_version):
-            dir_version = os.path.join(dir_version, file)
-            if os.path.isdir(dir_version):
-                break
         list_floder_version = os.listdir(dir_version)
         if ("instance.cfg" in list_floder_version) and ("mmc-pack.json" in list_floder_version):
              dir_jar = dir_version
