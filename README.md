@@ -49,28 +49,15 @@ BLENDER_EXE_PATH = "C:/Program Files/Blender Foundation/Blender 4.2/blender.exe"
 ## 开发组和鸣谢
 
 ### 开发组
-<a href="https://space.bilibili.com/3461563635731405" target="_blank" style="color: inherit; text-decoration: none;">
-    <div style="display: flow-root;">
-    <img 
-        src="https://i0.hdslb.com/bfs/face/d7d82f14e8469c3c973cd1d7b981ed275069aa55.jpg@128w_128h_1c_1s.webp" 
-        style="float: left; width: 60px; border-radius: 50%; margin-right: 15px;"
-    >
-    <div style="padding-top: 15px;">
-        <strong style="font-size: 1.2em;">BaiGave</strong>
-        <br>
-    </div>
-    </div>
-</a>
 
-<a href="https://space.bilibili.com/455309610" target="_blank" style="color: inherit; text-decoration: none;">
-    <div style="display: flow-root;">
-    <img 
-        src="https://i0.hdslb.com/bfs/face/cca0a2997727b7c9625b6c84b79d75b1d20b0505.jpg@128w_128h_1c_1s.webp" 
-        style="float: left; width: 60px; border-radius: 50%; margin-right: 15px;"
-    >
-    <div style="padding-top: 15px;">
-        <strong style="font-size: 1.2em;">少年忠城</strong>
-        <br>
-    </div>
-    </div>
-</a>
+#### 白给/BaiGave
+
+[![白给/BaiGave](https://i0.hdslb.com/bfs/face/d7d82f14e8469c3c973cd1d7b981ed275069aa55.jpg@128w_128h_1c_1s.webp)](https://space.bilibili.com/3461563635731405)
+
+开发了插件的C++部分
+
+#### 少年忠城/zhong_cheng
+
+[![少年忠城/zhong_cheng](https://i0.hdslb.com/bfs/face/cca0a2997727b7c9625b6c84b79d75b1d20b0505.jpg@128w_128h_1c_1s.webp)](https://space.bilibili.com/455309610)
+
+开发了插件的Python部分
