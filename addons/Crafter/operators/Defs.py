@@ -23,25 +23,47 @@ def dir_root_2_dir_versions(dir_root):
         dir_versions = os.path.join(dir_root, "Instances")
     elif "profiles" in list_folder_minecraft:
         dir_versions = os.path.join(dir_root, "profiles")
-    elif "versions" in list_folder_minecraft:
+    else:
         dir_versions = os.path.join(dir_root, "versions")
+    return dir_versions
+
+def dir_version_2_dir_saves(dir_version):
+    list_floder_version = os.listdir(dir_version)
+    if ("instance.cfg" in list_floder_version) and ("mmc-pack.json" in list_floder_version):
+        dir_saves = os.path.join(dir_version, "minecraft", "saves")
+    else:
+        dir_saves = os.path.join(dir_version, "saves")
+    return dir_saves
+
+def dir_back_saves_2_dir_version(dir_back_saves):
+    dir_back_back_saves = os.path.dirname(dir_back_saves)
+    list_floder_back_back_saves = os.listdir(dir_back_back_saves)
+    if ("instance.cfg" in list_floder_back_back_saves) and ("mmc-pack.json" in list_floder_back_back_saves):
+         dir_versions = dir_back_back_saves
+    else:
+        dir_versions = dir_back_saves
     return dir_versions
 
 def dir_version_2_dir_jar(dir_version):
     dir_versions = os.path.dirname(dir_version)
     name_versions = os.path.basename(dir_versions)
-    if name_versions == "versions":
-        name_version = os.path.basename(dir_version)
-        dir_jar = os.path.join(dir_version, name_version+".jar")
-    elif name_versions == "Instances":
-        dir_Instance = os.path.join(dir_version, "minecraftinstance.json")
-        with open(dir_Instance, "r", encoding="utf-8") as file:
-            json_instance = json.load(file)
-        json_versionjson = json.loads(json_instance["baseModLoader"]["versionJson"])
-        name_folder = json_versionjson["id"]
-        name_jar = name_folder + ".jar"
-        dir_minecraft = os.path.dirname(dir_versions)
-        dir_jar = os.path.join(dir_minecraft, "Install", "versions", name_folder, name_jar)
+    if name_versions == "Instances":
+        for file in os.listdir(dir_version):
+            dir_version = os.path.join(dir_version, file)
+            if os.path.isdir(dir_version):
+                break
+        list_floder_version = os.listdir(dir_version)
+        if ("instance.cfg" in list_floder_version) and ("mmc-pack.json" in list_floder_version):
+             dir_jar = dir_version
+        else:
+            dir_json_Instance = os.path.join(dir_version, "minecraftinstance.json")
+            with open(dir_json_Instance, "r", encoding="utf-8") as file:
+                json_instance = json.load(file)
+            json_versionjson = json.loads(json_instance["baseModLoader"]["versionJson"])
+            name_folder = json_versionjson["id"]
+            name_jar = name_folder + ".jar"
+            dir_minecraft = os.path.dirname(dir_versions)
+            dir_jar = os.path.join(dir_minecraft, "Install", "versions", name_folder, name_jar)
     elif name_versions == "profiles":
         name_version = os.path.basename(dir_version)
         dir_ModrinthApp = os.path.dirname(dir_versions)

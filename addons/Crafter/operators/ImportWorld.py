@@ -164,7 +164,7 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         
         #初始化路径
         jarPath = ""
-        versionName = ""
+        name_version = ""
         addon_prefs.is_Game_Path = True
         # 计算游戏文件路径
         dir_saves = os.path.dirname(worldPath)
@@ -181,17 +181,17 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             dir_resourcepacks = os.path.join(dir_dot_minecraft,"resourcepacks")
             dir_mods = os.path.join(dir_dot_minecraft,"mods")
         else:
-            versionPath = dir_back_saves
-            versionName = os.path.basename(versionPath)
-            jarPath = dir_version_2_dir_jar(versionPath)
+            dir_version = dir_back_saves_2_dir_version(dir_back_saves)
+            name_version = os.path.basename(dir_version)
+            jarPath = dir_version_2_dir_jar(dir_version)
             if not os.path.exists(jarPath):
                 addon_prefs.is_Game_Path = False
                 self.worldPath = worldPath
                 return context.window_manager.invoke_props_dialog(self)
             else:
-                dir_mods = os.path.join(versionPath, "mods")
-                dir_resourcepacks = os.path.join(versionPath, "resourcepacks")
-                dir_versions = os.path.dirname(versionPath)
+                dir_mods = os.path.join(dir_back_saves, "mods")
+                dir_resourcepacks = os.path.join(dir_back_saves, "resourcepacks")
+                dir_versions = os.path.dirname(dir_version)
                 dir_dot_minecraft = os.path.dirname(dir_versions)
         #储存信息到self
         self.worldPath = worldPath
@@ -199,7 +199,7 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         self.modsPath = dir_mods
 
         self.save = os.path.basename(worldPath)
-        self.version = versionName
+        self.version = name_version
         self.dot_minecraftPath = dir_dot_minecraft
         # 获取资源包
         if os.path.exists(dir_resourcepacks):
@@ -753,9 +753,10 @@ class VIEW3D_OT_UseCrafterHistoryWorlds(bpy.types.Operator):
             if os.path.exists(dir_undivided_saves):
                 dir_save = os.path.join(dir_undivided_saves,addon_prefs.History_World_Saves_List[addon_prefs.History_World_Saves_List_index].name)
             else:
-                dir_verisons = os.path.join(dir_root,dir_root_2_dir_versions(dir_root))
+                dir_verisons = dir_root_2_dir_versions(dir_root)
                 dir_version = os.path.join(dir_verisons,addon_prefs.History_World_Versions_List[addon_prefs.History_World_Versions_List_index].name)
-                dir_save = os.path.join(dir_version,"saves",addon_prefs.History_World_Saves_List[addon_prefs.History_World_Saves_List_index].name)
+                dir_saves = dir_version_2_dir_saves(dir_version)
+                dir_save = os.path.join(dir_saves, addon_prefs.History_World_Saves_List[addon_prefs.History_World_Saves_List_index].name)
             addon_prefs.World_Path = dir_save
             if len(addon_prefs.History_World_Settings_List) > 0:
                 settings = addon_prefs.History_World_Settings_List[addon_prefs.History_World_Settings_List_index].name
