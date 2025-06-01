@@ -50,14 +50,14 @@ BLENDER_EXE_PATH = "C:/Program Files/Blender Foundation/Blender 4.2/blender.exe"
 
 ### 开发组
 
-#### 白给/BaiGave
+[![白给/BaiGave](https://i0.hdslb.com/bfs/face/d7d82f14e8469c3c973cd1d7b981ed275069aa55.jpg@100w_100h_1c_1s.webp)](https://space.bilibili.com/3461563635731405)
 
-[![白给/BaiGave](https://i0.hdslb.com/bfs/face/d7d82f14e8469c3c973cd1d7b981ed275069aa55.jpg@128w_128h_1c_1s.webp)](https://space.bilibili.com/3461563635731405)
+#### -白给/BaiGave-
 
 开发了插件的C++部分
 
-#### 少年忠城/zhong_cheng
+[![少年忠城/zhong_cheng](https://i0.hdslb.com/bfs/face/cca0a2997727b7c9625b6c84b79d75b1d20b0505.jpg@100w_100h_1c.avif)](https://space.bilibili.com/455309610)
 
-[![少年忠城/zhong_cheng](https://i0.hdslb.com/bfs/face/cca0a2997727b7c9625b6c84b79d75b1d20b0505.jpg@128w_128h_1c_1s.webp)](https://space.bilibili.com/455309610)
+#### -少年忠城/zhong_cheng-
 
 开发了插件的Python部分
