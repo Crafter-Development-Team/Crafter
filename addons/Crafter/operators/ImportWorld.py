@@ -931,9 +931,7 @@ class VIEW3D_OT_CrafterDownGameResource(bpy.types.Operator):#降低 游戏资源
         bpy.ops.crafter.reload_game_resources()
 
         return {'FINISHED'}
-    
-# ==================== 刷新 ====================
-
+#=================== 刷新 =======================
 class VIEW3D_OT_CrafterReloadDimensions(bpy.types.Operator):#刷新 维度
     bl_label = "Reload Dimensions"  
     bl_idname = "crafter.reload_dimensions"
@@ -951,25 +949,81 @@ class VIEW3D_OT_CrafterReloadDimensions(bpy.types.Operator):#刷新 维度
         dir_level_dat = os.path.join(worldPath, "level.dat")
         if not os.path.exists(dir_level_dat):
             return { "FINISHED"}
-        level = nbt.nbt.NBTFile(dir_level_dat)
-        dimensions =  level["Data"]["WorldGenSettings"]["dimensions"].keys()
+        
+        #清空维度列表(不清空会报错)
         addon_prefs.Dimensions_List.clear()
-        if "minecraft:overworld" in dimensions:
-            dim = addon_prefs.Dimensions_List.add()
-            dim.name = "minecraft:overworld"
-        if "minecraft:the_nether" in dimensions:
+        
+        #添加默认维度(what ever)
+        dim_overworld = addon_prefs.Dimensions_List.add()
+        dim_overworld.name = "minecraft:overworld"
+        
+        #检查维度文件夹
+        dimensions_dir = os.path.join(worldPath, "dimensions")
+        if os.path.exists(dimensions_dir) and os.path.isdir(dimensions_dir):
+            #遍历dimensions目录下的所有folder
+            for namespace in os.listdir(dimensions_dir):
+                namespace_path = os.path.join(dimensions_dir, namespace)
+                if os.path.isdir(namespace_path):
+                    #遍历空间下的所有dim
+                    for dimension in os.listdir(namespace_path):
+                        dimension_path = os.path.join(namespace_path, dimension)
+                        if os.path.isdir(dimension_path):
+                            #添加到维度列表
+                            dim_name = f"{namespace}:{dimension}"
+                            #跳过overworld维度
+                            if dim_name == "minecraft:overworld":
+                                continue
+                            dim = addon_prefs.Dimensions_List.add()
+                            dim.name = dim_name
+                            print(f"add dim: {dim_name}")
+        
+        #检查DIM文件夹
+        for item in os.listdir(worldPath):
+            if item.startswith("DIM"):
+                #尝试提取维度ID
+                if item == "DIM1":
+                    dim = addon_prefs.Dimensions_List.add()
+                    dim.name = "minecraft:the_end"
+                    print("add dim: minecraft:the_end (DIM1)")
+                elif item == "DIM-1":
+                    dim = addon_prefs.Dimensions_List.add()
+                    dim.name = "minecraft:the_nether"
+                    print("add dim: minecraft:the_nether (DIM-1)")
+                else:
+                    #模组维度
+                    dim_id = item.replace("DIM", "")
+                    try:
+                        #try2查找维度名称文件
+                        dim_info_path = os.path.join(worldPath, item, "dimension.txt")
+                        if os.path.exists(dim_info_path):
+                            with open(dim_info_path, "r") as f:
+                                dim_name = f.read().strip()
+                            dim = addon_prefs.Dimensions_List.add()
+                            dim.name = dim_name
+                            print(f"add dim: {dim_name} ({item})")
+                        else:
+                            #没有维度名称文件 使用modid+dim_id
+                            dim = addon_prefs.Dimensions_List.add()
+                            dim.name = f"mod_dimension:{dim_id}"
+                            print(f"add dim: mod_dimension:{dim_id} ({item})")
+                    except Exception as e:
+                        print(f"something went wrong! when handling dim {item}: {e}")
+        
+        #如果没有找到下界和末地,直接添加
+        dimension_names = [dim.name for dim in addon_prefs.Dimensions_List]
+        if "minecraft:the_nether" not in dimension_names:
             dim = addon_prefs.Dimensions_List.add()
             dim.name = "minecraft:the_nether"
-        if "minecraft:the_end" in dimensions:
+        if "minecraft:the_end" not in dimension_names:
             dim = addon_prefs.Dimensions_List.add()
             dim.name = "minecraft:the_end"
-        for dimension in  dimensions:
-            if dimension not in ["minecraft:overworld", "minecraft:the_nether", "minecraft:the_end"]:
-                dim = addon_prefs.Dimensions_List.add()
-                dim.name = dimension
-        if addon_prefs.Dimensions_List_index >= len(addon_prefs.Dimensions_List) or  addon_prefs.Dimensions_List_index < 0:
+        
+        #确保有维度
+        if addon_prefs.Dimensions_List_index >= len(addon_prefs.Dimensions_List) or addon_prefs.Dimensions_List_index < 0:
             addon_prefs.Dimensions_List_index = 0
+            
         return { "FINISHED"}
+
 class VIEW3D_OT_CrafterReloadGameResources(bpy.types.Operator):#刷新 游戏资源包 列表
     bl_label = "Reload Game Resources"
     bl_idname = "crafter.reload_game_resources"
