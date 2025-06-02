@@ -4,11 +4,25 @@ import time
 import subprocess
 import json
 import shutil
-import nbt
+import sys
+
+#---------------导入NBT Module----------------
+try:
+    import nbt
+    import nbt.nbt
+except ImportError:
+    #尝试从插件目录中导入
+    addon_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+    if addon_dir not in sys.path:
+        sys.path.insert(0, addon_dir)
+    try:
+        import nbt
+        import nbt.nbt
+    except ImportError:
+        raise ImportError("cannot import nbt module")
+#---------------导入Other Module--------------
 import ctypes
 from ctypes import wintypes
-
-import nbt.nbt
 
 from ..config import __addon_name__
 from ....common.i18n.i18n import i18n
@@ -16,7 +30,7 @@ from bpy.props import *
 from ..__init__ import dir_cafter_data, dir_resourcepacks_plans, dir_materials, dir_classification_basis, dir_blend_append, dir_init_main
 from .Defs import *
 
-# ==================== 导入世界 ====================
+#==================== 导入世界 ====================
 
 class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世界
     bl_label = "Import World"
@@ -103,13 +117,13 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             if not addon_prefs.isLODAutoCenter:
                 col_lod_2.prop(addon_prefs, "LODCenterX")
                 col_lod_2.prop(addon_prefs, "LODCenterZ")
-        # 无版本隔离选择
+        #无版本隔离选择
         if self.version == "":
             layout.label(text="Versions")
             row_undivided = layout.row()
             row_undivided.template_list("VIEW3D_UL_CrafterUndividedVersions","",addon_prefs,"Undivided_Vsersions_List",addon_prefs,"Undivided_Vsersions_List_index",rows=1,)
 
-        # 资源包列表
+        #资源包列表
         row_resources = layout.row()
         row_resources.prop(addon_prefs, "Game_Resources")
         if addon_prefs.Game_Resources:
@@ -153,7 +167,7 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
     def invoke(self, context, event):
         addon_prefs = context.preferences.addons[__addon_name__].preferences
 
-        # 获取世界路径，检测路径合法性
+        #获取世界路径，检测路径合法性
         bpy.ops.crafter.reload_all()
         worldPath = os.path.normpath(addon_prefs.World_Path)
         dir_saves = os.path.dirname(worldPath)
@@ -166,10 +180,8 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         jarPath = ""
         name_version = ""
         addon_prefs.is_Game_Path = True
-        # 计算游戏文件路径
+        #计算游戏文件路径
         dir_saves = os.path.dirname(worldPath)
-        print("========================================")
-        print(dir_saves)
         dir_back_saves = os.path.dirname(dir_saves)
 
         if os.path.basename(dir_back_saves) == ".minecraft":
@@ -203,7 +215,7 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         self.save = os.path.basename(worldPath)
         self.version = name_version
         self.dot_minecraftPath = dir_dot_minecraft
-        # 获取资源包
+        #获取资源包
         if os.path.exists(dir_resourcepacks):
             list_resourcepacks = os.listdir(dir_resourcepacks)
         else:
@@ -313,9 +325,32 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         else:
             status = 1
         
+        #确保维度列表不为空
+        if len(addon_prefs.Dimensions_List) == 0:
+            #刷新维度列表，如果失败则添加默认值
+            try:
+                bpy.ops.crafter.reload_dimensions()
+            except Exception as e:
+                print(f"刷新维度列表失败: {e}")
+                #手动添加默认维度
+                dim = addon_prefs.Dimensions_List.add()
+                dim.name = "minecraft:overworld"
+                addon_prefs.Dimensions_List_index = 0
+        
+        #检查索引是否有效
+        if addon_prefs.Dimensions_List_index >= len(addon_prefs.Dimensions_List):
+            addon_prefs.Dimensions_List_index = 0
+            
+        #获取选中的维度
+        selectedDimension = "minecraft:overworld"  #默认值
+        try:
+            selectedDimension = addon_prefs.Dimensions_List[addon_prefs.Dimensions_List_index].name
+        except Exception as e:
+            print(f"获取维度失败，使用默认值: {e}")
+        
         worldconfig = {
             "worldPath": worldPath,
-            "selectedDimension":addon_prefs.Dimensions_List[addon_prefs.Dimensions_List_index].name,
+            "selectedDimension": selectedDimension,
             "jarPath": jarPath,
             "versionJsonPath": versionJsonPath,
             "modsPath": modsPath,
@@ -358,7 +393,7 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         with open(dir_json_config, 'w', encoding='utf-8') as config:
             json.dump(worldconfig, config, indent=4)
 
-        # 删去之前导出的obj
+        #删去之前导出的obj
         dir_importer = os.path.join(dir_init_main, "importer")
         dir_exe_importer = os.path.join(dir_importer, "WorldImporter.exe")
         for file in os.listdir(dir_importer):
@@ -368,44 +403,44 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         prepared_time = time.perf_counter()
         #生成obj
 
-# ==================================================================================
-        # # 旧的exe唤起命令
+#==================================================================================
+        ##旧的exe唤起命令
 
-        # # 后来白给修好exe的问题后忠城发现新唤起方式的shell模式性能比旧版高，所以改用新的唤起方式
+        ##后来白给修好exe的问题后忠城发现新唤起方式的shell模式性能比旧版高，所以改用新的唤起方式
 
-        # try:
-        #     # 在新的进程中运行WorldImporter.exe
-        #     CREATE_NEW_PROCESS_GROUP = 0x00000200
-        #     DETACHED_PROCESS = 0x00000008
-        #     process = subprocess.Popen(
-        #         [dir_exe_importer],
-        #         cwd=dir_importer,
-        #         creationflags=CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS,
-        #         shell=addon_prefs.shell
-        #     )
-        #     #等待进程结束
-        #     process.wait()
-        # except Exception as e:
-        #     return {"CANCELLED"}
+        #try:
+        #    #在新的进程中运行WorldImporter.exe
+        #    CREATE_NEW_PROCESS_GROUP = 0x00000200
+        #    DETACHED_PROCESS = 0x00000008
+        #    process = subprocess.Popen(
+        #        [dir_exe_importer],
+        #        cwd=dir_importer,
+        #        creationflags=CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS,
+        #        shell=addon_prefs.shell
+        #    )
+        #    #等待进程结束
+        #    process.wait()
+        #except Exception as e:
+        #    return {"CANCELLED"}
 
-# ==================================================================================
+#==================================================================================
         run_as_admin_and_wait(dir_exe_importer,dir_importer,shell = addon_prefs.shell)
-# ==================================================================================
+#==================================================================================
 
         #导入obj
         have_obj = False
         real_name_dic = {}
         material_should_delete = []
-        before_objects = set(bpy.data.objects)# 记录当前场景最初对象
+        before_objects = set(bpy.data.objects)#记录当前场景最初对象
         for file in os.listdir(dir_importer):
             if file.endswith(".obj"):
-                pre_import_objects = set(bpy.data.objects)# 记录当前场景中的所有对象
+                pre_import_objects = set(bpy.data.objects)#记录当前场景中的所有对象
                 
                 bpy.ops.wm.obj_import(filepath=os.path.join(dir_importer, file))
                 bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
                 have_obj = True
                 
-                imported_objects = list(set(bpy.data.objects) - pre_import_objects)# 计算新增对象
+                imported_objects = list(set(bpy.data.objects) - pre_import_objects)#计算新增对象
                 for obj in imported_objects:
                     for i in range(len(obj.data.materials)):
                         material = obj.data.materials[i]
@@ -424,7 +459,7 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
                     add_to_mcmts_collection(object=obj,context=context)
                     add_to_crafter_mcmts_collection(object=obj,context=context)
                     add_C_time(obj=obj)
-                    # 定位到视图
+                    #定位到视图
                     view_2_active_object(context)
 
         for material in material_should_delete:
@@ -433,19 +468,19 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             self.report({'ERROR'}, "WorldImporter didn't export obj!")
             return {"CANCELLED"}
         
-        # 若不存在，则导入Crafter-Moving_texture节点组
+        #若不存在，则导入Crafter-Moving_texture节点组
         if not "Crafter-Moving_texture" in bpy.data.node_groups:
             with bpy.data.libraries.load(dir_blend_append, link=False) as (data_from, data_to):
                 data_to.node_groups = ["Crafter-Moving_texture"]
             bpy.data.node_groups["Crafter-Moving_texture"].use_fake_user = True
-        # 若不存在，则导入群系着色纹理节点
+        #若不存在，则导入群系着色纹理节点
         if not "Crafter-biomeTex" in bpy.data.node_groups:
             node_groups_use_fake_user = ["Crafter-biomeTex"]
             with bpy.data.libraries.load(dir_blend_append, link=False) as (data_from, data_to):
                 data_to.node_groups = [name for name in data_from.node_groups if name in node_groups_use_fake_user]
             for node_group in node_groups_use_fake_user:
                 bpy.data.node_groups[node_group].use_fake_user = True
-        # 复制并修改Crafter-biomeTex
+        #复制并修改Crafter-biomeTex
         dir_biomeTex = os.path.join(dir_importer, "biomeTex")
         dir_biomeTex_num = os.path.join(dir_biomeTex, imported_time)
         os.makedirs(dir_biomeTex_num)
@@ -468,7 +503,7 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
                 node.inputs["max X"].default_value = 1 + max(addon_prefs.XYZ_1[0],addon_prefs.XYZ_2[0])
                 node.inputs["max Y"].default_value = max(0 - addon_prefs.XYZ_1[2],0 - addon_prefs.XYZ_2[2])
 
-        # 查找所需节点
+        #查找所需节点
         for name_material in real_name_dic.values():
             if name_material.startswith("color#"):
                 continue
@@ -491,7 +526,7 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
                         node.interpolation = "Closest"
             for node in nodes_wait_remove:
                 nodes.remove(node)
-            # 添加群系着色纹理,PBR、法线纹理
+            #添加群系着色纹理,PBR、法线纹理
             node_liomeTex = nodes.new("ShaderNodeGroup")
             node_liomeTex.location = (node_output_EEVEE.location.x - 400, node_output_EEVEE.location.y - 550)
             node_liomeTex.node_tree = node_group_biomeTex_copy
@@ -505,16 +540,16 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             
         #完成导入
         world_imported_time = time.perf_counter()
-        # 定位到视图
+        #定位到视图
         new_objects = list(set(bpy.data.objects) - before_objects)
         for object in new_objects:
             if object.type == "MESH":
                 object.select_set(True)
         view_2_active_object(context)
                             
-        # 保存历史世界
+        #保存历史世界
         dir_json_history_worlds = os.path.join(dir_cafter_data, "history_worlds.json")
-        # 读取json，若不存在则创建一个空的json文件
+        #读取json，若不存在则创建一个空的json文件
         if os.path.exists(dir_json_history_worlds):
             with open(dir_json_history_worlds, 'r', encoding='utf-8') as file:
                 json_history_worlds = json.load(file)
@@ -523,7 +558,7 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         if (not addon_prefs.is_Game_Path) or addon_prefs.Custom_Path:
             pass
         else:
-            # 根据是否隔离，按不同方式保存历史记录
+            #根据是否隔离，按不同方式保存历史记录
             if undivided:
                 json_history_worlds.setdefault(dot_minecraftPath, [{}])
                 undivided_list = json_history_worlds[dot_minecraftPath][0].setdefault(save,{})
@@ -552,11 +587,11 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
                         json_history_settings[i] = json_history_settings[i - 1]
                     json_history_settings[0] = world_settings_now
                     
-            # 保存到json文件
+            #保存到json文件
             with open(dir_json_history_worlds, 'w', encoding='utf-8') as file:
                 json.dump(json_history_worlds, file, indent=4)
 
-            # 保存最近世界
+            #保存最近世界
             world_now = f"{save}|{version}|{dot_minecraftPath}"
             dir_json_latest_worlds = os.path.join(dir_cafter_data, "latest_worlds.json")
             if os.path.exists(dir_json_latest_worlds):
@@ -580,10 +615,10 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
                     for i in range (len(json_latest_worlds) - 1,0,-1):
                         json_latest_worlds[i] = json_latest_worlds[i - 1]
                     json_latest_worlds[0] = world_now
-            # 保存到json文件
+            #保存到json文件
             with open(dir_json_latest_worlds, 'w', encoding='utf-8') as file:
                 json.dump(json_latest_worlds, file, indent=4)
-        # 归零index
+        #归零index
         addon_prefs.Latest_World_List_index = 0
         addon_prefs.History_World_Settings_List_index = 0
         #增加Crafter_import_time计数
@@ -617,7 +652,7 @@ class VIEW3D_OT_CrafterImportSolidArea(bpy.types.Operator):#导入可编辑区�
         addon_prefs.solid = 1
         return {'FINISHED'}
 
-# ==================== 使用历史世界 ====================
+#==================== 使用历史世界 ====================
 
 class VIEW3D_OT_UseCrafterHistoryWorlds(bpy.types.Operator):
     bl_label = "History Worlds"
@@ -648,7 +683,7 @@ class VIEW3D_OT_UseCrafterHistoryWorlds(bpy.types.Operator):
             json_history_worlds = json.load(file)
         if type(json_history_worlds) == list:
             json_history_worlds = {}
-        # 整理json
+        #整理json
         for root in list(json_history_worlds):
             #地址不存在则移除该root
             if not os.path.exists(root):
@@ -666,7 +701,7 @@ class VIEW3D_OT_UseCrafterHistoryWorlds(bpy.types.Operator):
                             json_history_worlds[root][0].setdefault(save, {})
             else:
                 dir_versions = dir_root_2_dir_versions(dir_root=root)
-                # 添加版本
+                #添加版本
                 for version in os.listdir(dir_versions):
                     if os.path.exists(os.path.join(dir_versions, version, "saves")):
                         json_history_worlds[root].setdefault(version, {})
@@ -687,7 +722,7 @@ class VIEW3D_OT_UseCrafterHistoryWorlds(bpy.types.Operator):
                         for save in os.listdir(dir_saves):
                             if os.path.isdir(os.path.join(dir_saves, save)):
                                 json_history_worlds[root][version].setdefault(save, [])
-        # 清理最近世界历史记录
+        #清理最近世界历史记录
         for i in range(len(json_latest_worlds)-1,-1,-1):
             world = json_latest_worlds[i].split("|")
             if not world[2] in json_history_worlds:
@@ -767,7 +802,7 @@ class VIEW3D_OT_UseCrafterHistoryWorlds(bpy.types.Operator):
                 addon_prefs.XYZ_2 = (int(setting[3]),int(setting[4]),int(setting[5]))
         return {'FINISHED'}
 
-# ==================== Ban游戏资源包 ====================
+#==================== Ban游戏资源包 ====================
 
 class VIEW3D_OT_CrafterBanGameResource(bpy.types.Operator):
     bl_label = "Ban resource"    
@@ -811,7 +846,7 @@ class VIEW3D_OT_CrafterBanGameResource(bpy.types.Operator):
 
         return {'FINISHED'}
 
-# ==================== 使用游戏资源包 ====================
+#==================== 使用游戏资源包 ====================
 
 class VIEW3D_OT_CrafterUseGameResource(bpy.types.Operator):
     bl_label = "Use resource"    
@@ -857,7 +892,7 @@ class VIEW3D_OT_CrafterUseGameResource(bpy.types.Operator):
 
 
 
-# ==================== 游戏资源包优先级 ====================
+#==================== 游戏资源包优先级 ====================
 
 class VIEW3D_OT_CrafterUpGameResource(bpy.types.Operator):#提高 游戏资源包 优先级
     bl_label = "Up resource's priority"    
@@ -932,7 +967,7 @@ class VIEW3D_OT_CrafterDownGameResource(bpy.types.Operator):#降低 游戏资源
 
         return {'FINISHED'}
     
-# ==================== 刷新 ====================
+#==================== 刷新 ====================
 
 class VIEW3D_OT_CrafterReloadDimensions(bpy.types.Operator):#刷新 维度
     bl_label = "Reload Dimensions"  
@@ -951,25 +986,81 @@ class VIEW3D_OT_CrafterReloadDimensions(bpy.types.Operator):#刷新 维度
         dir_level_dat = os.path.join(worldPath, "level.dat")
         if not os.path.exists(dir_level_dat):
             return { "FINISHED"}
-        level = nbt.nbt.NBTFile(dir_level_dat)
-        dimensions =  level["Data"]["WorldGenSettings"]["dimensions"].keys()
+        
+        #清空维度列表(不清空会报错)
         addon_prefs.Dimensions_List.clear()
-        if "minecraft:overworld" in dimensions:
-            dim = addon_prefs.Dimensions_List.add()
-            dim.name = "minecraft:overworld"
-        if "minecraft:the_nether" in dimensions:
+        
+        #添加默认维度(what ever)
+        dim_overworld = addon_prefs.Dimensions_List.add()
+        dim_overworld.name = "minecraft:overworld"
+        
+        #检查维度文件夹
+        dimensions_dir = os.path.join(worldPath, "dimensions")
+        if os.path.exists(dimensions_dir) and os.path.isdir(dimensions_dir):
+            #遍历dimensions目录下的所有folder
+            for namespace in os.listdir(dimensions_dir):
+                namespace_path = os.path.join(dimensions_dir, namespace)
+                if os.path.isdir(namespace_path):
+                    #遍历空间下的所有dim
+                    for dimension in os.listdir(namespace_path):
+                        dimension_path = os.path.join(namespace_path, dimension)
+                        if os.path.isdir(dimension_path):
+                            #添加到维度列表
+                            dim_name = f"{namespace}:{dimension}"
+                            #跳过overworld维度
+                            if dim_name == "minecraft:overworld":
+                                continue
+                            dim = addon_prefs.Dimensions_List.add()
+                            dim.name = dim_name
+                            print(f"add dim: {dim_name}")
+        
+        #检查DIM文件夹
+        for item in os.listdir(worldPath):
+            if item.startswith("DIM"):
+                #尝试提取维度ID
+                if item == "DIM1":
+                    dim = addon_prefs.Dimensions_List.add()
+                    dim.name = "minecraft:the_end"
+                    print("add dim: minecraft:the_end (DIM1)")
+                elif item == "DIM-1":
+                    dim = addon_prefs.Dimensions_List.add()
+                    dim.name = "minecraft:the_nether"
+                    print("add dim: minecraft:the_nether (DIM-1)")
+                else:
+                    #模组维度
+                    dim_id = item.replace("DIM", "")
+                    try:
+                        #try2查找维度名称文件
+                        dim_info_path = os.path.join(worldPath, item, "dimension.txt")
+                        if os.path.exists(dim_info_path):
+                            with open(dim_info_path, "r") as f:
+                                dim_name = f.read().strip()
+                            dim = addon_prefs.Dimensions_List.add()
+                            dim.name = dim_name
+                            print(f"add dim: {dim_name} ({item})")
+                        else:
+                            #没有维度名称文件 使用modid+dim_id
+                            dim = addon_prefs.Dimensions_List.add()
+                            dim.name = f"mod_dimension:{dim_id}"
+                            print(f"add dim: mod_dimension:{dim_id} ({item})")
+                    except Exception as e:
+                        print(f"something went wrong! when handling dim {item}: {e}")
+        
+        #如果没有找到下界和末地,直接添加
+        dimension_names = [dim.name for dim in addon_prefs.Dimensions_List]
+        if "minecraft:the_nether" not in dimension_names:
             dim = addon_prefs.Dimensions_List.add()
             dim.name = "minecraft:the_nether"
-        if "minecraft:the_end" in dimensions:
+        if "minecraft:the_end" not in dimension_names:
             dim = addon_prefs.Dimensions_List.add()
             dim.name = "minecraft:the_end"
-        for dimension in  dimensions:
-            if dimension not in ["minecraft:overworld", "minecraft:the_nether", "minecraft:the_end"]:
-                dim = addon_prefs.Dimensions_List.add()
-                dim.name = dimension
-        if addon_prefs.Dimensions_List_index >= len(addon_prefs.Dimensions_List) or  addon_prefs.Dimensions_List_index < 0:
+        
+        #确保有维度
+        if addon_prefs.Dimensions_List_index >= len(addon_prefs.Dimensions_List) or addon_prefs.Dimensions_List_index < 0:
             addon_prefs.Dimensions_List_index = 0
+            
         return { "FINISHED"}
+
 class VIEW3D_OT_CrafterReloadGameResources(bpy.types.Operator):#刷新 游戏资源包 列表
     bl_label = "Reload Game Resources"
     bl_idname = "crafter.reload_game_resources"
@@ -1038,7 +1129,7 @@ class VIEW3D_OT_CrafterReloadLatestWorldsList(bpy.types.Operator):#刷新 最近
                 if addon_prefs.History_World_Roots_List[i].name == world_now[2]:
                     addon_prefs.History_World_Roots_List_index = i
                     bpy.ops.crafter.reload_history_worlds_list()
-                    if addon_prefs.is_Undivided:# 是否开启版本隔离
+                    if addon_prefs.is_Undivided:#判断是否open版本隔离
                         dir_versions = os.path.join(world_now[2], "versions")
                         reload_Undivided_Vsersions(context=context,dir_versions=dir_versions)
                         for j in range(len(addon_prefs.Undivided_Vsersions_List)):
@@ -1124,16 +1215,16 @@ class VIEW3D_OT_CrafterReloadHistoryWorldsList(bpy.types.Operator):#刷新 历�
 
         return {'FINISHED'}
 
-# ==================== UIList ====================
+#==================== UIList ====================
 
-class VIEW3D_UL_CrafterUndividedVersions(bpy.types.UIList):# 无隔离 版本
+class VIEW3D_UL_CrafterUndividedVersions(bpy.types.UIList):#无隔离 版本
      def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
         text = item.name
         index_na = text.rfind("\\")
         text = text[index_na+1:]
         layout.label(text=text)
 
-class VIEW3D_UL_CrafterGameResources(bpy.types.UIList):# 游戏 资源包
+class VIEW3D_UL_CrafterGameResources(bpy.types.UIList):#游戏 资源包
      def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
         text = item.name
         index_na = text.rfind("\\")
@@ -1148,7 +1239,7 @@ class VIEW3D_UL_CrafterGameResources(bpy.types.UIList):# 游戏 资源包
             i+=1
         layout.label(text=true_text)
 
-class VIEW3D_UL_CrafterGameUnuseResources(bpy.types.UIList):# 游戏 未使用 资源包
+class VIEW3D_UL_CrafterGameUnuseResources(bpy.types.UIList):#游戏 未使用 资源包
      def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
         text = item.name
         index_na = text.rfind("\\")
@@ -1163,25 +1254,25 @@ class VIEW3D_UL_CrafterGameUnuseResources(bpy.types.UIList):# 游戏 未使用 �
             i+=1
         layout.label(text=true_text)
 
-class VIEW3D_UL_CrafterLatestWorldList(bpy.types.UIList):# 最近世界 列表
+class VIEW3D_UL_CrafterLatestWorldList(bpy.types.UIList):#最近世界 列表
      def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
        world = item.name.split("|")
        text = f"{world[0]}     {world[1]}     {world[2]}"
        layout.label(text=text)
 
-class VIEW3D_UL_CrafterHistoryWorldRootsList(bpy.types.UIList):# 历史世界 根 列表
+class VIEW3D_UL_CrafterHistoryWorldRootsList(bpy.types.UIList):#历史世界 根 列表
      def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
         layout.label(text=item.name)
 
-class VIEW3D_UL_CrafterHistoryWorldVersionsList(bpy.types.UIList):# 历史世界 版本 列表
+class VIEW3D_UL_CrafterHistoryWorldVersionsList(bpy.types.UIList):#历史世界 版本 列表
      def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
         layout.label(text=item.name)
 
-class VIEW3D_UL_CrafterHistoryWorldSavesList(bpy.types.UIList):# 历史世界 存档 列表
+class VIEW3D_UL_CrafterHistoryWorldSavesList(bpy.types.UIList):#历史世界 存档 列表
      def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
         layout.label(text=item.name)
 
-class VIEW3D_UL_CrafterHistoryWorldSettingsList(bpy.types.UIList):# 历史世界 设置 列表
+class VIEW3D_UL_CrafterHistoryWorldSettingsList(bpy.types.UIList):#历史世界 设置 列表
      def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
         settings=item.name.split(" ")
         layout.label(text=f"{settings[0]}     {settings[1]}     {settings[2]}   |   {settings[3]}     {settings[4]}     {settings[5]}")
