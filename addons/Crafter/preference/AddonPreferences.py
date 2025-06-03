@@ -1,10 +1,17 @@
 import os
+import sys
 
 import bpy
 from bpy.props import *
 from bpy.types import AddonPreferences
 from ..config import __addon_name__
 from ..properties import *
+
+#=======导入NBT=======
+try:
+    from ..nbt import nbt
+except ImportError:
+    print("AddonPreferences: cannot import nbt")
 
 
 class CrafterAddonPreferences(AddonPreferences):
@@ -214,11 +221,18 @@ class CrafterAddonPreferences(AddonPreferences):
         col_default_PBR.prop(self, "Default_IOR")
         col_default_PBR.prop(self, "Default_Emission_Strength")
 #==========修改变量操作==========
-
     def update_world_path(self, context):
         context.area.tag_redraw
-        bpy.ops.crafter.reload_dimensions()
-        return  None
+        try:
+            bpy.ops.crafter.reload_dimensions()
+        except Exception as e:
+            print(f"Error while sp dim: {e}")
+            #if dim empty, add defult
+            if len(self.Dimensions_List) == 0:
+                dim = self.Dimensions_List.add()
+                dim.name = "minecraft:overworld"
+                self.Dimensions_List_index = 0
+        return None
 
     def reload_all(self, context):
         bpy.ops.crafter.reload_all()
