@@ -11,13 +11,6 @@ from ...common.i18n.i18n import load_dictionary
 from bpy.props import StringProperty, IntProperty, BoolProperty, IntVectorProperty, EnumProperty, CollectionProperty, FloatProperty
 from .properties import ResourcePlan, ResourcePlansInfo, Material ,McMt
 
-#====导入NBT库=====
-try:
-    from . import nbt
-    print("susscuss import nbt")
-except ImportError as e:
-    print(f"sm went wrong: cannot import nbt module: {e}")
-
 # Add-on info
 bl_info = {
     "name": "Crafter",

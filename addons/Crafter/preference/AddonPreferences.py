@@ -7,12 +7,6 @@ from bpy.types import AddonPreferences
 from ..config import __addon_name__
 from ..properties import *
 
-#=======导入NBT=======
-try:
-    from ..nbt import nbt
-except ImportError:
-    print("AddonPreferences: cannot import nbt")
-
 
 class CrafterAddonPreferences(AddonPreferences):
     # this must match the add-on name (the folder name of the unzipped file)

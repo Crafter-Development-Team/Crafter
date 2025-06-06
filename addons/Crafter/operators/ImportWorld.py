@@ -5,22 +5,9 @@ import subprocess
 import json
 import shutil
 import sys
-
-#---------------导入NBT Module----------------
-try:
-    from ..nbt import nbt
-except ImportError:
-    #尝试从插件目录中导入
-    print("无法直接导入nbt模块，尝试其他方法")
-    try:
-        #尝试从系统路径导入
-        import nbt
-        import nbt.nbt
-    except ImportError:
-        raise ImportError("无法导入nbt模块，请确保已正确安装")
-#---------------导入Other Module--------------
 import ctypes
 from ctypes import wintypes
+from ..nbt import nbt
 
 from ..config import __addon_name__
 from ....common.i18n.i18n import i18n
@@ -993,24 +980,19 @@ class VIEW3D_OT_CrafterReloadDimensions(bpy.types.Operator):#刷新 维度
         dim_overworld.name = "minecraft:overworld"
         
         #尝试从level.dat读取维度信息
-        try:
-            from ..nbt import nbt
-            nbt_file = nbt.NBTFile(dir_level_dat)
-            print("成功读取level.dat文件")
-        except Exception as e:
-            print(f"读取level.dat文件失败: {e}")
+        nbt_file = nbt.NBTFile(dir_level_dat)
         
         #检查维度文件夹
         dimensions_dir = os.path.join(worldPath, "dimensions")
         if os.path.exists(dimensions_dir) and os.path.isdir(dimensions_dir):
             #遍历dimensions目录下的所有folder
             for namespace in os.listdir(dimensions_dir):
-                namespace_path = os.path.join(dimensions_dir, namespace)
-                if os.path.isdir(namespace_path):
+                dir_namespace = os.path.join(dimensions_dir, namespace)
+                if os.path.isdir(dir_namespace):
                     #遍历空间下的所有dim
-                    for dimension in os.listdir(namespace_path):
-                        dimension_path = os.path.join(namespace_path, dimension)
-                        if os.path.isdir(dimension_path):
+                    for dimension in os.listdir(dir_namespace):
+                        dir_dimension = os.path.join(dir_namespace, dimension)
+                        if os.path.isdir(dir_dimension):
                             #添加到维度列表
                             dim_name = f"{namespace}:{dimension}"
                             #跳过overworld维度
@@ -1018,7 +1000,6 @@ class VIEW3D_OT_CrafterReloadDimensions(bpy.types.Operator):#刷新 维度
                                 continue
                             dim = addon_prefs.Dimensions_List.add()
                             dim.name = dim_name
-                            print(f"add dim: {dim_name}")
         
         #检查DIM文件夹
         for item in os.listdir(worldPath):
@@ -1061,7 +1042,6 @@ class VIEW3D_OT_CrafterReloadDimensions(bpy.types.Operator):#刷新 维度
             dim = addon_prefs.Dimensions_List.add()
             dim.name = "minecraft:the_end"
         
-        #确保有维度
         if addon_prefs.Dimensions_List_index >= len(addon_prefs.Dimensions_List) or addon_prefs.Dimensions_List_index < 0:
             addon_prefs.Dimensions_List_index = 0
             
