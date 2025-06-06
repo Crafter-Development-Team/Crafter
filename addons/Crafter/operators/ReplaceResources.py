@@ -38,7 +38,7 @@ class VIEW3D_OT_CrafterReplaceResources(bpy.types.Operator):
             dir_resourcepack = os.path.join(dir_resourcepacks, resource)
             if not os.path.exists(dir_resourcepack):
                 try:
-                    unzip(dir_resourcepacks + ".zip", dir_resourcepack)
+                    unzip(dir_resourcepack + ".zip", dir_resourcepack)
                 except Exception as e:
                     print(e)
             dir_assets = os.path.join(dir_resourcepack, "assets")
