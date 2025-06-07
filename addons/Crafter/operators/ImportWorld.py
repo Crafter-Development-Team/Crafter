@@ -85,23 +85,38 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         if addon_prefs.exportFullModel:
             row_exportFullModel.prop(addon_prefs, "partitionSize")
         
-        row_if_lod = layout.row()
-        row_if_lod.prop(addon_prefs, "activeLOD")
+        col_lod = layout.column()
+        col_lod.prop(addon_prefs, "activeLOD")
         if addon_prefs.activeLOD:
-            row_lod = layout.row()
+            split_lod = col_lod.split(factor=0.5)
             
-            col_lod_1 = row_lod.column()
-            col_lod_1.prop(addon_prefs, "LOD0renderDistance")
-            col_lod_1.prop(addon_prefs, "LOD1renderDistance")
-            col_lod_1.prop(addon_prefs, "LOD2renderDistance")
-            col_lod_1.prop(addon_prefs, "LOD3renderDistance")
+            col_1_lod = split_lod.column()
 
-            col_lod_2 = row_lod.column()
-            col_lod_2.prop(addon_prefs, "useUnderwaterLOD")
-            col_lod_2.prop(addon_prefs, "isLODAutoCenter")
+            row_lod0 = col_1_lod.row()
+            row_lod0.prop(addon_prefs, "LOD0renderDistance")
+
+            row_lod1 = col_1_lod.row()
+            split_lod1 = row_lod1.split(factor=0.4)
+            split_lod1.prop(addon_prefs, "activeLOD2")
+            if addon_prefs.activeLOD2:
+                split_lod1.prop(addon_prefs, "LOD1renderDistance")
+                row_lod2 = col_1_lod.row()
+                split_lod2 = row_lod2.split(factor=0.4)
+                split_lod2.prop(addon_prefs, "activeLOD3")
+                if addon_prefs.activeLOD3:
+                    split_lod2.prop(addon_prefs, "LOD2renderDistance")
+                    row_lod3 = col_1_lod.row()
+                    split_lod3 = row_lod3.split(factor=0.4)
+                    split_lod3.prop(addon_prefs, "activeLOD4")
+                    if addon_prefs.activeLOD4:
+                        split_lod3.prop(addon_prefs, "LOD3renderDistance")
+            # ===================================================
+            col_2_lod = split_lod.column()
+            col_2_lod.prop(addon_prefs, "useUnderwaterLOD")
+            col_2_lod.prop(addon_prefs, "isLODAutoCenter")
             if not addon_prefs.isLODAutoCenter:
-                col_lod_2.prop(addon_prefs, "LODCenterX")
-                col_lod_2.prop(addon_prefs, "LODCenterZ")
+                col_2_lod.prop(addon_prefs, "LODCenterX")
+                col_2_lod.prop(addon_prefs, "LODCenterZ")
         #无版本隔离选择
         if self.version == "":
             layout.label(text="Versions")

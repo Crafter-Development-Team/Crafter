@@ -41,7 +41,7 @@ dictionary = {
         "LOD Auto Center":"LOD自动中心",
         "LOD Center X":"LOD中心X",
         "LOD Center Z":"LOD中心Z",
-        "LOD0 Distance":"LOD0距离",
+        "No LOD Distance":"无LOD距离",
         "LOD1 Distance":"LOD1距离",
         "LOD2 Distance":"LOD2距离",
         "LOD3 Distance":"LOD3距离",
