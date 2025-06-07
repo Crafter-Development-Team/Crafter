@@ -18,6 +18,7 @@ dictionary = {
         "Point Cloud Mode":"点云模式",
         "History Worlds":"历史世界",
         "To use the history world settings":"使用历史世界设置",
+        "Open WorldImporter folder":"打开WorldImporter文件夹",
         "Your world path is not in game folder,select jar.":"您的存档地址不在游戏文件夹中,选择jar文件",
         "Jar Path":"Jar路径",
         "Custom Mods":"自定义模组",

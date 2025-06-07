@@ -5,7 +5,7 @@ import bpy
 class VIEW3D_OT_CrafterReloadAll(bpy.types.Operator):
     bl_label = "Reload"
     bl_idname = "crafter.reload_all"
-    bl_description = ""
+    bl_description = " "
     @classmethod
     def poll(cls, context: bpy.types.Context):
         return True

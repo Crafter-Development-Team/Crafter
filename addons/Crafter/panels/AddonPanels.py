@@ -50,8 +50,9 @@ class VIEW3D_PT_CrafterImportWorld(bpy.types.Panel):
         # row_setting.operator("crafter.use_history_worlds",icon="TIME",text="")
         row_setting.operator("crafter.use_history_worlds",icon="TIME",text="History")
         
-        row_ImportWorld = layout.row()
+        row_ImportWorld = layout.row(align=True)
         row_ImportWorld.operator("crafter.import_surface_world",text="Import World")
+        row_ImportWorld.operator("crafter.open_worldimporter_folder",text="",icon="FILE_FOLDER")
         if addon_prefs.Point_Cloud_Mode:
             row_ImportWorld.operator("crafter.import_solid_area",text="Import Editable Area")
 

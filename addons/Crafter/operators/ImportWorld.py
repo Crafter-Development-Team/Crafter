@@ -15,6 +15,8 @@ from bpy.props import *
 from ..__init__ import dir_cafter_data, dir_resourcepacks_plans, dir_materials, dir_classification_basis, dir_blend_append, dir_init_main
 from .Defs import *
 
+dir_importer = os.path.join(dir_init_main, "importer")
+
 #==================== 导入世界 ====================
 
 class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世界
@@ -380,7 +382,6 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             "solid": 0,
         }
 
-        dir_importer = os.path.join(dir_init_main, "importer")
         dir_config = os.path.join(dir_importer, "config")
         dir_json_config = os.path.join(dir_config, "config.json")
 
@@ -388,7 +389,6 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             json.dump(worldconfig, config, indent=4)
 
         #删去之前导出的obj
-        dir_importer = os.path.join(dir_init_main, "importer")
         dir_exe_importer = os.path.join(dir_importer, "WorldImporter.exe")
         for file in os.listdir(dir_importer):
             if file.endswith(".obj"):
@@ -801,7 +801,7 @@ class VIEW3D_OT_UseCrafterHistoryWorlds(bpy.types.Operator):
 class VIEW3D_OT_CrafterBanGameResource(bpy.types.Operator):
     bl_label = "Ban resource"    
     bl_idname = "crafter.ban_game_resource"
-    bl_description = ""
+    bl_description = " "
 
     @classmethod
     def poll(cls, context: bpy.types.Context):
@@ -845,7 +845,7 @@ class VIEW3D_OT_CrafterBanGameResource(bpy.types.Operator):
 class VIEW3D_OT_CrafterUseGameResource(bpy.types.Operator):
     bl_label = "Use resource"    
     bl_idname = "crafter.use_game_resource"
-    bl_description = ""
+    bl_description = " "
 
     @classmethod
     def poll(cls, context: bpy.types.Context):
@@ -891,7 +891,7 @@ class VIEW3D_OT_CrafterUseGameResource(bpy.types.Operator):
 class VIEW3D_OT_CrafterUpGameResource(bpy.types.Operator):#提高 游戏资源包 优先级
     bl_label = "Up resource's priority"    
     bl_idname = "crafter.up_game_resource"
-    bl_description = ""
+    bl_description = " "
 
     @classmethod
     def poll(cls, context: bpy.types.Context):
@@ -924,7 +924,7 @@ class VIEW3D_OT_CrafterUpGameResource(bpy.types.Operator):#提高 游戏资源�
 class VIEW3D_OT_CrafterDownGameResource(bpy.types.Operator):#降低 游戏资源包 优先级
     bl_label = "Down resource's priority"    
     bl_idname = "crafter.down_game_resource"
-    bl_description = ""
+    bl_description = " "
 
     @classmethod
     def poll(cls, context: bpy.types.Context):
@@ -960,13 +960,29 @@ class VIEW3D_OT_CrafterDownGameResource(bpy.types.Operator):#降低 游戏资源
         bpy.ops.crafter.reload_game_resources()
 
         return {'FINISHED'}
+# ==================== 打开WorldImporter文件夹 ====================
+
+class VIEW3D_OT_CrafterOpenWorldImporter(bpy.types.Operator):
+    bl_label = "Open WorldImporter folder"
+    bl_idname = "crafter.open_worldimporter_folder"
+    bl_description = " "
     
+    @classmethod
+    def poll(cls, context: bpy.types.Context):
+        return True
+
+    def execute(self, context: bpy.types.Context):
+        folder_path = dir_importer
+        open_folder(folder_path)
+
+        return {'FINISHED'}
+
 #==================== 刷新 ====================
 
 class VIEW3D_OT_CrafterReloadDimensions(bpy.types.Operator):#刷新 维度
     bl_label = "Reload Dimensions"  
     bl_idname = "crafter.reload_dimensions"
-    bl_description = ""
+    bl_description = " "
     
     @classmethod
     def poll(cls, context: bpy.types.Context):
@@ -1059,7 +1075,7 @@ class VIEW3D_OT_CrafterReloadDimensions(bpy.types.Operator):#刷新 维度
 class VIEW3D_OT_CrafterReloadGameResources(bpy.types.Operator):#刷新 游戏资源包 列表
     bl_label = "Reload Game Resources"
     bl_idname = "crafter.reload_game_resources"
-    bl_description = ""
+    bl_description = " "
     
     @classmethod
     def poll(cls, context: bpy.types.Context):
@@ -1095,7 +1111,7 @@ class VIEW3D_OT_CrafterReloadGameResources(bpy.types.Operator):#刷新 游戏资
 class VIEW3D_OT_CrafterReloadLatestWorldsList(bpy.types.Operator):#刷新 最近世界 列表
     bl_label = "Reload Latest Worlds List"
     bl_idname = "crafter.reload_latest_worlds_list"
-    bl_description = ""
+    bl_description = " "
     
     @classmethod
     def poll(cls, context: bpy.types.Context):
@@ -1155,7 +1171,7 @@ class VIEW3D_OT_CrafterReloadLatestWorldsList(bpy.types.Operator):#刷新 最近
 class VIEW3D_OT_CrafterReloadHistoryWorldsList(bpy.types.Operator):#刷新 历史世界 列表
     bl_label = "Reload History Worlds List"
     bl_idname = "crafter.reload_history_worlds_list"
-    bl_description = ""
+    bl_description = " "
     
     @classmethod
     def poll(cls, context: bpy.types.Context):

@@ -134,7 +134,7 @@ class VIEW3D_OT_CrafterReplaceResources(bpy.types.Operator):
 class VIEW3D_OT_CrafterOpenResourcesPlans(bpy.types.Operator):
     bl_label = "Open Resources Plans"
     bl_idname = "crafter.open_resources_plans"
-    bl_description = ""
+    bl_description = " "
     
     @classmethod
     def poll(cls, context: bpy.types.Context):
@@ -153,7 +153,7 @@ class VIEW3D_OT_CrafterOpenResourcesPlans(bpy.types.Operator):
 class VIEW3D_OT_CrafterUpResource(bpy.types.Operator):#提高 资源包 优先级
     bl_label = "Up resource's priority"    
     bl_idname = "crafter.up_resource"
-    bl_description = ""
+    bl_description = " "
 
     @classmethod
     def poll(cls, context: bpy.types.Context):
@@ -184,7 +184,7 @@ class VIEW3D_OT_CrafterUpResource(bpy.types.Operator):#提高 资源包 优先�
 class VIEW3D_OT_CrafterDownResource(bpy.types.Operator):#降低 资源包 优先级
     bl_label = "Down resource's priority"    
     bl_idname = "crafter.down_resource"
-    bl_description = ""
+    bl_description = " "
 
     @classmethod
     def poll(cls, context: bpy.types.Context):
@@ -217,7 +217,7 @@ class VIEW3D_OT_CrafterDownResource(bpy.types.Operator):#降低 资源包 优先
 class VIEW3D_OT_CrafterReloadResourcesPlans(bpy.types.Operator):#刷新 资源包 预设 列表
     bl_label = "Reload Resources Plans"
     bl_idname = "crafter.reload_resources_plans"
-    bl_description = ""
+    bl_description = " "
     
     @classmethod
     def poll(cls, context: bpy.types.Context):
@@ -239,7 +239,7 @@ class VIEW3D_OT_CrafterReloadResourcesPlans(bpy.types.Operator):#刷新 资源�
 class VIEW3D_OT_CrafterReloadResources(bpy.types.Operator):#刷新 资源包 列表
     bl_label = "Reload Resources"
     bl_idname = "crafter.reload_resources"
-    bl_description = ""
+    bl_description = " "
     
     @classmethod
     def poll(cls, context: bpy.types.Context):
