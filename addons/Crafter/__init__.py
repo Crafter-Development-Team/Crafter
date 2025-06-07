@@ -59,7 +59,7 @@ dir_extensions = os.path.dirname(dir_extension)
 dir_defaults = os.path.join(dir_init_main, "defaults")
 dir_defaults_materials = os.path.join(dir_defaults, "materials")
 dir_defaults_classification_basis = os.path.join(dir_defaults, "classification basis")
-dir_blend_append = os.path.join(dir_defaults,"append.blend")
+dir_defaults_no_lod_blocks = os.path.join(dir_defaults,"no_lod_blocks")
 
 dir_cafter_data = os.path.join(dir_extensions, "cafter_data")
 dir_resourcepacks_plans = os.path.join(dir_cafter_data, "resourcepacks")
@@ -67,8 +67,7 @@ dir_Vanilla = os.path.join(dir_resourcepacks_plans, "Vanilla")
 dir_materials = os.path.join(dir_cafter_data, "materials")
 dir_classification_basis = os.path.join(dir_cafter_data, "classification basis")
 dir_classification_basis_default = os.path.join(dir_classification_basis, "default")
-dir_environments = os.path.join(dir_cafter_data, "environments")
-
+dir_no_lod_blocks = os.path.join(dir_classification_basis, "no_lod_blocks")
 #==========注册==========
 def register():
     # Register classes
@@ -87,7 +86,7 @@ def register():
     os.makedirs(dir_materials, exist_ok=True)
     os.makedirs(dir_classification_basis, exist_ok=True)
     os.makedirs(dir_classification_basis_default, exist_ok=True)
-    # os.makedirs(dir_environments, exist_ok=True)
+    os.makedirs(dir_no_lod_blocks, exist_ok=True)
     #==========初始化默认方案==========
     for filename in os.listdir(dir_defaults_materials):
         src_file = os.path.join(dir_defaults_materials, filename)
@@ -97,6 +96,12 @@ def register():
         src_file = os.path.join(dir_defaults_classification_basis, filename)
         dest_file = os.path.join(dir_classification_basis_default, filename)
         shutil.copy(src_file, dest_file)
+    list_no_lod_blocks_folder = os.listdir(dir_no_lod_blocks)
+    if len(list_no_lod_blocks_folder) == 0:
+        for filename in os.listdir(dir_defaults_no_lod_blocks):
+            src_file = os.path.join(dir_defaults_no_lod_blocks, filename)
+            dest_file = os.path.join(dir_no_lod_blocks, filename)
+            shutil.copy(src_file, dest_file)
 
     print("{} addon is installed.".format(__addon_name__))
 

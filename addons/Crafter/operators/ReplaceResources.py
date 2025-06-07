@@ -5,7 +5,7 @@ import json
 from ..config import __addon_name__
 from ....common.i18n.i18n import i18n
 from bpy.props import *
-from .. import dir_cafter_data, dir_resourcepacks_plans, dir_materials, dir_classification_basis, dir_blend_append, dir_init_main, dir_environments
+from .. import dir_cafter_data, dir_resourcepacks_plans, dir_materials, dir_classification_basis, dir_blend_append, dir_init_main
 from .Defs import *
 
 # ==================== 替换资源包 ====================

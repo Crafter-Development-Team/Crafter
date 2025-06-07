@@ -12,7 +12,7 @@ from ..nbt import nbt
 from ..config import __addon_name__
 from ....common.i18n.i18n import i18n
 from bpy.props import *
-from ..__init__ import dir_cafter_data, dir_resourcepacks_plans, dir_materials, dir_classification_basis, dir_blend_append, dir_init_main
+from ..__init__ import dir_cafter_data, dir_resourcepacks_plans, dir_materials, dir_classification_basis, dir_blend_append, dir_init_main, dir_no_lod_blocks
 from .Defs import *
 
 dir_importer = os.path.join(dir_init_main, "importer")
@@ -105,7 +105,10 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             col_2_lod = split_lod.column()
             col_2_lod.prop(addon_prefs, "useBiomeColors")
             col_2_lod.prop(addon_prefs, "useUnderwaterLOD")
-            col_2_lod.prop(addon_prefs, "isLODAutoCenter")
+            row_no_lod_list = col_2_lod.row()
+            row_no_lod_list.prop(addon_prefs, "no_lod_blocks")
+            if addon_prefs.no_lod_blocks:
+                col_2_lod.operator("crafter.open_no_lod_blocks_folder",icon="FILE_FOLDER")
             if not addon_prefs.isLODAutoCenter:
                 col_2_lod.prop(addon_prefs, "LODCenterX")
                 col_2_lod.prop(addon_prefs, "LODCenterZ")
@@ -282,7 +285,6 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
                 dir_version = addon_prefs.Undivided_Vsersions_List[addon_prefs.Undivided_Vsersions_List_index].name
                 version = os.path.basename(dir_version)
                 jarPath = os.path.join(dir_version, version + ".jar")
-
             else:
                 undivided = False
                 jarPath = self.jarPath
@@ -296,7 +298,7 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
 
             save = self.save
             dot_minecraftPath = self.dot_minecraftPath
-
+        # 获取资源包列表
         resourcepacksPaths = []
         if addon_prefs.Game_Resources:
             for resourcepacksPath in addon_prefs.Game_Resources_List:
@@ -310,39 +312,26 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
                 json_crafter = json.load(file)
             for resource in json_crafter:
                 resourcepacksPaths.append(os.path.join(dir_resourcepacks, resource + ".zip"))
+        # 获取无lod方块列表
+        list_no_lod_blocks = []
+        if addon_prefs.no_lod_blocks:
+            list_files = os.listdir(dir_no_lod_blocks)
+            for file in list_files:
+                if file.endswith(".json"):
+                    with open(os.path.join(dir_no_lod_blocks, file), "r", encoding="utf-8") as file:
+                        json_no_lod_blocks = json.load(file)
+                        make_json_together(list_no_lod_blocks, json_no_lod_blocks)
+
         #写入conifg.json
         point_cloud_mode = addon_prefs.Point_Cloud_Mode
         if point_cloud_mode:
             status = 2
         else:
             status = 1
-        
-        #确保维度列表不为空
-        if len(addon_prefs.Dimensions_List) == 0:
-            #刷新维度列表，如果失败则添加默认值
-            try:
-                bpy.ops.crafter.reload_dimensions()
-            except Exception as e:
-                print(f"刷新维度列表失败: {e}")
-                #手动添加默认维度
-                dim = addon_prefs.Dimensions_List.add()
-                dim.name = "minecraft:overworld"
-                addon_prefs.Dimensions_List_index = 0
-        
-        #检查索引是否有效
-        if addon_prefs.Dimensions_List_index >= len(addon_prefs.Dimensions_List):
-            addon_prefs.Dimensions_List_index = 0
             
-        #获取选中的维度
-        selectedDimension = "minecraft:overworld"  #默认值
-        try:
-            selectedDimension = addon_prefs.Dimensions_List[addon_prefs.Dimensions_List_index].name
-        except Exception as e:
-            print(f"获取维度失败，使用默认值: {e}")
-        
         worldconfig = {
             "worldPath": worldPath,
-            "selectedDimension": selectedDimension,
+            "selectedDimension": addon_prefs.Dimensions_List[addon_prefs.Dimensions_List_index].name,
             "jarPath": jarPath,
             "versionJsonPath": versionJsonPath,
             "modsPath": modsPath,
@@ -375,6 +364,7 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             "isLODAutoCenter":addon_prefs.isLODAutoCenter,
             "LODCenterX":addon_prefs.LODCenterX,
             "LODCenterZ":addon_prefs.LODCenterZ,
+            "lod1Blocks":list_no_lod_blocks,
             "LOD0renderDistance":addon_prefs.LOD0renderDistance,
             "LOD1renderDistance":addon_prefs.LOD1renderDistance,
             "LOD2renderDistance":addon_prefs.LOD2renderDistance,
@@ -973,6 +963,22 @@ class VIEW3D_OT_CrafterOpenWorldImporter(bpy.types.Operator):
 
     def execute(self, context: bpy.types.Context):
         folder_path = dir_importer
+        open_folder(folder_path)
+
+        return {'FINISHED'}
+# ==================== 打开no_lod_blocks文件夹 ====================
+
+class VIEW3D_OT_CrafterOpenNoLodBlocks(bpy.types.Operator):
+    bl_label = "Open no lod blocks folder"
+    bl_idname = "crafter.open_no_lod_blocks_folder"
+    bl_description = " "
+    
+    @classmethod
+    def poll(cls, context: bpy.types.Context):
+        return True
+
+    def execute(self, context: bpy.types.Context):
+        folder_path = dir_no_lod_blocks
         open_folder(folder_path)
 
         return {'FINISHED'}

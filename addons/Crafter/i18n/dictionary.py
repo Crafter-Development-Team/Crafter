@@ -38,6 +38,8 @@ dictionary = {
         "Chunk Number to Release":"释放内存区块数",
         "Biome Colors":"群系着色",
         "Underwater LOD":"水下LOD",
+        "List of Blocks not LOD":"不LOD方块列表",
+        "Open no lod blocks folder":"打开不LOD方块文件夹",
         "Greedy Mesh":"面合并",
         "LOD Auto Center":"LOD自动中心",
         "LOD Center X":"LOD中心X",

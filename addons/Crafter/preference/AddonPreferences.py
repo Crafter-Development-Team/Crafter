@@ -108,7 +108,7 @@ class CrafterAddonPreferences(AddonPreferences):
                                       ("2","2","2"),
                                       ("3","3","3"),
                                       ("4","4","4"),])#type: ignore
-    not_lod_blocks: BoolProperty(name="Blocks' List not LOD",
+    no_lod_blocks: BoolProperty(name="List of Blocks not LOD",
                             default=False,)# type: ignore
     useBiomeColors: BoolProperty(name="Biome Colors",
                                   default=True,)# type: ignore
