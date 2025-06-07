@@ -101,16 +101,17 @@ class CrafterAddonPreferences(AddonPreferences):
     maxTasksPerBatch: IntProperty(name="Chunk Number to Release",
                                   default=32768,
                                   min=1)# type: ignore
-    activeLOD: BoolProperty(name="LOD",
-                            default=False,)# type: ignore
-    activeLOD2: BoolProperty(name="LOD2",
-                            default=True,)# type: ignore
-    activeLOD3: BoolProperty(name="LOD3",
-                            default=True,)# type: ignore
-    activeLOD4: BoolProperty(name="LOD4",
-                            default=False,)# type: ignore
+    Max_LOD_Level: EnumProperty(name="Max LOD Level",
+                               default="0",
+                               items=[("0","Off","0"),
+                                      ("1","1","1"),
+                                      ("2","2","2"),
+                                      ("3","3","3"),
+                                      ("4","4","4"),])#type: ignore
     not_lod_blocks: BoolProperty(name="Blocks' List not LOD",
                             default=False,)# type: ignore
+    useBiomeColors: BoolProperty(name="Biome Colors",
+                                  default=True,)# type: ignore
     useUnderwaterLOD: BoolProperty(name="Underwater LOD",
                                    default=False,)# type: ignore
     useGreedyMesh: BoolProperty(name="Greedy Mesh",

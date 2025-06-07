@@ -85,33 +85,23 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         if addon_prefs.exportFullModel:
             row_exportFullModel.prop(addon_prefs, "partitionSize")
         
+        
         col_lod = layout.column()
-        col_lod.prop(addon_prefs, "activeLOD")
-        if addon_prefs.activeLOD:
+        col_lod.prop(addon_prefs, "Max_LOD_Level")
+        if int(addon_prefs.Max_LOD_Level) > 0:
             split_lod = col_lod.split(factor=0.5)
-            
+
             col_1_lod = split_lod.column()
-
-            row_lod0 = col_1_lod.row()
-            row_lod0.prop(addon_prefs, "LOD0renderDistance")
-
-            row_lod1 = col_1_lod.row()
-            split_lod1 = row_lod1.split(factor=0.4)
-            split_lod1.prop(addon_prefs, "activeLOD2")
-            if addon_prefs.activeLOD2:
-                split_lod1.prop(addon_prefs, "LOD1renderDistance")
-                row_lod2 = col_1_lod.row()
-                split_lod2 = row_lod2.split(factor=0.4)
-                split_lod2.prop(addon_prefs, "activeLOD3")
-                if addon_prefs.activeLOD3:
-                    split_lod2.prop(addon_prefs, "LOD2renderDistance")
-                    row_lod3 = col_1_lod.row()
-                    split_lod3 = row_lod3.split(factor=0.4)
-                    split_lod3.prop(addon_prefs, "activeLOD4")
-                    if addon_prefs.activeLOD4:
-                        split_lod3.prop(addon_prefs, "LOD3renderDistance")
+            col_1_lod.prop(addon_prefs, "LOD0renderDistance")
+            if int(addon_prefs.Max_LOD_Level) > 1:
+                col_1_lod.prop(addon_prefs, "LOD1renderDistance")
+                if int(addon_prefs.Max_LOD_Level) > 2:
+                    col_1_lod.prop(addon_prefs, "LOD2renderDistance")
+                    if int(addon_prefs.Max_LOD_Level) > 3:
+                        col_1_lod.prop(addon_prefs, "LOD3renderDistance")
             # ===================================================
             col_2_lod = split_lod.column()
+            col_2_lod.prop(addon_prefs, "useBiomeColors")
             col_2_lod.prop(addon_prefs, "useUnderwaterLOD")
             col_2_lod.prop(addon_prefs, "isLODAutoCenter")
             if not addon_prefs.isLODAutoCenter:
@@ -373,7 +363,11 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             "exportFullModel":not addon_prefs.exportFullModel,
             "partitionSize":addon_prefs.partitionSize,
             "maxTasksPerBatch":addon_prefs.maxTasksPerBatch,
-            "activeLOD":addon_prefs.activeLOD,
+            "activeLOD":int(addon_prefs.Max_LOD_Level) > 0,
+            "activeLOD2":int(addon_prefs.Max_LOD_Level) > 1,
+            "activeLOD3":int(addon_prefs.Max_LOD_Level) > 2,
+            "activeLOD4":int(addon_prefs.Max_LOD_Level) > 3,
+            "useBiomeColors":addon_prefs.useBiomeColors,
             "useUnderwaterLOD":addon_prefs.useUnderwaterLOD,
             "useGreedyMesh":addon_prefs.useGreedyMesh,
             "isLODAutoCenter":addon_prefs.isLODAutoCenter,
