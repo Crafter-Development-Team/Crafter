@@ -83,8 +83,8 @@ class TAG_List(TAG):
 
 class TAG_Compound(TAG):
     """复合标签，包含命名标签的集合"""
-    def __init__(self, name=None):
-        super().__init__(name, {})
+    def __init__(self, name=None, value=None):
+        super().__init__(name, {} if value is None else value)
         
     def __getitem__(self, key):
         if key in self.value:
