@@ -108,8 +108,9 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):
             links = node_tree_material.links
 
             # 设置材质设置
-            material.volume_intersection_method = 'ACCURATE'
-            material.displacement_method = "BOTH"
+            if bpy.app.version >= (4, 2, 0):
+                material.volume_intersection_method = 'ACCURATE'
+                material.displacement_method = "BOTH"
             
             node_tex_base = None
             #处理lod材质
