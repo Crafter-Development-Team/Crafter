@@ -96,7 +96,7 @@ class VIEW3D_OT_CrafterReplaceResources(bpy.types.Operator):
                             node_C_PBR_Parser = node
             if is_materialed and (not is_Vanilla):
                 node_tex_normal, node_tex_PBR = load_normal_and_PBR(node_tex_base=node_tex_base, nodes=nodes, links=links,)
-                link_base_normal_and_PBR(node_tex_base=node_tex_base, group_CI=group_CI, links=links, node_C_PBR_Parser=node_C_PBR_Parser,node_tex_normal=node_tex_normal, node_tex_PBR=node_tex_PBR)
+                link_base_normal_PBR(node_tex_base=node_tex_base, group_CI=group_CI, links=links, node_C_PBR_Parser=node_C_PBR_Parser,node_tex_normal=node_tex_normal, node_tex_PBR=node_tex_PBR)
                 
         for obj in context.selected_objects:
             if obj.type == "MESH":

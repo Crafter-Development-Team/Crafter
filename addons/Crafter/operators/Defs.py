@@ -402,44 +402,47 @@ def load_normal_and_PBR(node_tex_base, nodes, links):
     nodes: 目标材质节点组
     links:目标材质连接组
     '''
-    name_image = fuq_bl_dot_number(node_tex_base.image.name)
-    name_block = name_image[:-4]
-    dir_image = os.path.dirname(node_tex_base.image.filepath)
-    dir_n = os.path.join(dir_image,name_block + "_n.png")
-    dir_s = os.path.join(dir_image,name_block + "_s.png")
-    dir_a = os.path.join(dir_image,name_block + "_a.png")
-    add_node_moving_texture(node_tex_base, nodes, links)
     node_tex_normal = None
     node_tex_PBR = None
-    if os.path.exists(bpy.path.abspath(dir_n)):
-        node_tex_normal = nodes.new(type="ShaderNodeTexImage")
-        node_tex_normal.location = (node_tex_base.location.x, node_tex_base.location.y - 300)
-        node_tex_normal.image = bpy.data.images.load(dir_n)
-        node_tex_normal.interpolation = "Closest"
-        bpy.data.images[node_tex_normal.image.name].colorspace_settings.name = "Non-Color"
-        add_node_moving_texture(node_tex_normal, nodes, links)
-    if os.path.exists(bpy.path.abspath(dir_s)):
-        node_tex_PBR = nodes.new(type="ShaderNodeTexImage")
-        node_tex_PBR.location = (node_tex_base.location.x, node_tex_base.location.y - 600)
-        node_tex_PBR.image = bpy.data.images.load(dir_s)
-        node_tex_PBR.interpolation = "Closest"
-        bpy.data.images[node_tex_PBR.image.name].colorspace_settings.name = "Non-Color"
-        add_node_moving_texture(node_tex_PBR, nodes, links)
-    elif os.path.exists(bpy.path.abspath(dir_a)):
-        node_tex_PBR = nodes.new(type="ShaderNodeTexImage")
-        node_tex_PBR.location = (node_tex_base.location.x, node_tex_base.location.y - 600)
-        node_tex_PBR.image = bpy.data.images.load(dir_a)
-        node_tex_PBR.interpolation = "Closest"
-        bpy.data.images[node_tex_PBR.image.name].colorspace_settings.name = "Non-Color"
-        add_node_moving_texture(node_tex_PBR, nodes, links)
+    if node_tex_base != None:
+        name_image = fuq_bl_dot_number(node_tex_base.image.name)
+        name_block = name_image[:-4]
+        dir_image = os.path.dirname(node_tex_base.image.filepath)
+        dir_n = os.path.join(dir_image,name_block + "_n.png")
+        dir_s = os.path.join(dir_image,name_block + "_s.png")
+        dir_a = os.path.join(dir_image,name_block + "_a.png")
+        add_node_moving_texture(node_tex_base, nodes, links)
+        node_tex_normal = None
+        node_tex_PBR = None
+        if os.path.exists(bpy.path.abspath(dir_n)):
+            node_tex_normal = nodes.new(type="ShaderNodeTexImage")
+            node_tex_normal.location = (node_tex_base.location.x, node_tex_base.location.y - 300)
+            node_tex_normal.image = bpy.data.images.load(dir_n)
+            node_tex_normal.interpolation = "Closest"
+            bpy.data.images[node_tex_normal.image.name].colorspace_settings.name = "Non-Color"
+            add_node_moving_texture(node_tex_normal, nodes, links)
+        if os.path.exists(bpy.path.abspath(dir_s)):
+            node_tex_PBR = nodes.new(type="ShaderNodeTexImage")
+            node_tex_PBR.location = (node_tex_base.location.x, node_tex_base.location.y - 600)
+            node_tex_PBR.image = bpy.data.images.load(dir_s)
+            node_tex_PBR.interpolation = "Closest"
+            bpy.data.images[node_tex_PBR.image.name].colorspace_settings.name = "Non-Color"
+            add_node_moving_texture(node_tex_PBR, nodes, links)
+        elif os.path.exists(bpy.path.abspath(dir_a)):
+            node_tex_PBR = nodes.new(type="ShaderNodeTexImage")
+            node_tex_PBR.location = (node_tex_base.location.x, node_tex_base.location.y - 600)
+            node_tex_PBR.image = bpy.data.images.load(dir_a)
+            node_tex_PBR.interpolation = "Closest"
+            bpy.data.images[node_tex_PBR.image.name].colorspace_settings.name = "Non-Color"
+            add_node_moving_texture(node_tex_PBR, nodes, links)
     return node_tex_normal, node_tex_PBR
 
-def link_base_normal_and_PBR(node_tex_base, group_CI, links, node_C_PBR_Parser, node_tex_normal, node_tex_PBR):
-
-    if "Base Color" in group_CI.inputs:
-        links.new(node_tex_base.outputs["Color"], group_CI.inputs["Base Color"])
-    if "Alpha" in group_CI.inputs:
-        links.new(node_tex_base.outputs["Alpha"], group_CI.inputs["Alpha"])
+def link_base_normal_PBR(node_tex_base, group_CI, links, node_C_PBR_Parser, node_tex_normal, node_tex_PBR):
+    if node_tex_base != None:
+        if "Base Color" in group_CI.inputs:
+            links.new(node_tex_base.outputs["Color"], group_CI.inputs["Base Color"])
+        if "Alpha" in group_CI.inputs:
+            links.new(node_tex_base.outputs["Alpha"], group_CI.inputs["Alpha"])
     if node_tex_normal != None:
         links.new(node_tex_normal.outputs["Color"], node_C_PBR_Parser.inputs["Normal"])
         links.new(node_tex_normal.outputs["Alpha"], node_C_PBR_Parser.inputs["Normal Alpha"])

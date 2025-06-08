@@ -195,7 +195,7 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):
                             nodes_wait_remove.append(node)
                     elif node_tex_base != None:
                         nodes_wait_remove.append(node)
-                    elif name_image.endswith(".png"):
+                    else:
                         node.interpolation = "Closest"
                         node_tex_base = node
                         block_name = fuq_bl_dot_number(node_tex_base.image.name)
@@ -214,6 +214,11 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):
                     else:
                         if node.node_tree.name.startswith("Crafter-biomeTex"):
                             node_biomeTex = node
+            # 在未找到基础贴图时，尝试从材质名中获取
+            if node_tex_base == None:
+                name_material_real = fuq_bl_dot_number(material.name)
+                last_gang_index = name_material_real.rfind('/')
+                real_block_name = name_material_real[last_gang_index + 1:]
             if real_block_name == None:
                 continue
             # 如果在banlist里直接跳过
@@ -247,7 +252,7 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):
             node_C_PBR_Parser = add_node_parser(group_CI=group_CI,nodes=nodes,links=links)
             if not imported_by_crafter:
                 node_tex_normal, node_tex_PBR = load_normal_and_PBR(node_tex_base=node_tex_base, nodes=nodes, links=links,)
-            link_base_normal_and_PBR(node_tex_base=node_tex_base, group_CI=group_CI, links=links, node_C_PBR_Parser=node_C_PBR_Parser,node_tex_normal=node_tex_normal, node_tex_PBR=node_tex_PBR)
+            link_base_normal_PBR(node_tex_base=node_tex_base, group_CI=group_CI, links=links, node_C_PBR_Parser=node_C_PBR_Parser,node_tex_normal=node_tex_normal, node_tex_PBR=node_tex_PBR)
             if node_tex_base != None:
                 nodes.active = node_tex_base
         # 添加选中物体的材质到合集
