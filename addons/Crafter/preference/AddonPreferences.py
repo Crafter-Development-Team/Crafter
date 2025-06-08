@@ -226,15 +226,7 @@ class CrafterAddonPreferences(AddonPreferences):
 #==========修改变量操作==========
     def update_world_path(self, context):
         context.area.tag_redraw
-        try:
-            bpy.ops.crafter.reload_dimensions()
-        except Exception as e:
-            print(f"Error while sp dim: {e}")
-            #if dim empty, add defult
-            if len(self.Dimensions_List) == 0:
-                dim = self.Dimensions_List.add()
-                dim.name = "minecraft:overworld"
-                self.Dimensions_List_index = 0
+        bpy.ops.crafter.reload_all()
         return None
 
     def reload_all(self, context):

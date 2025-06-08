@@ -80,7 +80,7 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):
                 try:
                     with open(file_path, 'r', encoding='utf-8') as file:
                         data = json.load(file)
-                        classification_list = make_json_together(classification_list, data)
+                        classification_list = make_dict_together(classification_list, data)
                         if "ban" in data:
                             banlist.extend(data["ban"])
                         if "ban_keyw" in data:

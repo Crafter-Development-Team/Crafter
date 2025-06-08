@@ -16,7 +16,7 @@ bl_info = {
     "name": "Crafter",
     "author": "Crafter Development Team",
     "blender": (4, 2, 0),
-    "version": (0, 5, 0),
+    "version": (0, 5, 1),
     "description": "目标是成为从Minecraft到Blender全流程的Blender插件",
     "warning": "",
     "doc_url": "https://github.com/Crafter-Production-Team/Crafter?tab=readme-ov-file#crafter",
@@ -67,6 +67,7 @@ dir_Vanilla = os.path.join(dir_resourcepacks_plans, "Vanilla")
 dir_materials = os.path.join(dir_cafter_data, "materials")
 dir_classification_basis = os.path.join(dir_cafter_data, "classification basis")
 dir_classification_basis_default = os.path.join(dir_classification_basis, "default")
+dir_blend_append = os.path.join(dir_defaults,"append.blend")
 dir_no_lod_blocks = os.path.join(dir_classification_basis, "no_lod_blocks")
 #==========注册==========
 def register():

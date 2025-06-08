@@ -320,7 +320,9 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
                 if file.endswith(".json"):
                     with open(os.path.join(dir_no_lod_blocks, file), "r", encoding="utf-8") as file:
                         json_no_lod_blocks = json.load(file)
-                        make_json_together(list_no_lod_blocks, json_no_lod_blocks)
+                        for block in json_no_lod_blocks:
+                            if block not in list_no_lod_blocks:
+                                list_no_lod_blocks.append(block)
 
         #写入conifg.json
         point_cloud_mode = addon_prefs.Point_Cloud_Mode
@@ -997,16 +999,15 @@ class VIEW3D_OT_CrafterReloadDimensions(bpy.types.Operator):#刷新 维度
     def execute(self, context: bpy.types.Context):
         addon_prefs = context.preferences.addons[__addon_name__].preferences
 
-        bpy.ops.crafter.reload_all()
         worldPath = os.path.normpath(addon_prefs.World_Path)
         dir_level_dat = os.path.join(worldPath, "level.dat")
         if not os.path.exists(dir_level_dat):
             return { "FINISHED"}
         
-        #清空维度列表(不清空会报错)
+        #清空维度列表
         addon_prefs.Dimensions_List.clear()
         
-        #添加默认维度(what ever)
+        #添加默认维度
         dim_overworld = addon_prefs.Dimensions_List.add()
         dim_overworld.name = "minecraft:overworld"
         

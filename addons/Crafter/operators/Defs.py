@@ -193,7 +193,7 @@ def open_folder(folder_path: str):
     else:  # Linux
         subprocess.run(["xdg-open", folder_path])
 
-def make_json_together(dict1, dict2):
+def make_dict_together(dict1, dict2):
     '''
     递归合并json最底层的键值对
     dict1: 字典1
@@ -202,7 +202,7 @@ def make_json_together(dict1, dict2):
     for key, value in dict2.items():
         if key in dict1:
             if isinstance(dict1[key], dict) and isinstance(value, dict):
-                make_json_together(dict1[key], value)
+                make_dict_together(dict1[key], value)
             elif isinstance(dict1[key], list) and isinstance(value, list):
                 dict1[key] = list(set(dict1[key] + value))
             else:
