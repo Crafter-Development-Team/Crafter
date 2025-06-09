@@ -23,7 +23,7 @@
 
 ### 设置与运行
 
-本插件基于由[ZHU Xinyu](https://github.com/xzhuah)制作的[Blender插件打包工具](https://github.com/xzhuah/BlenderAddonPackageTool)测试及打包。拉取源码后应当执行如下操作。
+本插件基于由[异次元学者](https://space.bilibili.com/181717176)制作的[Blender插件打包工具](https://github.com/xzhuah/BlenderAddonPackageTool)测试及打包。拉取源码后应当执行如下操作。
 
 #### 1. 设置**main.py**中的路径为您的Blender路径
 
@@ -52,12 +52,35 @@ BLENDER_EXE_PATH = "C:/Program Files/Blender Foundation/Blender 4.2/blender.exe"
 
 [![白给/BaiGave](https://i0.hdslb.com/bfs/face/d7d82f14e8469c3c973cd1d7b981ed275069aa55.jpg@100w_100h_1c_1s.png)](https://space.bilibili.com/3461563635731405)
 
-#### -白给/BaiGave-
+#### 白给/BaiGave
 
-开发了插件的C++部分
+- 插件的C++部分
+
+[![被盗号的高锰酸钾/MCL0](https://i2.hdslb.com/bfs/face/4cc9254634fc212567c7e2286554bf664bfedd92.jpg@100w_100h_1c_1s.png)](https://space.bilibili.com/511403657)
+
+#### 被盗号的高锰酸钾/MCL0
+
+- 世界维度列表读取
+- 坐标选择器
 
 [![少年忠城/zhong_cheng](https://i0.hdslb.com/bfs/face/cca0a2997727b7c9625b6c84b79d75b1d20b0505.jpg@100w_100h_1c_1s.png)](https://space.bilibili.com/455309610)
 
-#### -少年忠城/zhong_cheng-
+#### 少年忠城/zhong_cheng
 
-开发了插件的Python部分
+- python部分的大部分程序
+
+### 鸣谢
+
+[![异次元学者](https://i2.hdslb.com/bfs/face/68a1603186d8655a14d7e7fc920b4c95f23929d4.jpg@100w_100h_1c_1s.png)](https://space.bilibili.com/181717176)
+
+#### 异次元学者
+
+- 插件框架作者
+
+[![-blueish-](https://i2.hdslb.com/bfs/face/e7ebd5fd6c2267d6bab44a2e89b9d1671a818f13.jpg@100w_100h_1c_1s.png)](https://space.bilibili.com/3546391456516604)
+
+#### -blueish-
+
+- 提供了视差节点 <未实装>
+
+-*【排名不分先后，按首字母排序】*
