@@ -68,6 +68,7 @@ BLENDER_EXE_PATH = "C:/Program Files/Blender Foundation/Blender 4.2/blender.exe"
 #### 少年忠城/zhong_cheng
 
 - python部分的大部分程序
+- 默认预设制作
 
 ### 鸣谢
 
