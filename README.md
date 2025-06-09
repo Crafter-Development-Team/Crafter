@@ -77,6 +77,13 @@ BLENDER_EXE_PATH = "C:/Program Files/Blender Foundation/Blender 4.2/blender.exe"
 
 - 插件框架作者
 
+[![像素艺作_VoxelCraft](https://i2.hdslb.com/bfs/face/1032246c6c38fc376fc6ae29d525edb85bc7da97.jpg@100w_100h_1c_1s.png)](https://space.bilibili.com/26149666)
+
+#### 像素艺作_VoxelCraft
+
+- 群系着色图像映射
+- EEVEE着色器材质解惑
+
 [![-blueish-](https://i2.hdslb.com/bfs/face/e7ebd5fd6c2267d6bab44a2e89b9d1671a818f13.jpg@100w_100h_1c_1s.png)](https://space.bilibili.com/3546391456516604)
 
 #### -blueish-
