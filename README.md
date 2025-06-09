@@ -15,6 +15,8 @@
 
 - 低于4.2版本安装Crafter.zip
 
+---
+
 -*【由于插件中包含C++编译程序，所以报毒是正常现象。不放心可以检查[WorldImporter](https://github.com/BaiGave/WorldImporter)中的代码，编译并替换确认安全性】*
 
 ### 导入
@@ -50,45 +52,66 @@ BLENDER_EXE_PATH = "C:/Program Files/Blender Foundation/Blender 4.2/blender.exe"
 
 ### 开发组
 
-[![白给/BaiGave](https://i0.hdslb.com/bfs/face/d7d82f14e8469c3c973cd1d7b981ed275069aa55.jpg@100w_100h_1c_1s.png)](https://space.bilibili.com/3461563635731405)
-
 #### 白给/BaiGave
+
+[![白给/BaiGave](https://i0.hdslb.com/bfs/face/d7d82f14e8469c3c973cd1d7b981ed275069aa55.jpg@100w_100h_1c_1s.png)](https://space.bilibili.com/3461563635731405)
 
 - 插件的C++部分
 
-[![被盗号的高锰酸钾/MCL0](https://i2.hdslb.com/bfs/face/4cc9254634fc212567c7e2286554bf664bfedd92.jpg@100w_100h_1c_1s.png)](https://space.bilibili.com/511403657)
+---
 
 #### 被盗号的高锰酸钾/MCL0
+
+[![被盗号的高锰酸钾/MCL0](https://i2.hdslb.com/bfs/face/4cc9254634fc212567c7e2286554bf664bfedd92.jpg@100w_100h_1c_1s.png)](https://space.bilibili.com/511403657)
 
 - 世界维度列表读取
 - 坐标选择器
 
-[![少年忠城/zhong_cheng](https://i0.hdslb.com/bfs/face/cca0a2997727b7c9625b6c84b79d75b1d20b0505.jpg@100w_100h_1c_1s.png)](https://space.bilibili.com/455309610)
+---
 
 #### 少年忠城/zhong_cheng
+
+[![少年忠城/zhong_cheng](https://i0.hdslb.com/bfs/face/cca0a2997727b7c9625b6c84b79d75b1d20b0505.jpg@100w_100h_1c_1s.png)](https://space.bilibili.com/455309610)
 
 - python部分的大部分程序
 - 默认预设制作
 
+---
+
 ### 鸣谢
 
-[![异次元学者](https://i2.hdslb.com/bfs/face/68a1603186d8655a14d7e7fc920b4c95f23929d4.jpg@100w_100h_1c_1s.png)](https://space.bilibili.com/181717176)
+#### 若有来生LS
+
+[![若有来生LS](https://i2.hdslb.com/bfs/face/69caf616d0ec1d734456ba5c3dcfb7228df98dc3.jpg@100w_100h_1c_1s.png)](https://space.bilibili.com/328067113)
+
+- 默认LOD1无LOD方块表整理
+- 制作了很好用的材质编辑插件，正在适配本插件
+
+---
 
 #### 异次元学者
 
+[![异次元学者](https://i2.hdslb.com/bfs/face/68a1603186d8655a14d7e7fc920b4c95f23929d4.jpg@100w_100h_1c_1s.png)](https://space.bilibili.com/181717176)
+
 - 插件框架作者
 
-[![像素艺作_VoxelCraft](https://i2.hdslb.com/bfs/face/1032246c6c38fc376fc6ae29d525edb85bc7da97.jpg@100w_100h_1c_1s.png)](https://space.bilibili.com/26149666)
+---
 
 #### 像素艺作_VoxelCraft
+
+[![像素艺作_VoxelCraft](https://i2.hdslb.com/bfs/face/1032246c6c38fc376fc6ae29d525edb85bc7da97.jpg@100w_100h_1c_1s.png)](https://space.bilibili.com/26149666)
 
 - 群系着色图像映射
 - EEVEE着色器材质解惑
 
-[![-blueish-](https://i2.hdslb.com/bfs/face/e7ebd5fd6c2267d6bab44a2e89b9d1671a818f13.jpg@100w_100h_1c_1s.png)](https://space.bilibili.com/3546391456516604)
+---
 
 #### -blueish-
 
+[![-blueish-](https://i2.hdslb.com/bfs/face/e7ebd5fd6c2267d6bab44a2e89b9d1671a818f13.jpg@100w_100h_1c_1s.png)](https://space.bilibili.com/3546391456516604)
+
 - 提供了视差节点 <未实装>
+
+---
 
 -*【排名不分先后，按首字母排序】*
