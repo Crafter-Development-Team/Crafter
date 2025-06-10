@@ -84,7 +84,7 @@ class CrafterAddonPreferences(AddonPreferences):
     cullCave: BoolProperty(name="Cull Cave",
                            default=False,)# type: ignore
     exportLightBlock: BoolProperty(name="Export Light Block",
-                                   default=True,)# type: ignore
+                                   default=False,)# type: ignore
     exportLightBlockOnly: BoolProperty(name="Only Export Light Block",
                                        default=False,)# type: ignore
     lightBlockSize: FloatProperty(name="Light Block Size",
