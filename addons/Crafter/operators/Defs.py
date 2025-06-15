@@ -268,8 +268,8 @@ def add_to_mcmts_collection(object,context):
         for context_material in bpy.data.materials:
             list_name_context_material.append(context_material.name)
         list_name_object_material = []
-        for object_material in object.data.materials:
-            list_name_object_material.append(object_material.name)
+        for material_object in object.data.materials:
+            list_name_object_material.append(material_object.name)
         if (object.name not in donot) and object.type == "MESH" and object.data.materials:
             for name_material in list_name_object_material:
                 if (name_material not in context.scene.Crafter_mcmts) and (name_material not in donot):

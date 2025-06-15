@@ -25,9 +25,9 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
     bl_description = "Import the surface world"
     bl_options = {'REGISTER', 'UNDO'}
     
-    worldPath = StringProperty(name="World path")#type: ignore
+    worldPath: StringProperty(name="World path")#type: ignore
     jarPath: StringProperty(name="Jar path")#type: ignore
-    modsPath = StringProperty(name="Mods path")#type: ignore
+    modsPath: StringProperty(name="Mods path")#type: ignore
 
     save: StringProperty(name="Save")#type: ignore
     version: StringProperty(name="Version")#type: ignore
@@ -251,7 +251,6 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         return context.window_manager.invoke_props_dialog(self)
     
     def execute(self, context: bpy.types.Context):
-        zero_time = time.perf_counter()#记录开始时间
         addon_prefs = context.preferences.addons[__addon_name__].preferences
 
         imported_time = str(context.scene.Crafter_import_time)

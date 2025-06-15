@@ -10,13 +10,14 @@ from ...common.i18n.dictionary import common_dictionary
 from ...common.i18n.i18n import load_dictionary
 from bpy.props import StringProperty, IntProperty, BoolProperty, IntVectorProperty, EnumProperty, CollectionProperty, FloatProperty
 from .properties import ResourcePlan, ResourcePlansInfo, Material ,McMt
+from .operators.item import ui_item
 
 # Add-on info
 bl_info = {
     "name": "Crafter",
     "author": "Crafter Development Team",
     "blender": (4, 2, 0),
-    "version": (0, 5, 7),
+    "version": (0, 5, 8),
     "description": "目标是成为从Minecraft到Blender全流程的Blender插件",
     "warning": "",
     "doc_url": "https://github.com/Crafter-Production-Team/Crafter?tab=readme-ov-file#crafter",
@@ -75,7 +76,6 @@ def register():
     auto_load.init()
     auto_load.register()
     add_properties(_addon_properties)
-
     # Internationalization
     load_dictionary(dictionary)
     bpy.app.translations.register(__addon_name__, common_dictionary)
@@ -103,6 +103,8 @@ def register():
             src_file = os.path.join(dir_defaults_no_lod_blocks, filename)
             dest_file = os.path.join(dir_no_lod_blocks, filename)
             shutil.copy(src_file, dest_file)
+    #==========添加至原有ui==========
+    bpy.types.VIEW3D_MT_image_add.append(ui_item)
 
     print("{} addon is installed.".format(__addon_name__))
 
@@ -116,4 +118,7 @@ def unregister():
     # unRegister classes
     auto_load.unregister()
     remove_properties(_addon_properties)
+    #==========从原有ui移除==========
+    bpy.types.VIEW3D_MT_image_add.remove(ui_item)
+
     print("{} addon is uninstalled.".format(__addon_name__))

@@ -75,6 +75,8 @@ dictionary = {
         "default":"默认",
         "Open Classification Basis":"打开材质分类依据文件夹",
         "Reload Classification Basis":"刷新材质分类依据列表",
+            #==========导入物品==========
+        "Minecraft Item":"Minecraft物品",
         #==========操作介绍==========
             #==========导入世界==========
         "Import world":"导入世界",
@@ -97,6 +99,9 @@ dictionary = {
         "1-R,G as Metallic,No Emission":"1-R,G为金属度,无自发光",
         "Load material":"加载材质",
         "Classification basis":"材质分类依据",
+            #==========导入物品==========
+        "Import Minecraft item":"导入Minecraft物品",
+        "Custome Size":"自定义尺寸",
         #==========节点接口==========
         "Normal Alpha":"法向Alpha",
         "Parsed Normal":"已解析法向",
@@ -114,6 +119,11 @@ dictionary = {
         "Import time: ":"导入用时: ",
         ", Material time: ":", 材质用时: ",
         ", Environment time: ":", 环境用时: ",
+            #==========UV==========
+        "No active object found":"未找到活动对象",
+        "Active object must be a mesh":"活动对象必须是网格模型",
+        "Active object has no faces":"活动对象没有面数据",
+        "No active UV map found":"未找到激活的UV贴图"
     }
 }
 
