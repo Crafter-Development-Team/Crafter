@@ -65,6 +65,7 @@ dictionary = {
             # ==========加载材质==========
         "Load Materials":"加载材质",
         "Materials":"材质",
+        "Parser":"解析器",
         "PBR Parser":"PBR解析器",
         "Mix Parser":"混合解析器",
         "Materials index":"材质索引",
@@ -75,6 +76,7 @@ dictionary = {
         "default":"默认",
         "Open Classification Basis":"打开材质分类依据文件夹",
         "Reload Classification Basis":"刷新材质分类依据列表",
+        "Crafter Materials Settings":"Crafter材质设置",
             # ==========导入物品==========
         "Minecraft Item":"Minecraft物品",
         # ==========操作介绍==========
@@ -91,7 +93,7 @@ dictionary = {
         "Replace resources,but can only replace textures with the same name":"替换资源包,但只能替换同名纹理",
         "Set texture interpolation":"设置纹理插值",
             # ==========加载材质==========
-        "Parsed Normal Strength":"解析后法向强度",
+        "Parsed Normal Strength":"解析法向强度",
         "How to parse PBR texture(and normal texture)":"如何解析PBR贴图(以及法线贴图)",
         "(1-R)**2,G as F0,Emission in Alpha":"(1-R)**2,G为F0,Alpha为自发光",
         "(1-R)**2,G as Metallic,Emission in Alpha":"(1-R)**2,G为金属度,Alpha为自发光",
@@ -99,6 +101,7 @@ dictionary = {
         "1-R,G as Metallic,No Emission":"1-R,G为金属度,无自发光",
         "Load material":"加载材质",
         "Classification basis":"材质分类依据",
+        "The Crafter-time node can provide the current second count to material nodes (dynamic textures and water flowing), but it will reduce the preview frame rate. It is recommended to remove it during previews and add it back before rendering":"Crafter-time节点能够为材质节点提供当前秒数(动态纹理、流动水),但会使预览帧数降低.建议在预览时移除,渲染前添加",
             # ==========导入物品==========
         "Import Minecraft item":"导入Minecraft物品",
         "Custome Size":"自定义尺寸",

@@ -94,7 +94,8 @@
             "cave_vines",
             "bamboo_large_leaves",
             "bamboo_small_leaves",
-            "hanging_roots"
+            "hanging_roots",
+            "cactus_flower"
         ]
     },
     "grass_tran_move":{

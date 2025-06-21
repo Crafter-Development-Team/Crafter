@@ -377,7 +377,45 @@ class VIEW3D_OT_CrafterSetParsedNormalStrength(bpy.types.Operator):
 
         return {'FINISHED'}
 
+# ==================== Crafter-time设置 ====================
 
+class VIEW3D_OT_CrafterAddCrafterTime(bpy.types.Operator):
+    bl_label = "Add Crafter-time"
+    bl_idname = "crafter.add_craftertime"
+    bl_description = "The Crafter-time node can provide the current second count to material nodes (dynamic textures and water flowing), but it will reduce the preview frame rate. It is recommended to remove it during previews and add it back before rendering"
+    
+    @classmethod
+    def poll(cls, context: bpy.types.Context):
+        selected = False
+        for obj in context.selected_objects:
+            if obj.type == 'MESH':
+                selected = True
+                break
+        mode_object = context.mode == 'OBJECT'
+        return selected and mode_object
+    def execute(self, context: bpy.types.Context):
+        for object in context.selected_objects:
+            if object.type == 'MESH':
+                add_C_time(object)
+
+        return {'FINISHED'}
+class VIEW3D_OT_CrafterRemoveCrafterTime(bpy.types.Operator):
+    bl_label = "Remove Crafter-time"
+    bl_idname = "crafter.remove_craftertime"
+    bl_description = "The Crafter-time node can provide the current second count to material nodes (dynamic textures and water flowing), but it will reduce the preview frame rate. It is recommended to remove it during previews and add it back before rendering"
+    
+    @classmethod
+    def poll(cls, context: bpy.types.Context):
+        return True
+    def execute(self, context: bpy.types.Context):
+        for object in bpy.data.objects:
+            if object.type == 'MESH':
+                for modifier in object.modifiers:
+                    if modifier.type == 'NODES':
+                        if modifier.node_group.name == "Crafter-time":
+                            object.modifiers.remove(modifier)
+                            break
+        return {'FINISHED'}
 
 # ==================== 刷新 ====================
 

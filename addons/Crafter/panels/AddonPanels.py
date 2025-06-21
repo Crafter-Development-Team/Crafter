@@ -44,17 +44,20 @@ class VIEW3D_PT_CrafterImportWorld(bpy.types.Panel):
 
         box.template_list("VIEW3D_UL_CrafterDimensionsList", "", addon_prefs, "Dimensions_List", addon_prefs, "Dimensions_List_index",rows=1)
 
+        box.label(text="XYZ",icon="ORIENTATION_GLOBAL")
         row_XYZ1 = box.row()
-        row_XYZ1.prop(addon_prefs, "XYZ_1")
+        row_XYZ1.prop(addon_prefs, "XYZ_1",text="")
         row_XYZ2 = box.row()
-        row_XYZ2.prop(addon_prefs, "XYZ_2")
+        row_XYZ2.prop(addon_prefs, "XYZ_2",text="")
         
         row_setting = box.row()
         # row_setting.prop(addon_prefs, "Point_Cloud_Mode")
         # row_setting.operator("crafter.use_history_worlds",icon="TIME",text="")
-        row_setting.operator("crafter.use_history_worlds",icon="TIME",text="History")
+        row_setting.label(icon="TIME")
+        row_setting.operator("crafter.use_history_worlds",text="History")
         
-        row_ImportWorld = box.row(align=True)
+        row_ImportWorld = box.row()
+        row_ImportWorld.label(icon="MOD_BUILD")
         row_ImportWorld.operator("crafter.import_surface_world",text="Import World")
         row_ImportWorld.operator("crafter.open_worldimporter_folder",text="",icon="FILE_FOLDER")
         if addon_prefs.Point_Cloud_Mode:
@@ -80,27 +83,40 @@ class VIEW3D_PT_CrafterMaterials(bpy.types.Panel):
         
         layout = self.layout
         box = layout.box()
-        row_PBR_Parser = box.row()
-        row_PBR_Parser.prop(addon_prefs, "PBR_Parser")
-
-        row_Parsed_Normal_Strength = box.row()
-        row_Parsed_Normal_Strength.prop(addon_prefs, "Parsed_Normal_Strength")
-
-        box.label(text="Materials")
-        row_Materials_List = box.row()
+        
+        box_main = box.box()
+        box_main.label(text="Materials",icon="SHADING_TEXTURE")
+        row_Materials_List = box_main.row()
         row_Materials_List.template_list("VIEW3D_UL_CrafterMaterials", "", addon_prefs, "Materials_List", addon_prefs, "Materials_List_index", rows=1)
         col_Materials_List_ops = row_Materials_List.column()
         col_Materials_List_ops.operator("crafter.open_materials",icon="FILE_FOLDER",text="")
         col_Materials_List_ops.operator("crafter.reload_all",icon="FILE_REFRESH",text="")
 
-        box.label(text="Classification Basis")
-        row_Classification_Basis = box.row()
+        box_main.operator("crafter.load_material",text="Load")
+        
+        box_other = box.box()
+        row_PBR_Parser = box_other.row()
+        row_PBR_Parser.label(icon="SHADERFX")
+        row_PBR_Parser.prop(addon_prefs, "PBR_Parser",text="Parser")
+
+        row_Parsed_Normal_Strength = box_other.row()
+        row_Parsed_Normal_Strength.label(icon="NODE_TEXTURE")
+        row_Parsed_Normal_Strength.prop(addon_prefs, "Parsed_Normal_Strength")
+
+        row_Crafter_time = box_other.row()
+        row_Crafter_time.label(icon="TIME")
+        row_Crafter_time_ops = row_Crafter_time.row(align=True)
+        row_Crafter_time_ops.operator("crafter.add_craftertime",icon="LINKED",text="Add")
+        row_Crafter_time_ops.operator("crafter.remove_craftertime",icon="UNLINKED",text="Remove")
+
+        box_classification = box.box()
+        box_classification.label(text="Classification Basis",icon="PACKAGE")
+        row_Classification_Basis = box_classification.row()
         row_Classification_Basis.template_list("VIEW3D_UL_CrafterClassificationBasis", "", addon_prefs, "Classification_Basis_List", addon_prefs, "Classification_Basis_List_index", rows=1)
         row_Classification_Basis_ops = row_Classification_Basis.column()
         row_Classification_Basis_ops.operator("crafter.open_classification_basis",icon="FILE_FOLDER",text="")
         row_Classification_Basis_ops.operator("crafter.reload_all",icon="FILE_REFRESH",text="")
 
-        box.operator("crafter.load_material",text="Load")
     @classmethod
     def poll(cls, context: bpy.types.Context):
         return True
