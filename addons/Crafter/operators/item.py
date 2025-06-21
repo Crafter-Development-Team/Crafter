@@ -111,6 +111,8 @@ class VIEW3D_OT_CrafterImportItem(bpy.types.Operator):#导入物体
         # 应用第一个修改器
         name_modifier = object_item.modifiers[0].name
         bpy.ops.object.modifier_apply(modifier=name_modifier)
+        # 删去该节点组
+        bpy.data.node_groups.remove(bpy.data.node_groups["C-item"])
         return  {'FINISHED'}
         
 
