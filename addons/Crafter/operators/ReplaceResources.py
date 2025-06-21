@@ -269,6 +269,10 @@ class VIEW3D_OT_CrafterReloadResources(bpy.types.Operator):#刷新 资源包 列
                 json_crafter.append(resourcepack)
                 
         index = 0
+        try:
+            bpy.utils.previews.remove(icons_plan_resource)
+        except:
+            pass
         icons_plan_resource.clear()
 
         for resourcepack in json_crafter:

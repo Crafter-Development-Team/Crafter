@@ -1099,6 +1099,14 @@ class VIEW3D_OT_CrafterReloadGameResources(bpy.types.Operator):#刷新 游戏资
             return {'FINISHED'}
         index_game = 0
         index_game_unuse = 0
+        try:
+            bpy.utils.previews.remove(icons_game_resource)
+        except:
+            pass
+        try:
+            bpy.utils.previews.remove(icons_game_unuse_resource)
+        except:
+            pass
         icons_game_resource.clear()
         icons_game_unuse_resource.clear()
 
@@ -1199,6 +1207,10 @@ class VIEW3D_OT_CrafterReloadHistoryWorldsList(bpy.types.Operator):#刷新 历�
         with open(dir_json_history_worlds, 'r', encoding='utf-8') as file:
             json_history_worlds = json.load(file)
 
+        try:
+            bpy.utils.previews.remove(icons_world)
+        except:
+            pass
         icons_world.clear()
         world_index = 0
 
@@ -1235,8 +1247,8 @@ class VIEW3D_OT_CrafterReloadHistoryWorldsList(bpy.types.Operator):#刷新 历�
                     for save in json_history_worlds[addon_prefs.History_World_Roots_List[addon_prefs.History_World_Roots_List_index].name][addon_prefs.History_World_Versions_List[addon_prefs.History_World_Versions_List_index].name]:
                         history_world_save = addon_prefs.History_World_Saves_List.add()
                         history_world_save.name = save
-                        dir_coin = os.path.join(get_dir_saves(context), save, "icon.png")
-                        icons_world.load("world_icon_" + str(world_index), dir_coin, 'IMAGE')
+                        dir_icon = os.path.join(get_dir_saves(context), save, "icon.png")
+                        icons_world.load("world_icon_" + str(world_index), dir_icon, 'IMAGE')
                         world_index += 1
                     if len(addon_prefs.History_World_Saves_List) > 0:
                         if addon_prefs.History_World_Saves_List_index < 0 or addon_prefs.History_World_Saves_List_index >= len(addon_prefs.History_World_Saves_List):
