@@ -115,7 +115,7 @@ def register():
 # ========== 注销 ==========
 def unregister():
     # 注销icon
-    world_icon.clear()
+    bpy.utils.previews.remove(world_icon) 
     # Internationalization
     bpy.app.translations.unregister(__addon_name__)
     # unRegister classes
