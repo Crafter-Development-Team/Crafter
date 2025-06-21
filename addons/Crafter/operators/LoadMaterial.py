@@ -264,36 +264,6 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):
 
         return {'FINISHED'}
 
-    def invoke(self, context, event):
-        addon_prefs = context.preferences.addons[__addon_name__].preferences
-
-        bpy.ops.crafter.reload_all()
-        return context.window_manager.invoke_props_dialog(self)
-
-    def draw(self, context):
-        addon_prefs = context.preferences.addons[__addon_name__].preferences
-        layout = self.layout
-
-        row_PBR_Parser = layout.row()
-        row_PBR_Parser.prop(addon_prefs, "PBR_Parser")
-
-        row_Parsed_Normal_Strength = layout.row()
-        row_Parsed_Normal_Strength.prop(addon_prefs, "Parsed_Normal_Strength")
-
-        layout.label(text="Materials")
-        row_Materials_List = layout.row()
-        row_Materials_List.template_list("VIEW3D_UL_CrafterMaterials", "", addon_prefs, "Materials_List", addon_prefs, "Materials_List_index", rows=1)
-        col_Materials_List_ops = row_Materials_List.column()
-        col_Materials_List_ops.operator("crafter.open_materials",icon="FILE_FOLDER",text="")
-        col_Materials_List_ops.operator("crafter.reload_all",icon="FILE_REFRESH",text="")
-
-        layout.label(text="Classification Basis")
-        row_Classification_Basis = layout.row()
-        row_Classification_Basis.template_list("VIEW3D_UL_CrafterClassificationBasis", "", addon_prefs, "Classification_Basis_List", addon_prefs, "Classification_Basis_List_index", rows=1)
-        row_Classification_Basis_ops = row_Classification_Basis.column()
-        row_Classification_Basis_ops.operator("crafter.open_classification_basis",icon="FILE_FOLDER",text="")
-        row_Classification_Basis_ops.operator("crafter.reload_all",icon="FILE_REFRESH",text="")
-
 # ==================== 设置PBR解析器 ====================
 
 class VIEW3D_OT_CrafterSetPBRParser(bpy.types.Operator):
