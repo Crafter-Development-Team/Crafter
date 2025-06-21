@@ -225,7 +225,6 @@ def get_boundary_edges_sorted(bm):
     for edge in bm.edges:
         v1, v2 = edge.verts
         delta = v2.co - v1.co
-        # print(abs(delta.x) > abs(delta.y),"|",v1.co,"|",v2.co,"|",delta)
         if abs(delta.x) > abs(delta.y):  # 水平方向
             horizontal_edges.append(edge)
         else:  # 垂直方向

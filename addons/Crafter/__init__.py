@@ -9,7 +9,7 @@ from ...common.class_loader.auto_load import add_properties, remove_properties
 from ...common.i18n.dictionary import common_dictionary
 from ...common.i18n.i18n import load_dictionary
 from bpy.props import StringProperty, IntProperty, BoolProperty, IntVectorProperty, EnumProperty, CollectionProperty, FloatProperty
-from .properties import ResourcePlan, ResourcePlansInfo, Material ,McMt
+from .properties import ResourcePlan, ResourcePlansInfo, Material ,McMt, dirs_temp
 from .operators.item import ui_item
 
 # Add-on info
@@ -55,7 +55,10 @@ _addon_properties = {
 
 # ========== 初始化icon ==========
 
-world_icon = bpy.utils.previews.new()
+icons_world = bpy.utils.previews.new()
+icons_game_resource = bpy.utils.previews.new()
+icons_game_unuse_resource = bpy.utils.previews.new()
+icons_plan_resource = bpy.utils.previews.new()
 
 # ========== 初始化cafter_data地址 ==========
 dir_init_main = os.path.dirname(os.path.abspath(__file__))
@@ -115,7 +118,10 @@ def register():
 # ========== 注销 ==========
 def unregister():
     # 注销icon
-    bpy.utils.previews.remove(world_icon) 
+    bpy.utils.previews.remove(icons_world)
+    bpy.utils.previews.remove(icons_game_resource)
+    bpy.utils.previews.remove(icons_game_unuse_resource)
+    bpy.utils.previews.remove(icons_plan_resource)
     # Internationalization
     bpy.app.translations.unregister(__addon_name__)
     # unRegister classes
@@ -123,5 +129,8 @@ def unregister():
     remove_properties(_addon_properties)
     # ========== 从原有ui移除 ==========
     bpy.types.VIEW3D_MT_image_add.remove(ui_item)
+    # ========== 清理缓存 ==========
+    for dir_temp in dirs_temp:
+        shutil.rmtree(dir_temp)
 
     print("{} addon is uninstalled.".format(__addon_name__))

@@ -6,16 +6,33 @@ import json
 import zipfile
 import sqlite3
 import ctypes
-from ctypes import wintypes
+import tempfile
 import textwrap
+
+from ctypes import wintypes
 
 from ..config import __addon_name__
 from ....common.i18n.i18n import i18n
 from bpy.props import *
-from ..__init__ import dir_cafter_data, dir_resourcepacks_plans, dir_materials, dir_classification_basis, dir_blend_append, dir_init_main
+from ..__init__ import dir_blend_append, dir_init_main
+from..properties import dirs_temp
 
 donot = ["Crafter Materials Settings"]
 len_color_jin = 21
+
+
+def load_icon_from_zip(zip_path, icons, name_icons, index):
+    dir_temp = tempfile.mkdtemp()
+    with zipfile.ZipFile(zip_path, "r") as zip_file:
+        if "pack.png" in zip_file.namelist():
+            zip_file.extract("pack.png", dir_temp)
+            have = True
+        else:
+            have = False
+    dir_icon = os.path.join(dir_temp, "pack.png")
+    icons.load(name_icons + "_icon_" + str(index), dir_icon, 'IMAGE')
+    dirs_temp.append(dir_temp)
+    return have
 
 def get_dir_saves(context):
     addon_prefs = context.preferences.addons[__addon_name__].preferences
@@ -31,6 +48,7 @@ def get_dir_saves(context):
         dir_saves = dir_version_2_dir_saves(dir_version)
         
         return dir_saves
+
 def get_dir_save(context):
     addon_prefs = context.preferences.addons[__addon_name__].preferences
 
@@ -100,7 +118,6 @@ def dir_version_2_dir_jar(dir_version):
                     name_jar = row[4] + "-" + row[6]
                 break
         dir_jar = os.path.join(dir_versions_meta, name_jar, name_jar + ".jar")
-        print(dir_jar)
     else:
         name_version = os.path.basename(dir_version)
         dir_jar = os.path.join(dir_version, name_version+".jar")
@@ -177,7 +194,6 @@ def run_as_admin_and_wait(exe_path, work_dir=None,shell = False):
     if not ctypes.windll.shell32.ShellExecuteExW(ctypes.byref(sei)):
         error_code = ctypes.GetLastError()
         error_msg = ctypes.FormatError(error_code)
-        print(f"启动失败 (错误 0x{error_code:X}): {error_msg}")
         return False
 
     # 等待进程结束
@@ -191,7 +207,6 @@ def run_as_admin_and_wait(exe_path, work_dir=None,shell = False):
             continue
         else:
             ctypes.windll.kernel32.CloseHandle(sei.hProcess)
-            print(f"等待进程超时")
             return False
 
     # 获取退出码
@@ -199,7 +214,6 @@ def run_as_admin_and_wait(exe_path, work_dir=None,shell = False):
     ctypes.windll.kernel32.GetExitCodeProcess(sei.hProcess, ctypes.byref(exit_code))
     ctypes.windll.kernel32.CloseHandle(sei.hProcess)
     
-    print(f"进程已退出，代码: {exit_code.value}")
     return exit_code.value == 0, 
 
 def open_folder(folder_path: str):

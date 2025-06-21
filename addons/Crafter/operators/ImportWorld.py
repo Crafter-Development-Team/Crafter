@@ -12,7 +12,8 @@ from ..nbt import nbt
 from ..config import __addon_name__
 from ....common.i18n.i18n import i18n
 from bpy.props import *
-from ..__init__ import dir_cafter_data, dir_resourcepacks_plans, dir_materials, dir_classification_basis, dir_blend_append, dir_init_main, dir_no_lod_blocks, world_icon
+from ..__init__ import dir_cafter_data, dir_resourcepacks_plans, dir_blend_append, dir_init_main, dir_no_lod_blocks
+from ..__init__ import icons_world, icons_game_resource, icons_game_unuse_resource
 from .Defs import *
 
 dir_importer = os.path.join(dir_init_main, "importer")
@@ -926,13 +927,8 @@ class VIEW3D_OT_CrafterDownGameResource(bpy.types.Operator):#降低 游戏资源
         dir_saves = os.path.dirname(worldPath)
         target_name = addon_prefs.Game_Resources_List[addon_prefs.Game_Resources_List_index].name
         for i in range(len(json_resourcepacks[dir_saves][0])):
-            print(i)
-            print(json_resourcepacks[dir_saves][0][i])
-            print(target_name)
             if json_resourcepacks[dir_saves][0][i] == target_name:
-                print('=')
                 if i < len(addon_prefs.Game_Resources_List) - 1:
-                    print("down")
                     json_resourcepacks[dir_saves][0][i], json_resourcepacks[dir_saves][0][i + 1] = json_resourcepacks[dir_saves][0][i + 1], json_resourcepacks[dir_saves][0][i]
                     addon_prefs.Game_Resources_List_index += 1
                     break
@@ -1097,13 +1093,32 @@ class VIEW3D_OT_CrafterReloadGameResources(bpy.types.Operator):#刷新 游戏资
                 json_resourcepacks = json.load(file)
         else:
             return {'FINISHED'}
-        resourcepacks = json_resourcepacks[dir_saves]
+        if dir_saves in json_resourcepacks:
+            resourcepacks = json_resourcepacks[dir_saves]
+        else:
+            return {'FINISHED'}
+        index_game = 0
+        index_game_unuse = 0
+        icons_game_resource.clear()
+        icons_game_unuse_resource.clear()
+
+        worldPath = os.path.normpath(addon_prefs.World_Path)
+        dir_saves = os.path.dirname(worldPath)
+        dir_back_saves = os.path.dirname(dir_saves)
+        dir_resourcepacks = os.path.join(dir_back_saves, "resourcepacks")
+        
         for resourcepack in resourcepacks[0]:
             resourcepack_use = addon_prefs.Game_Resources_List.add()
             resourcepack_use.name = resourcepack
+            dir_resource = os.path.join(dir_resourcepacks, resourcepack)
+            load_icon_from_zip(zip_path=dir_resource, icons=icons_game_resource, name_icons="game_resource", index=index_game)
+            index_game += 1
         for resourcepack in resourcepacks[1]:
             resourcepack_unuse = addon_prefs.Game_unuse_Resources_List.add()
             resourcepack_unuse.name = resourcepack
+            dir_resource = os.path.join(dir_resourcepacks, resourcepack)
+            load_icon_from_zip(zip_path=dir_resource, icons=icons_game_unuse_resource, name_icons="game_unuse_resource", index=index_game_unuse)
+            index_game_unuse += 1
 
 
         return {'FINISHED'}
@@ -1184,7 +1199,7 @@ class VIEW3D_OT_CrafterReloadHistoryWorldsList(bpy.types.Operator):#刷新 历�
         with open(dir_json_history_worlds, 'r', encoding='utf-8') as file:
             json_history_worlds = json.load(file)
 
-        world_icon.clear()
+        icons_world.clear()
         world_index = 0
 
         addon_prefs.History_World_Roots_List.clear()
@@ -1221,7 +1236,7 @@ class VIEW3D_OT_CrafterReloadHistoryWorldsList(bpy.types.Operator):#刷新 历�
                         history_world_save = addon_prefs.History_World_Saves_List.add()
                         history_world_save.name = save
                         dir_coin = os.path.join(get_dir_saves(context), save, "icon.png")
-                        world_icon.load("world_icon_" + str(world_index), dir_coin, 'IMAGE')
+                        icons_world.load("world_icon_" + str(world_index), dir_coin, 'IMAGE')
                         world_index += 1
                     if len(addon_prefs.History_World_Saves_List) > 0:
                         if addon_prefs.History_World_Saves_List_index < 0 or addon_prefs.History_World_Saves_List_index >= len(addon_prefs.History_World_Saves_List):
@@ -1242,7 +1257,7 @@ class VIEW3D_UL_CrafterUndividedVersions(bpy.types.UIList):#无隔离 版本
         layout.label(text=text)
 
 class VIEW3D_UL_CrafterGameResources(bpy.types.UIList):#游戏 资源包
-     def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
+     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
         text = item.name
         index_na = text.rfind("\\")
         text = text[index_na+1:-4]
@@ -1254,10 +1269,12 @@ class VIEW3D_UL_CrafterGameResources(bpy.types.UIList):#游戏 资源包
             elif text[i] != "!":
                 true_text += text[i]
             i+=1
-        layout.label(text=true_text)
+        name_icon = "game_resource_icon_"+ str(index)
+        icon = icons_game_resource[name_icon]
+        layout.label(text=true_text,icon_value=icon.icon_id)
 
 class VIEW3D_UL_CrafterGameUnuseResources(bpy.types.UIList):#游戏 未使用 资源包
-     def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
+     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
         text = item.name
         index_na = text.rfind("\\")
         text = text[index_na+1:-4]
@@ -1269,7 +1286,9 @@ class VIEW3D_UL_CrafterGameUnuseResources(bpy.types.UIList):#游戏 未使用 �
             elif text[i] != "!":
                 true_text += text[i]
             i+=1
-        layout.label(text=true_text)
+        name_icon = "game_unuse_resource_icon_"+ str(index)
+        icon = icons_game_unuse_resource[name_icon]
+        layout.label(text=true_text,icon_value=icon.icon_id)
 
 class VIEW3D_UL_CrafterLatestWorldList(bpy.types.UIList):#最近世界 列表
      def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
@@ -1289,7 +1308,7 @@ class VIEW3D_UL_CrafterHistoryWorldSavesList(bpy.types.UIList):#历史世界 存
      def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
         row=layout.row()
         name_icon = "world_icon_"+ str(index)
-        icon = world_icon[name_icon]
+        icon = icons_world[name_icon]
         row.label(text=item.name, icon_value=icon.icon_id)
 
 class VIEW3D_UL_CrafterHistoryWorldSettingsList(bpy.types.UIList):#历史世界 设置 列表

@@ -1,6 +1,6 @@
 import bpy
 from bpy.props import StringProperty, PointerProperty
-
+dirs_temp = []
 # ==========导入世界属性==========
 class LatestWorld(bpy.types.PropertyGroup):
     Latest_World: StringProperty(name="Latest World",)# type: ignore

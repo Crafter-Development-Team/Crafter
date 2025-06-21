@@ -5,7 +5,7 @@ import json
 from ..config import __addon_name__
 from ....common.i18n.i18n import i18n
 from bpy.props import *
-from .. import dir_cafter_data, dir_resourcepacks_plans, dir_materials, dir_classification_basis, dir_blend_append, dir_init_main
+from ..__init__ import dir_cafter_data, dir_resourcepacks_plans, icons_plan_resource
 from .Defs import *
 
 # ==================== 替换资源包 ====================
@@ -267,9 +267,16 @@ class VIEW3D_OT_CrafterReloadResources(bpy.types.Operator):#刷新 资源包 列
         for resourcepack in json_crafter_copy:
             if os.path.exists(os.path.join(dir_resourcepacks, resourcepack + ".zip")):
                 json_crafter.append(resourcepack)
+                
+        index = 0
+        icons_plan_resource.clear()
+
         for resourcepack in json_crafter:
             resourcepack_name = addon_prefs.Resources_List.add()
             resourcepack_name.name = resourcepack
+            dir_resourcepack = os.path.join(dir_resourcepacks, resourcepack + ".zip")
+            load_icon_from_zip(zip_path=dir_resourcepack, icons=icons_plan_resource, name_icons="plan_resource", index=index)
+            index += 1
 
         with open(dir_crafter_json, "w", encoding="utf-8") as file:
             json.dump(json_crafter, file, ensure_ascii=False, indent=4)
@@ -286,10 +293,8 @@ class VIEW3D_UL_CrafterResources(bpy.types.UIList):# 资源包 预设 列表
         layout.label(text=item.name)
 
 class VIEW3D_UL_CrafterResourcesInfo(bpy.types.UIList):# 资源包 预设详情 列表
-     def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
+     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
         addon_prefs = context.preferences.addons[__addon_name__].preferences
-        # dir_resourcepacks = os.path.join(dir_resourcepacks_plans, addon_prefs.Resources_Plans_List[addon_prefs.Resources_Plans_List_index].name)
-        # dir_resourcepack = os.path.join(dir_resourcepacks, item.name)
         
         item_name = ""
         i = 0
@@ -299,11 +304,9 @@ class VIEW3D_UL_CrafterResourcesInfo(bpy.types.UIList):# 资源包 预设详情 
             elif item.name[i] != "!":
                 item_name += item.name[i]
             i+=1
-        # if "pack.png" in os.listdir(dir_resourcepack):
-        #     layout.label(text=item_name,icon="crafter_resources" + item.name)
-        # else:
-        #     layout.label(text=item_name)
-        layout.label(text=item_name)
+        name_icon = "plan_resource_icon_"+ str(index)
+        icon = icons_plan_resource[name_icon]
+        layout.label(text=item_name,icon_value=icon.icon_id)
 
 
 
