@@ -11,13 +11,14 @@ from ...common.i18n.i18n import load_dictionary
 from bpy.props import StringProperty, IntProperty, BoolProperty, IntVectorProperty, EnumProperty, CollectionProperty, FloatProperty
 from .properties import ResourcePlan, ResourcePlansInfo, Material ,McMt, dirs_temp
 from .operators.item import ui_item
+from bpy.utils import previews
 
 # Add-on info
 bl_info = {
     "name": "Crafter",
     "author": "Crafter Development Team",
     "blender": (4, 2, 0),
-    "version": (0, 5, 8),
+    "version": (0, 6, 0),
     "description": "目标是成为从Minecraft到Blender全流程的Blender插件",
     "warning": "",
     "doc_url": "https://github.com/Crafter-Production-Team/Crafter?tab=readme-ov-file#crafter",
@@ -54,11 +55,10 @@ _addon_properties = {
 # }
 
 # ========== 初始化icon ==========
-
-icons_world = bpy.utils.previews.new()
-icons_game_resource = bpy.utils.previews.new()
-icons_game_unuse_resource = bpy.utils.previews.new()
-icons_plan_resource = bpy.utils.previews.new()
+icons_world = previews.new()
+icons_game_resource = previews.new()
+icons_game_unuse_resource = previews.new()
+icons_plan_resource = previews.new()
 
 # ========== 初始化cafter_data地址 ==========
 dir_init_main = os.path.dirname(os.path.abspath(__file__))
