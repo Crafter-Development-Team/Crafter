@@ -17,6 +17,27 @@ from ..__init__ import dir_cafter_data, dir_resourcepacks_plans, dir_materials, 
 donot = ["Crafter Materials Settings"]
 len_color_jin = 21
 
+def get_dir_saves(context):
+    addon_prefs = context.preferences.addons[__addon_name__].preferences
+
+    dir_root = addon_prefs.History_World_Roots_List[addon_prefs.History_World_Roots_List_index].name
+    dir_undivided_saves = os.path.join(dir_root,"saves")
+    if os.path.exists(dir_undivided_saves):
+        
+        return dir_undivided_saves
+    else:
+        dir_verisons = dir_root_2_dir_versions(dir_root)
+        dir_version = os.path.join(dir_verisons,addon_prefs.History_World_Versions_List[addon_prefs.History_World_Versions_List_index].name)
+        dir_saves = dir_version_2_dir_saves(dir_version)
+        
+        return dir_saves
+def get_dir_save(context):
+    addon_prefs = context.preferences.addons[__addon_name__].preferences
+
+    dir_save = os.path.join(get_dir_saves(context), addon_prefs.History_World_Saves_List[addon_prefs.History_World_Saves_List_index].name)
+    
+    return dir_save
+
 def dir_root_2_dir_versions(dir_root):
     list_folder_minecraft = os.listdir(dir_root)
     if "Instances" in list_folder_minecraft:

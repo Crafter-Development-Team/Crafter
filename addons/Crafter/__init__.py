@@ -53,7 +53,11 @@ _addon_properties = {
 #     },
 # }
 
-#==========初始化cafter_data地址==========
+# ========== 初始化icon ==========
+
+world_icon = bpy.utils.previews.new()
+
+# ========== 初始化cafter_data地址 ==========
 dir_init_main = os.path.dirname(os.path.abspath(__file__))
 dir_extension = os.path.dirname(os.path.dirname(dir_init_main))
 dir_extensions = os.path.dirname(dir_extension)
@@ -70,7 +74,7 @@ dir_classification_basis = os.path.join(dir_cafter_data, "classification basis")
 dir_classification_basis_default = os.path.join(dir_classification_basis, "default")
 dir_blend_append = os.path.join(dir_defaults,"append.blend")
 dir_no_lod_blocks = os.path.join(dir_cafter_data, "no_lod_blocks")
-#==========注册==========
+# ========== 注册 ==========
 def register():
     # Register classes
     auto_load.init()
@@ -80,7 +84,7 @@ def register():
     load_dictionary(dictionary)
     bpy.app.translations.register(__addon_name__, common_dictionary)
 
-    #==========初始化cafter_data文件夹==========
+    # ========== 初始化cafter_data文件夹 ==========
     os.makedirs(dir_cafter_data, exist_ok=True)
     os.makedirs(dir_resourcepacks_plans, exist_ok=True)
     os.makedirs(dir_Vanilla, exist_ok=True)
@@ -88,7 +92,7 @@ def register():
     os.makedirs(dir_classification_basis, exist_ok=True)
     os.makedirs(dir_classification_basis_default, exist_ok=True)
     os.makedirs(dir_no_lod_blocks, exist_ok=True)
-    #==========初始化默认方案==========
+    # ========== 初始化默认方案 ==========
     for filename in os.listdir(dir_defaults_materials):
         src_file = os.path.join(dir_defaults_materials, filename)
         dest_file = os.path.join(dir_materials, filename)
@@ -103,22 +107,21 @@ def register():
             src_file = os.path.join(dir_defaults_no_lod_blocks, filename)
             dest_file = os.path.join(dir_no_lod_blocks, filename)
             shutil.copy(src_file, dest_file)
-    #==========添加至原有ui==========
+    # ========== 添加至原有ui ==========
     bpy.types.VIEW3D_MT_image_add.append(ui_item)
 
     print("{} addon is installed.".format(__addon_name__))
 
-#==========注销==========
+# ========== 注销 ==========
 def unregister():
-    # #==========注销crafter_resource_icons==========
-    # from .operators.AddonOperators import crafter_resources_icons
-    # bpy.utils.previews.remove(crafter_resources_icons)
+    # 注销icon
+    world_icon.clear()
     # Internationalization
     bpy.app.translations.unregister(__addon_name__)
     # unRegister classes
     auto_load.unregister()
     remove_properties(_addon_properties)
-    #==========从原有ui移除==========
+    # ========== 从原有ui移除 ==========
     bpy.types.VIEW3D_MT_image_add.remove(ui_item)
 
     print("{} addon is uninstalled.".format(__addon_name__))

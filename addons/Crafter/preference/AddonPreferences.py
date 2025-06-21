@@ -16,7 +16,7 @@ class CrafterAddonPreferences(AddonPreferences):
     # The name can't be dynamically translated during blender programming running as they are defined
     # when the class is registered, i.e. we need to restart blender for the property name to be correctly translated.
 
-#==========导入世界属性==========
+# ==========导入世界属性==========
     World_Path: StringProperty(name="World path",
                                default="World path",
                                subtype="DIR_PATH",
@@ -153,7 +153,7 @@ class CrafterAddonPreferences(AddonPreferences):
     Custom_mods_Path: StringProperty(name="Mods Path",
                                         subtype="DIR_PATH",
                                         default="Mods Path")# type: ignore
-#==========加载资源包属性==========
+# ==========加载资源包属性==========
     Resources_Plans_List: CollectionProperty(name="Resources Plans",type=ResourcePlan)#type: ignore
     Resources_Plans_List_index: IntProperty(name="Resources",
                                             default=0,
@@ -170,7 +170,7 @@ class CrafterAddonPreferences(AddonPreferences):
                                         default="Closest",
                                         description="Texture interpolation method",
                                         update=lambda self, context: self.update_texture_interpolation(context))# type: ignore
-#==========加载材质属性==========
+# ==========加载材质属性==========
     PBR_Parser: EnumProperty(name="PBR Parser",
                               items=[("lab_PBR_1.3","lab PBR 1.3","(1-R)**2,G as F0,Emission in Alpha"),
                                      ("old_continuum","old continuum","(1-R)**2,G as Metallic,Emission in Alpha"),
@@ -210,12 +210,12 @@ class CrafterAddonPreferences(AddonPreferences):
                                           min=0.0,
                                           max=1.0,)# type: ignore
 
-#==========加载环境属性==========
+# ==========加载环境属性==========
     Environments_List: CollectionProperty(name="Environments",type=Environment)# type: ignore
     Environments_List_index: IntProperty(name="Environment",
                                       default=0,
                                       update=lambda self, context: self.reload_all(context))# type: ignore
-#==========偏好设置面板==========
+# ==========偏好设置面板==========
     def draw(self, context: bpy.types.Context):
         layout = self.layout
         col_default_PBR  = layout.column()
@@ -223,7 +223,7 @@ class CrafterAddonPreferences(AddonPreferences):
         col_default_PBR.prop(self, "Default_Roughness")
         col_default_PBR.prop(self, "Default_IOR")
         col_default_PBR.prop(self, "Default_Emission_Strength")
-#==========修改变量操作==========
+# ==========修改变量操作==========
     def update_world_path(self, context):
         context.area.tag_redraw
         bpy.ops.crafter.reload_all()

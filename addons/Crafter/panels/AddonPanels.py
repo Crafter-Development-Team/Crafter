@@ -6,7 +6,7 @@ from ....common.i18n.i18n import i18n
 from ....common.types.framework import reg_order
 from ..__init__ import dir_resourcepacks_plans
 
-# @reg_order(0)#==========加载预设面板==========
+# @reg_order(0)# ==========加载预设面板==========
 # class VIEW3D_PT_CrafterPlans(bpy.types.Panel):
 #     bl_label = "Plans"
 #     bl_space_type = "VIEW_3D"
@@ -25,7 +25,7 @@ from ..__init__ import dir_resourcepacks_plans
 #     def poll(cls, context: bpy.types.Context):
 #             return True
     
-@reg_order(1)#==========导入世界面板==========
+@reg_order(1)# ==========导入世界面板==========
 class VIEW3D_PT_CrafterImportWorld(bpy.types.Panel):
     bl_label = "Import World"
     bl_space_type = "VIEW_3D"
@@ -61,7 +61,7 @@ class VIEW3D_PT_CrafterImportWorld(bpy.types.Panel):
             return True
 
 
-@reg_order(2)#==========加载面板==========
+@reg_order(2)# ==========加载面板==========
 class VIEW3D_PT_CrafterImport(bpy.types.Panel):
     bl_label = "Load"
     bl_space_type = "VIEW_3D"
@@ -73,7 +73,7 @@ class VIEW3D_PT_CrafterImport(bpy.types.Panel):
         layout = self.layout
         addon_prefs = context.preferences.addons[__addon_name__].preferences
 
-        #==========加载资源包面板==========
+        # ==========加载资源包面板==========
         row_Resources = layout.row()
         if -1 < addon_prefs.Resources_Plans_List_index and addon_prefs.Resources_Plans_List_index < len(addon_prefs.Resources_Plans_List):
             resource = addon_prefs.Resources_Plans_List[addon_prefs.Resources_Plans_List_index].name
@@ -81,7 +81,7 @@ class VIEW3D_PT_CrafterImport(bpy.types.Panel):
             resource = ""
         row_Resources.label(text=i18n("Resources") + ":" + resource)
         row_Resources.operator("crafter.replace_resources",text="Replace")
-        #==========加载材质面板==========
+        # ==========加载材质面板==========
         row_Resources = layout.row()
         if -1 < addon_prefs.Materials_List_index and addon_prefs.Materials_List_index < len(addon_prefs.Materials_List):
             material = addon_prefs.Materials_List[addon_prefs.Materials_List_index].name
@@ -89,14 +89,6 @@ class VIEW3D_PT_CrafterImport(bpy.types.Panel):
             material = ""
         row_Resources.label(text=i18n("Materials") + ":" + material)
         row_Resources.operator("crafter.load_material",text="Load")
-        #==========加载环境面板==========
-        # row_Environments = layout.row()
-        # if -1 < addon_prefs.Environments_List_index and addon_prefs.Environments_List_index < len(addon_prefs.Environments_List):
-        #     environment = addon_prefs.Environments_List[addon_prefs.Environments_List_index].name
-        # else:
-        #     environment = ""
-        # row_Environments.label(text=i18n("Environment") + ":" + environment)
-        # row_Environments.operator("crafter.load_environment",text="Load")
     @classmethod
     def poll(cls, context: bpy.types.Context):
         return True

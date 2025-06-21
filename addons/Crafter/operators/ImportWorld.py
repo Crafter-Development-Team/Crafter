@@ -12,12 +12,12 @@ from ..nbt import nbt
 from ..config import __addon_name__
 from ....common.i18n.i18n import i18n
 from bpy.props import *
-from ..__init__ import dir_cafter_data, dir_resourcepacks_plans, dir_materials, dir_classification_basis, dir_blend_append, dir_init_main, dir_no_lod_blocks
+from ..__init__ import dir_cafter_data, dir_resourcepacks_plans, dir_materials, dir_classification_basis, dir_blend_append, dir_init_main, dir_no_lod_blocks, world_icon
 from .Defs import *
 
 dir_importer = os.path.join(dir_init_main, "importer")
 
-#==================== 导入世界 ====================
+# ==================== 导入世界 ====================
 
 class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世界
     bl_label = "Import World"
@@ -388,7 +388,7 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         prepared_time = time.perf_counter()
         #生成obj
 
-#==================================================================================
+# ==================================================================================
         ##旧的exe唤起命令
 
         ##后来白给修好exe的问题后忠城发现新唤起方式的shell模式性能比旧版高，所以改用新的唤起方式
@@ -408,9 +408,9 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         #except Exception as e:
         #return {"CANCELLED"}
 
-#==================================================================================
+# ==================================================================================
         run_as_admin_and_wait(dir_exe_importer,dir_importer,shell = addon_prefs.shell)
-#==================================================================================
+# ==================================================================================
 
         #导入obj
         have_obj = False
@@ -637,7 +637,7 @@ class VIEW3D_OT_CrafterImportSolidArea(bpy.types.Operator):#导入可编辑区�
         addon_prefs.solid = 1
         return {'FINISHED'}
 
-#==================== 使用历史世界 ====================
+# ==================== 使用历史世界 ====================
 
 class VIEW3D_OT_UseCrafterHistoryWorlds(bpy.types.Operator):
     bl_label = "History Worlds"
@@ -770,24 +770,16 @@ class VIEW3D_OT_UseCrafterHistoryWorlds(bpy.types.Operator):
         addon_prefs = context.preferences.addons[__addon_name__].preferences
 
         if len(addon_prefs.History_World_Saves_List) > 0:
-            dir_root = addon_prefs.History_World_Roots_List[addon_prefs.History_World_Roots_List_index].name
-            dir_undivided_saves = os.path.join(dir_root,"saves")
-            if os.path.exists(dir_undivided_saves):
-                dir_save = os.path.join(dir_undivided_saves,addon_prefs.History_World_Saves_List[addon_prefs.History_World_Saves_List_index].name)
-            else:
-                dir_verisons = dir_root_2_dir_versions(dir_root)
-                dir_version = os.path.join(dir_verisons,addon_prefs.History_World_Versions_List[addon_prefs.History_World_Versions_List_index].name)
-                dir_saves = dir_version_2_dir_saves(dir_version)
-                dir_save = os.path.join(dir_saves, addon_prefs.History_World_Saves_List[addon_prefs.History_World_Saves_List_index].name)
-            addon_prefs.World_Path = dir_save
+            addon_prefs.World_Path = get_dir_save(context)
             if len(addon_prefs.History_World_Settings_List) > 0:
                 settings = addon_prefs.History_World_Settings_List[addon_prefs.History_World_Settings_List_index].name
                 setting = settings.split(" ")
                 addon_prefs.XYZ_1 = (int(setting[0]),int(setting[1]),int(setting[2]))
                 addon_prefs.XYZ_2 = (int(setting[3]),int(setting[4]),int(setting[5]))
+                
         return {'FINISHED'}
 
-#==================== Ban游戏资源包 ====================
+# ==================== Ban游戏资源包 ====================
 
 class VIEW3D_OT_CrafterBanGameResource(bpy.types.Operator):
     bl_label = "Ban resource"    
@@ -831,7 +823,7 @@ class VIEW3D_OT_CrafterBanGameResource(bpy.types.Operator):
 
         return {'FINISHED'}
 
-#==================== 使用游戏资源包 ====================
+# ==================== 使用游戏资源包 ====================
 
 class VIEW3D_OT_CrafterUseGameResource(bpy.types.Operator):
     bl_label = "Use resource"    
@@ -877,7 +869,7 @@ class VIEW3D_OT_CrafterUseGameResource(bpy.types.Operator):
 
 
 
-#==================== 游戏资源包优先级 ====================
+# ==================== 游戏资源包优先级 ====================
 
 class VIEW3D_OT_CrafterUpGameResource(bpy.types.Operator):#提高 游戏资源包 优先级
     bl_label = "Up resource's priority"    
@@ -951,6 +943,7 @@ class VIEW3D_OT_CrafterDownGameResource(bpy.types.Operator):#降低 游戏资源
         bpy.ops.crafter.reload_game_resources()
 
         return {'FINISHED'}
+
 # ==================== 打开WorldImporter文件夹 ====================
 
 class VIEW3D_OT_CrafterOpenWorldImporter(bpy.types.Operator):
@@ -967,6 +960,7 @@ class VIEW3D_OT_CrafterOpenWorldImporter(bpy.types.Operator):
         open_folder(folder_path)
 
         return {'FINISHED'}
+
 # ==================== 打开no_lod_blocks文件夹 ====================
 
 class VIEW3D_OT_CrafterOpenNoLodBlocks(bpy.types.Operator):
@@ -984,7 +978,7 @@ class VIEW3D_OT_CrafterOpenNoLodBlocks(bpy.types.Operator):
 
         return {'FINISHED'}
 
-#==================== 刷新 ====================
+# ==================== 刷新 ====================
 
 class VIEW3D_OT_CrafterReloadDimensions(bpy.types.Operator):#刷新 维度
     bl_label = "Reload Dimensions"  
@@ -1146,7 +1140,7 @@ class VIEW3D_OT_CrafterReloadLatestWorldsList(bpy.types.Operator):#刷新 最近
                 if addon_prefs.History_World_Roots_List[i].name == world_now[2]:
                     addon_prefs.History_World_Roots_List_index = i
                     bpy.ops.crafter.reload_history_worlds_list()
-                    if addon_prefs.is_Undivided:#判断是否open版本隔离
+                    if addon_prefs.is_Undivided:#判断是否开启版本隔离
                         dir_versions = os.path.join(world_now[2], "versions")
                         reload_Undivided_Vsersions(context=context,dir_versions=dir_versions)
                         for j in range(len(addon_prefs.Undivided_Vsersions_List)):
@@ -1190,6 +1184,9 @@ class VIEW3D_OT_CrafterReloadHistoryWorldsList(bpy.types.Operator):#刷新 历�
         with open(dir_json_history_worlds, 'r', encoding='utf-8') as file:
             json_history_worlds = json.load(file)
 
+        world_icon.clear()
+        world_index = 0
+
         addon_prefs.History_World_Roots_List.clear()
         addon_prefs.History_World_Versions_List.clear()
         addon_prefs.History_World_Saves_List.clear()
@@ -1223,6 +1220,9 @@ class VIEW3D_OT_CrafterReloadHistoryWorldsList(bpy.types.Operator):#刷新 历�
                     for save in json_history_worlds[addon_prefs.History_World_Roots_List[addon_prefs.History_World_Roots_List_index].name][addon_prefs.History_World_Versions_List[addon_prefs.History_World_Versions_List_index].name]:
                         history_world_save = addon_prefs.History_World_Saves_List.add()
                         history_world_save.name = save
+                        dir_coin = os.path.join(get_dir_saves(context), save, "icon.png")
+                        world_icon.load("world_icon_" + str(world_index), dir_coin, 'IMAGE')
+                        world_index += 1
                     if len(addon_prefs.History_World_Saves_List) > 0:
                         if addon_prefs.History_World_Saves_List_index < 0 or addon_prefs.History_World_Saves_List_index >= len(addon_prefs.History_World_Saves_List):
                             addon_prefs.History_World_Saves_List_index = 0
@@ -1232,7 +1232,7 @@ class VIEW3D_OT_CrafterReloadHistoryWorldsList(bpy.types.Operator):#刷新 历�
 
         return {'FINISHED'}
 
-#==================== UIList ====================
+# ==================== UIList ====================
 
 class VIEW3D_UL_CrafterUndividedVersions(bpy.types.UIList):#无隔离 版本
      def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
@@ -1286,8 +1286,11 @@ class VIEW3D_UL_CrafterHistoryWorldVersionsList(bpy.types.UIList):#历史世界 
         layout.label(text=item.name)
 
 class VIEW3D_UL_CrafterHistoryWorldSavesList(bpy.types.UIList):#历史世界 存档 列表
-     def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
-        layout.label(text=item.name)
+     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
+        row=layout.row()
+        name_icon = "world_icon_"+ str(index)
+        icon = world_icon[name_icon]
+        row.label(text=item.name, icon_value=icon.icon_id)
 
 class VIEW3D_UL_CrafterHistoryWorldSettingsList(bpy.types.UIList):#历史世界 设置 列表
      def draw_item(self, context, layout, data, item, icon, active_data, active_propname):

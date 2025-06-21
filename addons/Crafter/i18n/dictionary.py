@@ -3,12 +3,12 @@ from common.i18n.dictionary import preprocess_dictionary
 dictionary = {
     "zh_CN": {
         "Plans":"方案",
-        #==========面板==========
-            #==========加载==========
-                #==========加载环境==========
+        # ==========面板==========
+            # ==========加载==========
+                # ==========加载环境==========
         "Environment":"环境",
         "Load Environment":"加载环境",
-            #==========导入世界==========
+            # ==========导入世界==========
         "Import World":"导入世界",
         "Import Editable Area":"导入可编辑区域",
         "Minecraft Saves":"Minecraft存档",
@@ -50,7 +50,7 @@ dictionary = {
         "LOD2 Distance":"LOD2距离",
         "LOD3 Distance":"LOD3距离",
         "Game Resources":"游戏资源包",
-            #==========替换资源包==========
+            # ==========替换资源包==========
         "Replace Resources":"替换资源包",
         "Resources":"资源包预设",
         "Vanilla":"原版",
@@ -62,7 +62,7 @@ dictionary = {
         "Texture Interpolation":"纹理插值",
         "Texture interpolation method":"纹理插值类型",
         "Set Texture Interpolation":"设置纹理插值",
-            #==========加载材质==========
+            # ==========加载材质==========
         "Load Materials":"加载材质",
         "Materials":"材质",
         "PBR Parser":"PBR解析器",
@@ -75,10 +75,10 @@ dictionary = {
         "default":"默认",
         "Open Classification Basis":"打开材质分类依据文件夹",
         "Reload Classification Basis":"刷新材质分类依据列表",
-            #==========导入物品==========
+            # ==========导入物品==========
         "Minecraft Item":"Minecraft物品",
-        #==========操作介绍==========
-            #==========导入世界==========
+        # ==========操作介绍==========
+            # ==========导入世界==========
         "Import world":"导入世界",
         "Import World":"导入世界",
         "History":"历史",
@@ -87,10 +87,10 @@ dictionary = {
         "Starting coordinates":"起始坐标",
         "Ending coordinates":"结束坐标",
         "Enable this option when reporting a bug and include the shell output content":"反馈bug时,请启用此项并附带shell输出的内容",
-            #==========替换资源包==========
+            # ==========替换资源包==========
         "Replace resources,but can only replace textures with the same name":"替换资源包,但只能替换同名纹理",
         "Set texture interpolation":"设置纹理插值",
-            #==========加载材质==========
+            # ==========加载材质==========
         "Parsed Normal Strength":"解析后法向强度",
         "How to parse PBR texture(and normal texture)":"如何解析PBR贴图(以及法线贴图)",
         "(1-R)**2,G as F0,Emission in Alpha":"(1-R)**2,G为F0,Alpha为自发光",
@@ -99,14 +99,14 @@ dictionary = {
         "1-R,G as Metallic,No Emission":"1-R,G为金属度,无自发光",
         "Load material":"加载材质",
         "Classification basis":"材质分类依据",
-            #==========导入物品==========
+            # ==========导入物品==========
         "Import Minecraft item":"导入Minecraft物品",
         "Custome Size":"自定义尺寸",
-        #==========节点接口==========
+        # ==========节点接口==========
         "Normal Alpha":"法向Alpha",
         "Parsed Normal":"已解析法向",
         "Porosity":"孔隙率",
-        #==========提示==========
+        # ==========提示==========
         "Path not found!":"路径未找到!",
         "It's not a jar file!":"这不是一个jar文件!",
         "It's not a folder!":"这不是一个文件夹!",
@@ -119,7 +119,7 @@ dictionary = {
         "Import time: ":"导入用时: ",
         ", Material time: ":", 材质用时: ",
         ", Environment time: ":", 环境用时: ",
-            #==========UV==========
+            # ==========UV==========
         "No active object found":"未找到活动对象",
         "Active object must be a mesh":"活动对象必须是网格模型",
         "Active object has no faces":"活动对象没有面数据",

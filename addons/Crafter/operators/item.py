@@ -12,7 +12,7 @@ from ..config import __addon_name__
 from ....common.i18n.i18n import i18n
 from bpy.props import *
 
-#==================== 导入物体 ====================
+# ==================== 导入物体 ====================
 
 
 class VIEW3D_OT_CrafterImportItem(bpy.types.Operator):#导入物体
@@ -115,7 +115,7 @@ class VIEW3D_OT_CrafterImportItem(bpy.types.Operator):#导入物体
         
 
 
-#==================== 缩放UV ====================
+# ==================== 缩放UV ====================
 
 # 非常好uv缩放，感谢MCprep
 class VIEW3D_OT_CrafterScaleUV(bpy.types.Operator):
