@@ -137,12 +137,8 @@ class VIEW3D_PT_CrafterOthers(bpy.types.Panel):
 
         # ========== 功能选择面板 ==========
         row_function1 = layout.row()
-        col_f1_1 = row_function1.column()
-        # col_f1_1.alert = addon_prefs.Other_index == 0
-        col_f1_1.operator("crafter.ui_asset",text="Asset",icon="ASSET_MANAGER")
-        col_f1_2 = row_function1.column()
-        # col_f1_2.alert = addon_prefs.Other_index == 1
-        col_f1_2.operator("crafter.ui_replace_resources",text="Replace Resources",icon="NODE_COMPOSITING")
+        row_function1.operator("crafter.ui_asset",text="Asset",icon="ASSET_MANAGER",depress=addon_prefs.Other_index == 0)
+        row_function1.operator("crafter.ui_replace_resources",text="Replace Resources",icon="NODE_COMPOSITING",depress=addon_prefs.Other_index == 1)
         
         if addon_prefs.Other_index == 0:
             row_Asset = layout.row()

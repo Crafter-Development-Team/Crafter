@@ -41,9 +41,10 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         addon_prefs = context.preferences.addons[__addon_name__].preferences
         layout = self.layout
 
-        col_custom = layout.column()
+        box_custom = layout.box()
+        col_custom = box_custom.column()
         if not addon_prefs.is_Game_Path:
-            col_custom.label(text="Your world path is not in game folder,select jar.")
+            col_custom.label(icon="GHOST_DISABLED",text="Your world path is not in game folder,select jar.")
         else:
             col_custom.prop(addon_prefs, "Custom_Path")
         if (not addon_prefs.is_Game_Path) or addon_prefs.Custom_Path:
@@ -54,23 +55,24 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
                 col_custom.label(icon="ERROR",text="It's not a jar file!")
             col_custom.prop(addon_prefs, "use_Custom_mods_Path")
             if addon_prefs.use_Custom_mods_Path:
-                col_custom = layout.row()
                 col_custom.prop(addon_prefs, "Custom_mods_Path")
                 if not os.path.exists(addon_prefs.Custom_mods_Path):
                     col_custom.label(icon="ERROR",text="Path not found!")
                 elif not os.path.isdir(addon_prefs.Custom_mods_Path):
                     col_custom.label(icon="ERROR",text="It's not a folder!")
 
-        row = layout.row()
+        box_main_settings = layout.box()
+        col_cols = box_main_settings.column(align=True)
+        row_cols = box_main_settings.row()
 
-        col_1 = row.column()
+        col_1 = row_cols.column()
         col_1.prop(addon_prefs, "useChunkPrecision")
         col_1.prop(addon_prefs, "strictDeduplication")
         col_1.prop(addon_prefs, "allowDoubleFace")
         col_1.prop(addon_prefs, "Auto_Load_Material")
         col_1.prop(addon_prefs, "exportLightBlock")
 
-        col_2 = row.column()
+        col_2 = row_cols.column()
         col_2.prop(addon_prefs, "maxTasksPerBatch")
         col_2.prop(addon_prefs, "keepBoundary")
         col_2.prop(addon_prefs, "cullCave")
@@ -78,21 +80,21 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         col_2.prop(addon_prefs, "useGreedyMesh")
 
         if addon_prefs.exportLightBlock:
-            row_Light_Block = layout.row()
+            row_Light_Block = box_main_settings.row()
             row_Light_Block.prop(addon_prefs, "exportLightBlockOnly")
             row_Light_Block.prop(addon_prefs, "lightBlockSize")
 
 
-        row_exportFullModel = layout.row()
+        row_exportFullModel = box_main_settings.row()
         row_exportFullModel.prop(addon_prefs, "exportFullModel")
         if addon_prefs.exportFullModel:
             row_exportFullModel.prop(addon_prefs, "partitionSize")
         
         
-        col_lod = layout.column()
-        col_lod.prop(addon_prefs, "Max_LOD_Level")
+        box_lod = layout.box()
+        box_lod.prop(addon_prefs, "Max_LOD_Level")
         if int(addon_prefs.Max_LOD_Level) > 0:
-            split_lod = col_lod.split(factor=0.5)
+            split_lod = box_lod.split(factor=0.5)
 
             col_1_lod = split_lod.column()
             col_1_lod.prop(addon_prefs, "LOD0renderDistance")
@@ -106,26 +108,38 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             col_2_lod = split_lod.column()
             col_2_lod.prop(addon_prefs, "useBiomeColors")
             col_2_lod.prop(addon_prefs, "useUnderwaterLOD")
-            row_no_lod_list = col_2_lod.row()
-            row_no_lod_list.prop(addon_prefs, "no_lod_blocks")
+            if addon_prefs.isLODAutoCenter:
+                col_2_lod.prop(addon_prefs, "isLODAutoCenter")
+            else:
+                box_lodcenter = col_2_lod.box()
+                col_lodcenter = box_lodcenter.column()
+                col_lodcenter.prop(addon_prefs, "isLODAutoCenter")
+                col_lodcenter.prop(addon_prefs, "LODCenterX")
+                col_lodcenter.prop(addon_prefs, "LODCenterZ")
+
             if addon_prefs.no_lod_blocks:
-                col_2_lod.operator("crafter.open_no_lod_blocks_folder",icon="FILE_FOLDER")
-            if not addon_prefs.isLODAutoCenter:
-                col_2_lod.prop(addon_prefs, "LODCenterX")
-                col_2_lod.prop(addon_prefs, "LODCenterZ")
+                box_nolod = col_2_lod.box()
+                col_nolod = box_nolod.column()
+                col_nolod.prop(addon_prefs, "no_lod_blocks")
+                col_nolod.operator("crafter.open_no_lod_blocks_folder",icon="FILE_FOLDER")
+            else:
+                col_2_lod.prop(addon_prefs, "no_lod_blocks")
+
         #无版本隔离选择
         if self.version == "":
-            layout.label(text="Versions")
-            row_undivided = layout.row()
+            box_undivided = layout.box()
+            box_undivided.label(text="Versions")
+            row_undivided = box_undivided.row()
             row_undivided.template_list("VIEW3D_UL_CrafterUndividedVersions","",addon_prefs,"Undivided_Vsersions_List",addon_prefs,"Undivided_Vsersions_List_index",rows=1,)
 
         #资源包列表
-        row_resources = layout.row()
-        row_resources.prop(addon_prefs, "Game_Resources")
+        box_resources_main = layout.box()
+        box_resources_main.prop(addon_prefs, "Game_Resources")
+        box_resources = box_resources_main.box()
         if addon_prefs.Game_Resources:
             if len(addon_prefs.Game_Resources_List) + len(addon_prefs.Game_unuse_Resources_List) > 0:
-                layout.label(text="Resources List")
-                row_resources_use = layout.row()
+                box_resources.label(text="Resources List",icon="NODE_COMPOSITING")
+                row_resources_use = box_resources.row()
                 col_use_list = row_resources_use.column()
                 col_use_list.template_list("VIEW3D_UL_CrafterGameResources", "", addon_prefs, "Game_Resources_List", addon_prefs, "Game_Resources_List_index", rows=1)
                 col_use_ops = row_resources_use.column(align=True)
@@ -136,23 +150,24 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
                     col_use_ops.operator("crafter.up_game_resource", text="", icon="TRIA_UP")
                     col_use_ops.operator("crafter.down_game_resource", text="", icon="TRIA_DOWN")
 
-                row_resources_unuse = layout.row()
-                col_unuse_list = row_resources_unuse.column()
-                col_unuse_list.template_list("VIEW3D_UL_CrafterGameUnuseResources", "", addon_prefs, "Game_unuse_Resources_List", addon_prefs, "Game_unuse_Resources_List_index", rows=1)
-                col_unuse_ops = row_resources_unuse.column()
                 if len (addon_prefs.Game_unuse_Resources_List) > 0:
+                    row_resources_unuse = box_resources.row()
+                    col_unuse_list = row_resources_unuse.column()
+                    col_unuse_list.template_list("VIEW3D_UL_CrafterGameUnuseResources", "", addon_prefs, "Game_unuse_Resources_List", addon_prefs, "Game_unuse_Resources_List_index", rows=1)
+                    col_unuse_ops = row_resources_unuse.column()
                     col_unuse_ops.operator("crafter.use_game_resource", text="", icon="ADD")
         else:
-            layout.label(text="Resources List")
-            row_Plans_List = layout.row()
+            box_resources.label(text="Resources List",icon="PACKAGE")
+            row_Plans_List = box_resources.row()
             row_Plans_List.template_list("VIEW3D_UL_CrafterResources", "", addon_prefs, "Resources_Plans_List", addon_prefs, "Resources_Plans_List_index", rows=1)
             col_Plans_List_ops = row_Plans_List.column()
             col_Plans_List_ops.operator("crafter.open_resources_plans",icon="FILE_FOLDER",text="")
             col_Plans_List_ops.operator("crafter.reload_all",icon="FILE_REFRESH",text="")
 
             if len(addon_prefs.Resources_List) > 0:
-                layout.label(text=i18n("Resource"))
-                row_Resources_List = layout.row()
+                box_resource = box_resources_main.box()
+                box_resource.label(text="Resource",icon="NODE_COMPOSITING")
+                row_Resources_List = box_resource.row()
                 row_Resources_List.template_list("VIEW3D_UL_CrafterResourcesInfo", "", addon_prefs, "Resources_List", addon_prefs, "Resources_List_index", rows=1)
                 if len(addon_prefs.Resources_List) > 1:
                     col_Resources_List_ops = row_Resources_List.column(align=True)
