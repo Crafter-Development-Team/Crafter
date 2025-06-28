@@ -16,7 +16,7 @@ class CrafterAddonPreferences(AddonPreferences):
     # The name can't be dynamically translated during blender programming running as they are defined
     # when the class is registered, i.e. we need to restart blender for the property name to be correctly translated.
 
-# ==========导入世界属性==========
+# ========== 导入世界属性 ==========
     World_Path: StringProperty(name="World path",
                                default="World path",
                                subtype="DIR_PATH",
@@ -153,15 +153,14 @@ class CrafterAddonPreferences(AddonPreferences):
     Custom_mods_Path: StringProperty(name="Mods Path",
                                         subtype="DIR_PATH",
                                         default="Mods Path")# type: ignore
-# ==========加载资源包属性==========
+# ========== 替换资源包属性 ==========
     Resources_Plans_List: CollectionProperty(name="Resources Plans",type=ResourcePlan)#type: ignore
     Resources_Plans_List_index: IntProperty(name="Resources",
                                             default=0,
-                                            update=lambda self, context: self.reload_all(context))# type: ignore
+                                            update=lambda self, context: self.reload_resources(context))# type: ignore
     Resources_List: CollectionProperty(name="Resources",type=ResourcePlansInfo)# type: ignore
     Resources_List_index: IntProperty(name="Resource",
-                                      default=0,
-                                      update=lambda self, context: self.reload_all(context))# type: ignore
+                                      default=0)# type: ignore
     Texture_Interpolation: EnumProperty(name="Texture Interpolation",
                                         items=[("Linear","Linear","Linear interpolation"),
                                                ("Closest","Closest","No interpolation (sample closest texel)"),
@@ -170,7 +169,7 @@ class CrafterAddonPreferences(AddonPreferences):
                                         default="Closest",
                                         description="Texture interpolation method",
                                         update=lambda self, context: self.update_texture_interpolation(context))# type: ignore
-# ==========加载材质属性==========
+# ========== 加载材质属性 ==========
     PBR_Parser: EnumProperty(name="PBR Parser",
                               items=[("lab_PBR_1.3","lab PBR 1.3","(1-R)**2,G as F0,Emission in Alpha"),
                                      ("old_continuum","old continuum","(1-R)**2,G as Metallic,Emission in Alpha"),
@@ -183,7 +182,7 @@ class CrafterAddonPreferences(AddonPreferences):
                                           default=1.0,
                                           min=0.0,
                                           max=100.0,
-                                          description="Parsed Normal strength",
+                                          description=" ",
                                           update=lambda self,context: self.set_parsed_normal_strength(context))# type: ignore
     Materials_List: CollectionProperty(name="Materials",type=Material)#type: ignore
     Materials_List_index: IntProperty(name="Material",default=0)# type: ignore
@@ -210,12 +209,10 @@ class CrafterAddonPreferences(AddonPreferences):
                                           min=0.0,
                                           max=1.0,)# type: ignore
 
-# ==========加载环境属性==========
-    Environments_List: CollectionProperty(name="Environments",type=Environment)# type: ignore
-    Environments_List_index: IntProperty(name="Environment",
-                                      default=0,
-                                      update=lambda self, context: self.reload_all(context))# type: ignore
-# ==========偏好设置面板==========
+# ========== 其他功能属性 ==========
+    Other_index: IntProperty(name="Other Function's Index",
+                                      default=0)# type: ignore
+# ========== 偏好设置面板 ==========
     def draw(self, context: bpy.types.Context):
         layout = self.layout
         col_default_PBR  = layout.column()
@@ -248,4 +245,8 @@ class CrafterAddonPreferences(AddonPreferences):
         return None
     def set_parsed_normal_strength(self, context):
         bpy.ops.crafter.set_parsed_normal_strength()
+        return None
+    def reload_resources(self, context):
+        bpy.ops.crafter.reload_all()
+        bpy.ops.crafter.reload_resources()
         return None

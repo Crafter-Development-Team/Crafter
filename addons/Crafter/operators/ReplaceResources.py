@@ -25,6 +25,7 @@ class VIEW3D_OT_CrafterReplaceResources(bpy.types.Operator):
         addon_prefs = context.preferences.addons[__addon_name__].preferences
         
         bpy.ops.crafter.reload_all()
+        bpy.ops.crafter.reload_resources()
         if not (-1 < addon_prefs.Resources_Plans_List_index and addon_prefs.Resources_Plans_List_index < len(addon_prefs.Resources_Plans_List)):
             return {'CANCELLED'}
         bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
@@ -103,31 +104,27 @@ class VIEW3D_OT_CrafterReplaceResources(bpy.types.Operator):
                 add_to_crafter_mcmts_collection(object=obj,context=context)
 
         return {'FINISHED'}
-    def invoke(self, context, event):
+
+# ==================== UI切换至替换资源包 ====================
+
+class VIEW3D_OT_CrafterUIReplaceResources(bpy.types.Operator):
+    bl_label = "UI-Replace Resources"
+    bl_idname = "crafter.ui_replace_resources"
+    bl_description = " "
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context: bpy.types.Context):
+        return True
+
+    def execute(self, context: bpy.types.Context):
         addon_prefs = context.preferences.addons[__addon_name__].preferences
 
+        addon_prefs.Other_index = 1
         bpy.ops.crafter.reload_all()
-        return context.window_manager.invoke_props_dialog(self)
+        bpy.ops.crafter.reload_resources()
 
-    def draw(self, context):
-        addon_prefs = context.preferences.addons[__addon_name__].preferences
-        layout = self.layout
-        
-        layout.label(text=i18n("Resources"))
-        row_Plans_List = layout.row()
-        row_Plans_List.template_list("VIEW3D_UL_CrafterResources", "", addon_prefs, "Resources_Plans_List", addon_prefs, "Resources_Plans_List_index", rows=1)
-        col_Plans_List_ops = row_Plans_List.column()
-        col_Plans_List_ops.operator("crafter.open_resources_plans",icon="FILE_FOLDER",text="")
-        col_Plans_List_ops.operator("crafter.reload_all",icon="FILE_REFRESH",text="")
-
-        if len(addon_prefs.Resources_List) > 0:
-            layout.label(text=i18n("Resource"))
-            row_Resources_List = layout.row()
-            row_Resources_List.template_list("VIEW3D_UL_CrafterResourcesInfo", "", addon_prefs, "Resources_List", addon_prefs, "Resources_List_index", rows=1)
-            if len(addon_prefs.Resources_List) > 1:
-                col_Resources_List_ops = row_Resources_List.column(align=True)
-                col_Resources_List_ops.operator("crafter.up_resource",icon="TRIA_UP",text="")
-                col_Resources_List_ops.operator("crafter.down_resource",icon="TRIA_DOWN",text="")
+        return {'FINISHED'}
 
 # ==================== 打开资源包列表文件夹 ====================
 
@@ -145,8 +142,6 @@ class VIEW3D_OT_CrafterOpenResourcesPlans(bpy.types.Operator):
         open_folder(folder_path)
 
         return {'FINISHED'}
-
-
 
 # ==================== 资源包优先级 ====================
 
@@ -233,7 +228,7 @@ class VIEW3D_OT_CrafterReloadResourcesPlans(bpy.types.Operator):#刷新 资源�
                 plan_name.name = folder
         if (addon_prefs.Resources_Plans_List_index < 0 or addon_prefs.Resources_Plans_List_index >= len(addon_prefs.Resources_Plans_List)) and addon_prefs.Resources_Plans_List_index != 0:
             addon_prefs.Resources_Plans_List_index = 0
-
+        bpy.ops.crafter.reload_resources()
         return {'FINISHED'}
 
 class VIEW3D_OT_CrafterReloadResources(bpy.types.Operator):#刷新 资源包 列表

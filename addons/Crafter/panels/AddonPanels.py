@@ -135,14 +135,42 @@ class VIEW3D_PT_CrafterOthers(bpy.types.Panel):
         layout = self.layout
         addon_prefs = context.preferences.addons[__addon_name__].preferences
 
-        # ==========加载资源包面板==========
-        row_Resources = layout.row()
-        if -1 < addon_prefs.Resources_Plans_List_index and addon_prefs.Resources_Plans_List_index < len(addon_prefs.Resources_Plans_List):
-            resource = addon_prefs.Resources_Plans_List[addon_prefs.Resources_Plans_List_index].name
-        else:
-            resource = ""
-        row_Resources.label(text=i18n("Resources") + ":" + resource)
-        row_Resources.operator("crafter.replace_resources",text="Replace")
+        # ========== 功能选择面板 ==========
+        row_function1 = layout.row()
+        col_f1_1 = row_function1.column()
+        # col_f1_1.alert = addon_prefs.Other_index == 0
+        col_f1_1.operator("crafter.ui_asset",text="Asset",icon="ASSET_MANAGER")
+        col_f1_2 = row_function1.column()
+        # col_f1_2.alert = addon_prefs.Other_index == 1
+        col_f1_2.operator("crafter.ui_replace_resources",text="Replace Resources",icon="NODE_COMPOSITING")
+        
+        if addon_prefs.Other_index == 0:
+            row_Asset = layout.row()
+            
+        # ========== 加载资源包面板 ==========
+        if addon_prefs.Other_index == 1:
+            layout = self.layout
+            
+            box_resources = layout.box()
+            box_resources.label(text="Resources",icon="PACKAGE")
+            row_Plans_List = box_resources.row()
+            row_Plans_List.template_list("VIEW3D_UL_CrafterResources", "", addon_prefs, "Resources_Plans_List", addon_prefs, "Resources_Plans_List_index", rows=1)
+            col_Plans_List_ops = row_Plans_List.column()
+            col_Plans_List_ops.operator("crafter.open_resources_plans",icon="FILE_FOLDER",text="")
+            col_Plans_List_ops.operator("crafter.reload_all",icon="FILE_REFRESH",text="")
+
+            box_resource = layout.box()
+            if len(addon_prefs.Resources_List) > 0:
+                box_resource.label(text="Resource",icon="NODE_COMPOSITING")
+                row_Resources_List = box_resource.row()
+                row_Resources_List.template_list("VIEW3D_UL_CrafterResourcesInfo", "", addon_prefs, "Resources_List", addon_prefs, "Resources_List_index", rows=1)
+                if len(addon_prefs.Resources_List) > 1:
+                    col_Resources_List_ops = row_Resources_List.column(align=True)
+                    col_Resources_List_ops.operator("crafter.up_resource",icon="TRIA_UP",text="")
+                    col_Resources_List_ops.operator("crafter.down_resource",icon="TRIA_DOWN",text="")
+
+            row_Resources = layout.row()
+            row_Resources.operator("crafter.replace_resources",text="Replace")
 
     @classmethod
     def poll(cls, context: bpy.types.Context):

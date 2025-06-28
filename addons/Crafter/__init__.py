@@ -10,7 +10,7 @@ from ...common.i18n.dictionary import common_dictionary
 from ...common.i18n.i18n import load_dictionary
 from bpy.props import StringProperty, IntProperty, BoolProperty, IntVectorProperty, EnumProperty, CollectionProperty, FloatProperty
 from .properties import ResourcePlan, ResourcePlansInfo, Material ,McMt, dirs_temp
-from .operators.item import ui_item
+from .operators.Item import ui_item
 from bpy.utils import previews
 
 # Add-on info

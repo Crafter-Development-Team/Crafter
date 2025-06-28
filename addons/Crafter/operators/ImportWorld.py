@@ -165,6 +165,7 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
 
         #获取世界路径，检测路径合法性
         bpy.ops.crafter.reload_all()
+        bpy.ops.crafter.reload_resources()
         worldPath = os.path.normpath(addon_prefs.World_Path)
         dir_saves = os.path.dirname(worldPath)
         dir_level_dat = os.path.join(worldPath, "level.dat")

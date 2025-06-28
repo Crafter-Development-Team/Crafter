@@ -89,9 +89,6 @@ dictionary = {
         "Starting coordinates":"起始坐标",
         "Ending coordinates":"结束坐标",
         "Enable this option when reporting a bug and include the shell output content":"反馈bug时,请启用此项并附带shell输出的内容",
-            # ==========替换资源包==========
-        "Replace resources,but can only replace textures with the same name":"替换资源包,但只能替换同名纹理",
-        "Set texture interpolation":"设置纹理插值",
             # ==========加载材质==========
         "Parsed Normal Strength":"解析法向强度",
         "How to parse PBR texture(and normal texture)":"如何解析PBR贴图(以及法线贴图)",
@@ -104,6 +101,12 @@ dictionary = {
         "The Crafter-time node can provide the current second count to material nodes (dynamic textures and water flowing), but it will reduce the preview frame rate. It is recommended to remove it during previews and add it back before rendering":"Crafter-time节点能够为材质节点提供当前秒数(动态纹理、流动水),但会使预览帧数降低.建议在预览时移除,渲染前添加",
             # ==========导入物品==========
         "Import Minecraft item":"导入Minecraft物品",
+            # ==========其余功能==========
+                # ==========资产==========
+                "Asset":"资产",
+                # ==========替换资源包==========
+        "Replace resources,but can only replace textures with the same name":"替换资源包,但只能替换同名纹理",
+        "Set texture interpolation":"设置纹理插值",
         "Custome Size":"自定义尺寸",
         # ==========节点接口==========
         "Normal Alpha":"法向Alpha",
