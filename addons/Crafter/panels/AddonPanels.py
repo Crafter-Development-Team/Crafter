@@ -109,6 +109,15 @@ class VIEW3D_PT_CrafterMaterials(bpy.types.Panel):
         row_Crafter_time_ops.operator("crafter.add_craftertime",icon="LINKED",text="Add")
         row_Crafter_time_ops.operator("crafter.remove_craftertime",icon="UNLINKED",text="Remove")
 
+        row_parallax = box_other.row()
+        row_parallax.label(icon="TEXTURE")
+        row_parallax.operator("crafter.load_parallax",icon="FILE_IMAGE",text="Load Parallax")
+        row_parallax.prop(addon_prefs,"Parallax_Depth")
+        
+        row_parallax1 = box_other.row()
+        row_parallax1.prop(addon_prefs,"Parallax_Smooth")
+        row_parallax1.prop(addon_prefs,"Parallax_Iterations")
+
         box_classification = box.box()
         box_classification.label(text="Classification Basis",icon="PACKAGE")
         row_Classification_Basis = box_classification.row()

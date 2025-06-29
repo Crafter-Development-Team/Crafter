@@ -277,8 +277,14 @@ def add_node_moving_texture(node_tex, nodes, links):
                 node_Moving_texture.inputs["frametime"].default_value = frametime
         except:
             pass
-        node_Moving_texture.inputs["row"].default_value = node_tex.image.size[1] / node_tex.image.size[0]
+        if not node_tex.image.size[0] == 0:
+            node_Moving_texture.inputs["row"].default_value = node_tex.image.size[1] / node_tex.image.size[0]
+        else:
+            node_Moving_texture.inputs["row"].default_value = 1
         links.new(node_Moving_texture.outputs["Vector"], node_tex.inputs["Vector"])
+        node_UV = nodes.new("ShaderNodeTexCoord")
+        node_UV.location = node_tex.location.x - 400, node_tex.location.y
+        links.new(node_UV.outputs["UV"], node_Moving_texture.inputs["UV"])
         return node_Moving_texture
 
 def fuq_bl_dot_number(name: str):
@@ -493,7 +499,7 @@ def link_base_normal_PBR(node_tex_base, group_CI, links, node_C_PBR_Parser, node
         if "PBR Alpha" in group_CI.inputs:
             links.new(node_tex_PBR.outputs["Alpha"], group_CI.inputs["PBR Alpha"])
 
-def add_C_time(obj):
+def add_Crafter_time(obj):
     if not "Crafter-time" in bpy.data.node_groups:
         with bpy.data.libraries.load(dir_blend_append, link=False) as (data_from, data_to):
             data_to.node_groups = ["Crafter-time"]
@@ -527,3 +533,95 @@ def reload_Undivided_Vsersions(context: bpy.types.Context,dir_versions):#刷新�
         if (len(addon_prefs.Undivided_Vsersions_List) - 1 < addon_prefs.Undivided_Vsersions_List_index) or (addon_prefs.Undivided_Vsersions_List_index < 0):
             addon_prefs.Undivided_Vsersions_List_index = 0
     
+def node_moving_tex_info(node):
+    info = [False,None,None]
+    if node == None:
+        return info
+    if len(node.inputs["Vector"].links) >0:
+        info[0] = True
+        info[1] = node.inputs["Vector"].links[0].from_node.inputs["row"].default_value
+        info[2] = node.inputs["Vector"].links[0].from_node.inputs["frametime"].default_value
+    return info
+
+def make_parallax_node(node,node_tex_normal,iterations,smooth,info_moving,nodes,links):
+    node_frame = nodes.new(type="NodeFrame")
+    location = [node.location.x - 1000, node.location.y]
+    node_frame.location = location
+    node_frame.label = "Crafter_Parallax"
+
+    node_UV = nodes.new(type="ShaderNodeGroup")
+    node_UV.location = location
+    node_UV.parent = node_frame
+    move = 150
+    location[0] -= move# location
+    node_UV.node_tree = bpy.data.node_groups["CP-Final_Parallax"]
+    if info_moving[0]:
+        node_Moving_texture = nodes.new(type="ShaderNodeGroup")
+        node_Moving_texture.node_tree = bpy.data.node_groups["Crafter-Moving_texture"]
+        node_Moving_texture.inputs["row"].default_value = info_moving[1]
+        node_Moving_texture.inputs["frametime"].default_value = info_moving[2]
+        node_Moving_texture.parent = node_frame
+        output_cycleing_UV = node_Moving_texture.outputs["Vector"]
+        links.new(node_Moving_texture.outputs["Vector"], node_UV.inputs["UV"])
+        node_tex_UV = nodes.new("ShaderNodeTexCoord")
+        node_tex_UV.parent = node_frame
+        links.new(node_tex_UV.outputs["UV"], node_Moving_texture.inputs["UV"])
+    else:
+        node_tex_UV = nodes.new("ShaderNodeTexCoord")
+        node_tex_UV.parent = node_frame
+        output_cycleing_UV = node_tex_UV.outputs["UV"]
+        links.new(node_tex_UV.outputs["UV"], node_UV.inputs["UV"])
+
+    input_lates = [node_UV.inputs["Depth"]]
+
+    while iterations > 0:
+        iterations -= 1
+        node_last = nodes.new("ShaderNodeGroup")
+        node_last.node_tree = bpy.data.node_groups["CP-Steep_Steps_last"]
+        node_last.location = location
+        location[0] -= move# location
+        node_last.parent = node_frame
+        for input in input_lates:
+            links.new(node_last.outputs["Current_Depth"], input)
+
+        node_height = nodes.new("ShaderNodeTexImage")
+        node_height.image = node_tex_normal.image
+        node_height.location = location
+        location[0] -= move# location
+        node_height.parent = node_frame
+        if smooth:
+            node_height.interpolation = "Linear"
+        else:
+            node_height.interpolation = "Closest"
+        links.new(node_height.outputs["Alpha"], node_last.inputs["Height"])
+
+        node_first = nodes.new("ShaderNodeGroup")
+        node_first.node_tree = bpy.data.node_groups["CP-Steep_Steps_first"]
+        node_first.location = location
+        location[0] -= move# location
+        node_first.parent = node_frame
+        links.new(node_first.outputs["Vector"], node_height.inputs["Vector"])
+        if info_moving[0]:
+            links.new(node_Moving_texture.outputs["Vector"], node_first.inputs["UV"])
+        else:
+            links.new(output_cycleing_UV, node_first.inputs["UV"])
+
+        input_lates = [node_first.inputs["Current_Depth"],node_last.inputs["Current_Depth"]]
+
+    
+    if info_moving[0]:
+        node_Moving_texture.location = (location[0], location[1] + 200)
+        node_tex_UV.location = (location[0] - move, location[1] + 200)
+    else:
+        node_tex_UV.location = (location[0] - move, location[1] + 200)
+
+    link_node_UV(node=node,node_UV=node_UV,info_moving=info_moving,links=links)
+    return node_UV
+
+def link_node_UV(node,node_UV,info_moving,links):
+    output_UV = node_UV.outputs["UV"]
+    if info_moving[0]:
+        links.new(output_UV, node.inputs["Vector"])
+    else:
+        links.new(output_UV, node.inputs["Vector"])
+    return None

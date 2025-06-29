@@ -208,7 +208,16 @@ class CrafterAddonPreferences(AddonPreferences):
                                           default=0.0,
                                           min=0.0,
                                           max=1.0,)# type: ignore
-
+    Parallax_Iterations: IntProperty(name="Parallax Iterations",
+                                     min=8,
+                                     default=32)# type: ignore
+    Parallax_Smooth: BoolProperty(name="Parallax Smooth",
+                                  default=False)# type: ignore
+    Parallax_Depth: FloatProperty(name="Parallax Depth",
+                                  default=0.25,
+                                  min=0.001,
+                                  max=2.0,
+                                  update=lambda self, context: self.set_parallax_depth(context))# type: ignore
 # ========== 其他功能属性 ==========
     Other_index: IntProperty(name="Other Function's Index",
                                       default=0)# type: ignore
@@ -249,4 +258,7 @@ class CrafterAddonPreferences(AddonPreferences):
     def reload_resources(self, context):
         bpy.ops.crafter.reload_all()
         bpy.ops.crafter.reload_resources()
+        return None
+    def set_parallax_depth(self, context):
+        bpy.ops.crafter.set_parallax_depth()
         return None

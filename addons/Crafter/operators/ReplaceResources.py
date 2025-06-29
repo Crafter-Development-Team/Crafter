@@ -57,7 +57,7 @@ class VIEW3D_OT_CrafterReplaceResources(bpy.types.Operator):
         for obj in context.selected_objects:
             if obj.type == "MESH":
                 add_to_mcmts_collection(object=obj,context=context)
-                add_C_time(obj=obj)
+                add_Crafter_time(obj=obj)
         for name_material in context.scene.Crafter_mcmts:
             material = bpy.data.materials[name_material.name]
             node_tree_material = material.node_tree

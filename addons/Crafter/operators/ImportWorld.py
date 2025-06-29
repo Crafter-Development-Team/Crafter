@@ -460,7 +460,7 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
                             real_name_dic[real_material_name] = material.name
                     add_to_mcmts_collection(object=obj,context=context)
                     add_to_crafter_mcmts_collection(object=obj,context=context)
-                    add_C_time(obj=obj)
+                    add_Crafter_time(obj=obj)
                     #定位到视图
                     view_2_active_object(context)
 

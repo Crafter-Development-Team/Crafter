@@ -31,9 +31,12 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):
             bpy.ops.object.mode_set(mode='OBJECT')
         bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
         # 删除startswith(CO-)、startswith(CI-)节点组、startswith(C-)节点组
+        node_delete = []
         for node in bpy.data.node_groups:
             if node.name.startswith("CO-") or node.name.startswith("CI-") or node.name.startswith("C-"):
-                bpy.data.node_groups.remove(node)
+                node_delete.append(node)
+        for node in node_delete:
+            bpy.data.node_groups.remove(node)
         # 删除Crafter Materials Settings物体、材质
         try:
             bpy.data.objects.remove(bpy.data.objects["Crafter Materials Settings"])
@@ -50,7 +53,7 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):
         for node_group in node_groups_use_fake_user:
             bpy.data.node_groups[node_group].use_fake_user = True
         # 导入Crafter-Moving_texture节点组
-        if not "Crafter-Moving_texture" in bpy.data.node_groups:# 若不存在则导入C-节点组
+        if not "Crafter-Moving_texture" in bpy.data.node_groups:# 若不存在则导入Crafter-Moving_texture节点组
             with bpy.data.libraries.load(dir_blend_append, link=False) as (data_from, data_to):
                 data_to.node_groups = ["Crafter-Moving_texture"]
             bpy.data.node_groups["Crafter-Moving_texture"].use_fake_user = True
@@ -90,17 +93,21 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):
         # 应用 Parsed_Normal_Strength
         bpy.ops.crafter.set_parsed_normal_strength()
 
-        # 添加选中物体的材质到合集
+        for_collection = []
+        for mcmt in context.scene.Crafter_mcmts:
+            for_collection.append(mcmt.name)
+        # 添加选中物体的材质到遍历合集
         for obj in context.selected_objects:
             if obj.type == "MESH":
-                add_to_mcmts_collection(object=obj,context=context)
-                add_C_time(obj=obj)
+                for mat in obj.data.materials:
+                    if mat.name not in for_collection:
+                        for_collection.append(mat.name)
         # 遍历材质合集
-        for name_material in context.scene.Crafter_mcmts:
+        for name_material in for_collection:
             imported_by_crafter = False
-            if name_material.name in context.scene.Crafter_crafter_mcmts:
+            if name_material in context.scene.Crafter_crafter_mcmts:
                 imported_by_crafter = True
-            material = bpy.data.materials[name_material.name]
+            material = bpy.data.materials[name_material]
             node_tree_material = material.node_tree
             if node_tree_material == None:
                 continue
@@ -260,8 +267,184 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):
         for obj in context.selected_objects:
             if obj.type == "MESH":
                 add_to_crafter_mcmts_collection(object=obj,context=context)
+                add_Crafter_time(obj=obj)
+                
         bpy.ops.crafter.set_pbr_parser()
 
+        return {'FINISHED'}
+
+
+# ==================== 加载视差 ====================
+
+class VIEW3D_OT_CrafterLoadParallax(bpy.types.Operator):
+    bl_label = "Load Parallax"
+    bl_idname = "crafter.load_parallax"
+    bl_description = " "
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context: bpy.types.Context):
+        return True
+
+    def execute(self, context: bpy.types.Context):
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
+
+        bpy.ops.crafter.remove_parallax()
+        if context.active_object:
+            bpy.ops.object.mode_set(mode='OBJECT')
+        bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
+        # 导入CP-节点组
+        node_groups_use_fake_user = ["CP-Steep_Steps_first","CP-Steep_Steps_last","CP-Final_Parallax"]
+        with bpy.data.libraries.load(dir_blend_append, link=False) as (data_from, data_to):
+            data_to.node_groups = [name for name in data_from.node_groups if name in node_groups_use_fake_user]
+        for node_group in node_groups_use_fake_user:
+            bpy.data.node_groups[node_group].use_fake_user = True
+        # 开始遍历
+        for_collection = []
+        for mcmt in context.scene.Crafter_mcmts:
+            for_collection.append(mcmt.name)
+        # 遍历材质合集
+        for name_material in for_collection:
+            material = bpy.data.materials[name_material]
+            node_tree_material = material.node_tree
+            if node_tree_material == None:
+                continue
+            if material.name.startswith("color#"):
+                continue
+            nodes = node_tree_material.nodes
+            links = node_tree_material.links
+            have_loaded_material = False
+
+            nodes_wait_remove = []
+            node_tex_base = None
+            node_tex_normal = None
+            node_tex_PBR = None
+            for node in nodes:
+                if node.type == "TEX_IMAGE" and node.image != None:
+                    name_image = fuq_bl_dot_number(node.image.name)
+                    if name_image.endswith("_n.png") or name_image.endswith("_s.png") or name_image.endswith("_a.png"):
+                        if name_image.endswith("_n.png"):
+                            node_tex_normal = node
+                        if name_image.endswith("_s.png") or name_image.endswith("_a.png"):
+                            node_tex_PBR = node
+                    elif node_tex_base != None:
+                        nodes_wait_remove.append(node)
+                    else:
+                        node_tex_base = node
+                if node.type == "GROUP":
+                    have_loaded_material = True
+            if not have_loaded_material:
+                continue
+            if node_tex_base == None or node_tex_normal == None:# 若没有基础纹理或没有法向纹理，则跳过
+                continue
+            
+            iterations = addon_prefs.Parallax_Iterations
+            soomth = addon_prefs.Parallax_Smooth
+
+            info_base = node_moving_tex_info(node_tex_base)
+            info_normal = node_moving_tex_info(node_tex_normal)
+            info_PBR = node_moving_tex_info(node_tex_PBR)
+
+            node_UV_base = make_parallax_node(node=node_tex_base,node_tex_normal=node_tex_normal,iterations=iterations,smooth=soomth,info_moving=info_base,nodes=nodes,links=links)
+            if info_normal == info_base:
+                link_node_UV(node=node_tex_normal,node_UV=node_UV_base,info_moving=info_normal,links=links)
+            else:
+                node_UV_normal = make_parallax_node(node=node_tex_normal,node_tex_normal=node_tex_normal,iterations=iterations,smooth=soomth,info_moving=info_normal,nodes=nodes,links=links)
+            if info_PBR == info_base:
+                link_node_UV(node=node_tex_PBR,node_UV=node_UV_base,info_moving=info_PBR,links=links)
+            elif info_PBR == info_normal:
+                link_node_UV(node=node_tex_PBR,node_UV=node_UV_normal,info_moving=info_PBR,links=links)
+            else:
+                make_parallax_node(node=node_tex_PBR,node_tex_normal=node_tex_normal,iterations=iterations,smooth=soomth,info_moving=info_PBR,nodes=nodes,links=links)
+            bpy.ops.crafter.set_parallax_depth()
+            bpy.ops.crafter.set_parallax_iterations()
+
+
+
+
+        return {'FINISHED'}
+
+# ==================== 去除视差 ====================
+class VIEW3D_OT_CrafterRemoveParallax(bpy.types.Operator):
+    bl_label = "Remove Parallax"
+    bl_idname = "crafter.remove_parallax"
+    bl_description = " "
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context: bpy.types.Context):
+        return True
+
+    def execute(self, context: bpy.types.Context):
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
+        
+        bpy.ops.crafter.reload_all()
+        if context.active_object:
+            bpy.ops.object.mode_set(mode='OBJECT')
+        bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
+        # 删除startswith(CP-)节点组
+        node_delete = []
+        for node in bpy.data.node_groups:
+            if node.name.startswith("CP-"):
+                node_delete.append(node)
+        for node in node_delete:
+            bpy.data.node_groups.remove(node)
+        # 开始遍历
+        for_collection = []
+        for mcmt in context.scene.Crafter_mcmts:
+            for_collection.append(mcmt.name)
+        # 遍历材质合集
+        for name_material in for_collection:
+            material = bpy.data.materials[name_material]
+            node_tree_material = material.node_tree
+            if node_tree_material == None:
+                continue
+            if material.name.startswith("color#"):
+                continue
+            nodes = node_tree_material.nodes
+            links = node_tree_material.links
+        return {'FINISHED'}
+    
+# ==================== 设置视差迭代 ====================
+class VIEW3D_OT_CrafterSetParallaxIterations(bpy.types.Operator):
+    bl_label = "Set Parallax Iterations"
+    bl_idname = "crafter.set_parallax_iterations"
+    bl_description = " "
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context: bpy.types.Context):
+        return True
+
+    def execute(self, context: bpy.types.Context):
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
+        
+        for node in bpy.data.node_groups["CP-Parallax_Iterations"].nodes:
+            if node.type == "GROUP_OUTPUT":
+                node_output = node
+        node_output.inputs["Parallax_Iterations"].default_value = addon_prefs.Parallax_Iterations
+
+        return {'FINISHED'}
+
+# ==================== 设置视差深度 ====================
+class VIEW3D_OT_CrafterSetParallaxDepth(bpy.types.Operator):
+    bl_label = "Set Parallax Depth"
+    bl_idname = "crafter.set_parallax_depth"
+    bl_description = " "
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context: bpy.types.Context):
+        return True
+
+    def execute(self, context: bpy.types.Context):
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
+        
+        for node in bpy.data.node_groups["CP-Parallax_Depth"].nodes:
+            if node.type == "GROUP_OUTPUT":
+                node_output = node
+        node_output.inputs["Parallax_Depth"].default_value = addon_prefs.Parallax_Depth
+        
         return {'FINISHED'}
 
 # ==================== 设置PBR解析器 ====================
@@ -396,7 +579,7 @@ class VIEW3D_OT_CrafterAddCrafterTime(bpy.types.Operator):
     def execute(self, context: bpy.types.Context):
         for object in context.selected_objects:
             if object.type == 'MESH':
-                add_C_time(object)
+                add_Crafter_time(object)
 
         return {'FINISHED'}
 class VIEW3D_OT_CrafterRemoveCrafterTime(bpy.types.Operator):
