@@ -110,7 +110,7 @@ BLENDER_EXE_PATH = "C:/Program Files/Blender Foundation/Blender 4.2/blender.exe"
 
 [![-blueish-](https://i2.hdslb.com/bfs/face/e7ebd5fd6c2267d6bab44a2e89b9d1671a818f13.jpg@100w_100h_1c_1s.png)](https://space.bilibili.com/3546391456516604)
 
-- 提供了视差节点 <未实装>
+- 提供了视差节点
 
 ---
 
