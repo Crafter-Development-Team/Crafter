@@ -74,7 +74,7 @@ BLENDER_EXE_PATH = "C:/Program Files/Blender Foundation/Blender 4.2/blender.exe"
 [![少年忠城/zhong_cheng](https://i0.hdslb.com/bfs/face/cca0a2997727b7c9625b6c84b79d75b1d20b0505.jpg@100w_100h_1c_1s.png)](https://space.bilibili.com/455309610)
 
 - python部分的大部分程序
-- 默认预设制作
+- 默认材质预设制作
 
 ---
 
