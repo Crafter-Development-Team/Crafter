@@ -350,12 +350,13 @@ class VIEW3D_OT_CrafterLoadParallax(bpy.types.Operator):
                 link_node_UV(node=node_tex_normal,node_UV=node_UV_base,info_moving=info_normal,links=links)
             else:
                 node_UV_normal = make_parallax_node(node=node_tex_normal,node_tex_normal=node_tex_normal,iterations=iterations,smooth=soomth,info_moving=info_normal,nodes=nodes,links=links)
-            if info_PBR == info_base:
-                link_node_UV(node=node_tex_PBR,node_UV=node_UV_base,info_moving=info_PBR,links=links)
-            elif info_PBR == info_normal:
-                link_node_UV(node=node_tex_PBR,node_UV=node_UV_normal,info_moving=info_PBR,links=links)
-            else:
-                make_parallax_node(node=node_tex_PBR,node_tex_normal=node_tex_normal,iterations=iterations,smooth=soomth,info_moving=info_PBR,nodes=nodes,links=links)
+            if node_tex_PBR != None:
+                if info_PBR == info_base:
+                    link_node_UV(node=node_tex_PBR,node_UV=node_UV_base,info_moving=info_PBR,links=links)
+                elif info_PBR == info_normal:
+                    link_node_UV(node=node_tex_PBR,node_UV=node_UV_normal,info_moving=info_PBR,links=links)
+                else:
+                    make_parallax_node(node=node_tex_PBR,node_tex_normal=node_tex_normal,iterations=iterations,smooth=soomth,info_moving=info_PBR,nodes=nodes,links=links)
             bpy.ops.crafter.set_parallax_depth()
             bpy.ops.crafter.set_parallax_iterations()
 
