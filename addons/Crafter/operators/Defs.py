@@ -625,3 +625,26 @@ def link_node_UV(node,node_UV,info_moving,links):
     else:
         links.new(output_UV, node.inputs["Vector"])
     return None
+
+def is_alpha_channel_all_one(image_node):
+    """
+    判断图像纹理节点的图像纹理的alpha通道是否全部为1。
+    
+    参数:
+        image_node (ShaderNodeTexImage): 图像纹理节点对象。
+        
+    返回:
+        bool: 如果所有alpha通道值都为1，则返回True；否则返回False。
+    """
+    if not image_node or image_node.type != 'TEX_IMAGE' or not image_node.image:
+        return False  # 确保提供了有效的图像纹理节点
+    
+    image = image_node.image
+    pixels = image.pixels[:]  # 获取像素数据（RGBA格式）
+
+    for i in range(0, len(pixels), 4):
+        alpha = pixels[i + 3]  # 提取alpha通道的值
+        if alpha < 1.0 - 1e-6:  # 使用一个小的容差来处理浮点精度问题
+            return False  # 发现非1的alpha值，直接返回False
+
+    return True  # 所有alpha值都是1

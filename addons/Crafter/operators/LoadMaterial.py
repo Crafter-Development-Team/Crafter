@@ -314,7 +314,7 @@ class VIEW3D_OT_CrafterLoadParallax(bpy.types.Operator):
             nodes = node_tree_material.nodes
             links = node_tree_material.links
             have_loaded_material = False
-
+            # 遍历并寻找关键节点
             nodes_wait_remove = []
             node_tex_base = None
             node_tex_normal = None
@@ -337,7 +337,11 @@ class VIEW3D_OT_CrafterLoadParallax(bpy.types.Operator):
                 continue
             if node_tex_base == None or node_tex_normal == None:# 若没有基础纹理或没有法向纹理，则跳过
                 continue
-            
+            # 查看法线贴图alpha是否存在视差信息
+            not_parallax = is_alpha_channel_all_one(node_tex_normal)
+            if not_parallax:
+                continue
+
             iterations = addon_prefs.Parallax_Iterations
             soomth = addon_prefs.Parallax_Smooth
 
