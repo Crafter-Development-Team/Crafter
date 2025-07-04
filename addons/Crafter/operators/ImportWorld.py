@@ -816,7 +816,7 @@ class VIEW3D_OT_CrafterBanGameResource(bpy.types.Operator):
         with open(dir_json_resourcepacks, "r", encoding="utf-8") as file:
             json_resourcepacks = json.load(file)
 
-        worldPath = addon_prefs.World_Path
+        worldPath = os.path.normpath(addon_prefs.World_Path)
         dir_saves = os.path.dirname(worldPath)
         use_list = json_resourcepacks[dir_saves][0].copy()
         unuse_list = json_resourcepacks[dir_saves][1].copy()
@@ -860,7 +860,7 @@ class VIEW3D_OT_CrafterUseGameResource(bpy.types.Operator):
         with open(dir_json_resourcepacks, "r", encoding="utf-8") as file:
             json_resourcepacks = json.load(file)
 
-        worldPath = addon_prefs.World_Path
+        worldPath = os.path.normpath(addon_prefs.World_Path)
         dir_saves = os.path.dirname(worldPath)
         use_list = json_resourcepacks[dir_saves][0].copy()
         unuse_list = json_resourcepacks[dir_saves][1].copy()
@@ -906,7 +906,7 @@ class VIEW3D_OT_CrafterUpGameResource(bpy.types.Operator):#提高 游戏资源�
         with open(dir_json_resourcepacks, "r", encoding="utf-8") as file:
             json_resourcepacks = json.load(file)
 
-        worldPath = addon_prefs.World_Path
+        worldPath = os.path.normpath(addon_prefs.World_Path)
         dir_saves = os.path.dirname(worldPath)
         target_name = addon_prefs.Game_Resources_List[addon_prefs.Game_Resources_List_index].name
         for i in range(len(json_resourcepacks[dir_saves][0])):
@@ -939,7 +939,7 @@ class VIEW3D_OT_CrafterDownGameResource(bpy.types.Operator):#降低 游戏资源
         with open(dir_json_resourcepacks, "r", encoding="utf-8") as file:
             json_resourcepacks = json.load(file)
 
-        worldPath = addon_prefs.World_Path
+        worldPath = os.path.normpath(addon_prefs.World_Path)
         dir_saves = os.path.dirname(worldPath)
         target_name = addon_prefs.Game_Resources_List[addon_prefs.Game_Resources_List_index].name
         for i in range(len(json_resourcepacks[dir_saves][0])):
