@@ -277,14 +277,18 @@ def add_node_moving_texture(node_tex, nodes, links):
                 node_Moving_texture.inputs["frametime"].default_value = frametime
         except:
             pass
+        try:
+            with open(dir_mcmeta, 'r', encoding='utf-8') as file:
+                mcmeta = json.load(file)
+                frametime = mcmeta["animation"]["interpolate"]
+                node_Moving_texture.inputs["interpolate"].default_value = frametime
+        except:
+            pass
         if not node_tex.image.size[0] == 0:
             node_Moving_texture.inputs["row"].default_value = node_tex.image.size[1] / node_tex.image.size[0]
         else:
             node_Moving_texture.inputs["row"].default_value = 1
         links.new(node_Moving_texture.outputs["Vector"], node_tex.inputs["Vector"])
-        node_UV = nodes.new("ShaderNodeTexCoord")
-        node_UV.location = node_tex.location.x - 400, node_tex.location.y
-        links.new(node_UV.outputs["UV"], node_Moving_texture.inputs["UV"])
         return node_Moving_texture
 
 def fuq_bl_dot_number(name: str):
@@ -534,15 +538,71 @@ def reload_Undivided_Vsersions(context: bpy.types.Context,dir_versions):#刷新�
             addon_prefs.Undivided_Vsersions_List_index = 0
     
 def node_moving_tex_info(node):
-    info = [False,None,None]
+    info = [False,None]
     if node == None:
         return info
     if len(node.inputs["Vector"].links) >0:
         info[0] = True
-        info[1] = node.inputs["Vector"].links[0].from_node.inputs["row"].default_value
-        info[2] = node.inputs["Vector"].links[0].from_node.inputs["frametime"].default_value
+        info[1] = node.inputs["Vector"].links[0].from_node
     return info
 
+def creat_parallax_node(node_tex_base, node_tex_normal, iterations, smooth, info_moving_normal, nodes, links):
+    # 创建框，方便清除
+    node_frame = nodes.new(type="NodeFrame")
+    location = [node_tex_base.location.x - 1000, node_tex_base.location.y]
+    node_frame.location = location
+    node_frame.label = "Crafter_Parallax"
+
+    move = 200
+    iterations = max(iterations, 1)
+    first = False
+    input_lates = []
+
+    if not info_moving_normal[0]:
+        node_tex_UV = nodes.new("ShaderNodeTexCoord")
+        node_tex_UV.parent = node_frame
+        output_cycleing_UV = node_tex_UV.outputs["UV"]
+        
+    while iterations > 0:
+        iterations -= 1
+        node_last = nodes.new("ShaderNodeGroup")
+        node_last.node_tree = bpy.data.node_groups["CP-Steep_Steps_last"]
+        node_last.location = location
+        location[0] -= move# location
+        node_last.parent = node_frame
+        for input in input_lates:
+            links.new(node_last.outputs["Current_Depth"], input)
+        if not first:
+            node_final_depth = node_last
+            first = True
+
+        node_height = nodes.new("ShaderNodeTexImage")
+        node_height.image = node_tex_normal.image
+        node_height.location = location
+        location[0] -= move# location
+        node_height.parent = node_frame
+        if smooth:
+            node_height.interpolation = "Linear"
+        else:
+            node_height.interpolation = "Closest"
+        links.new(node_height.outputs["Alpha"], node_last.inputs["Height"])
+
+        node_first = nodes.new("ShaderNodeGroup")
+        node_first.node_tree = bpy.data.node_groups["CP-Steep_Steps_first"]
+        node_first.location = location
+        location[0] -= move# location
+        node_first.parent = node_frame
+        links.new(node_first.outputs["Vector"], node_height.inputs["Vector"])
+        if info_moving_normal[0]:
+            links.new(info_moving_normal[1].outputs["Vector"], node_first.inputs["UV"])
+        else:
+            links.new(output_cycleing_UV, node_first.inputs["UV"])
+
+        input_lates = [node_first.inputs["Current_Depth"],node_last.inputs["Current_Depth"]]
+
+    if not info_moving_normal[0]:
+        node_tex_UV.location = (location[0], location[1] + 200)
+    return node_final_depth, node_frame
 def make_parallax_node(node,node_tex_normal,iterations,smooth,info_moving,nodes,links):
     node_frame = nodes.new(type="NodeFrame")
     location = [node.location.x - 1000, node.location.y]
