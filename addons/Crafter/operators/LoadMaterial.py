@@ -294,7 +294,7 @@ class VIEW3D_OT_CrafterLoadParallax(bpy.types.Operator):
             bpy.ops.object.mode_set(mode='OBJECT')
         bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
         # 导入CP-节点组
-        node_groups_use_fake_user = ["CP-Steep_Steps_first","CP-Steep_Steps_last","CP-Final_Parallax"]
+        node_groups_use_fake_user = ["CP-Steep_Steps_first","CP-Steep_Steps_last","CP-Final_Parallax","CP-Steep_Steps_first_moving","CP-Final_Parallax_moving"]
         with bpy.data.libraries.load(dir_blend_append, link=False) as (data_from, data_to):
             data_to.node_groups = [name for name in data_from.node_groups if name in node_groups_use_fake_user]
         for node_group in node_groups_use_fake_user:
