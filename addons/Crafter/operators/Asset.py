@@ -14,7 +14,7 @@ from ....common.i18n.i18n import i18n
 from bpy.props import *
 from .. import dir_cafter_data, dir_resourcepacks_plans, dir_blend_append, dir_init_main, dir_no_lod_blocks
 from .. import icons_world, icons_game_resource, icons_game_unuse_resource
-from .Defs import *
+from .dfs import *
 
 # ==================== UI切换至资产 ====================
 
