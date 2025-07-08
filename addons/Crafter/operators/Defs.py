@@ -556,7 +556,7 @@ def creat_parallax_node(node_tex_base, node_tex_normal, iterations, smooth, info
     node_frame.location = location
     node_frame.label = "Crafter_Parallax"
 
-    move = 200
+    move = 190
     iterations = max(iterations, 1)
     node_final_depth = None
     input_lates = []
@@ -600,88 +600,23 @@ def creat_parallax_node(node_tex_base, node_tex_normal, iterations, smooth, info
         input_lates = [node_first.inputs["Current_Depth"],node_last.inputs["Current_Depth"]]
 
     return node_final_depth, node_frame
-def make_parallax_node(node,node_tex_normal,iterations,smooth,info_moving,nodes,links):
-    node_frame = nodes.new(type="NodeFrame")
-    location = [node.location.x - 1000, node.location.y]
-    node_frame.location = location
-    node_frame.label = "Crafter_Parallax"
 
-    node_UV = nodes.new(type="ShaderNodeGroup")
-    node_UV.location = location
-    node_UV.parent = node_frame
-    move = 150
-    location[0] -= move# location
-    node_UV.node_tree = bpy.data.node_groups["CP-Final_Parallax"]
+def create_parallax_final(node, node_final_depth, node_frame, info_moving, nodes, links):
+    node_final = nodes.new("ShaderNodeGroup")
     if info_moving[0]:
-        node_Moving_texture = nodes.new(type="ShaderNodeGroup")
-        node_Moving_texture.node_tree = bpy.data.node_groups["Crafter-Moving_texture"]
-        node_Moving_texture.inputs["row"].default_value = info_moving[1]
-        node_Moving_texture.inputs["frametime"].default_value = info_moving[2]
-        node_Moving_texture.parent = node_frame
-        output_cycleing_UV = node_Moving_texture.outputs["Vector"]
-        links.new(node_Moving_texture.outputs["Vector"], node_UV.inputs["UV"])
-        node_tex_UV = nodes.new("ShaderNodeTexCoord")
-        node_tex_UV.parent = node_frame
-        links.new(node_tex_UV.outputs["UV"], node_Moving_texture.inputs["UV"])
+        node_final.node_tree = bpy.data.node_groups["CP-Final_Parallax_moving"]
+        node_final.inputs["row"].default_value = info_moving[1]
+        node_final.inputs["frametime"].default_value = info_moving[2]
+        node_final.inputs["interpolate"].default_value = info_moving[3]
     else:
-        node_tex_UV = nodes.new("ShaderNodeTexCoord")
-        node_tex_UV.parent = node_frame
-        output_cycleing_UV = node_tex_UV.outputs["UV"]
-        links.new(node_tex_UV.outputs["UV"], node_UV.inputs["UV"])
+        node_final.node_tree = bpy.data.node_groups["CP-Final_Parallax"]
+    node_final.location = node.location.x - 600, node.location.y
+    node_final.parent = node_frame
 
-    input_lates = [node_UV.inputs["Depth"]]
+    links.new(node_final_depth.outputs["Current_Depth"], node_final.inputs["Depth"])
+    links.new(node_final.outputs["UV"], node.inputs["Vector"])
 
-    while iterations > 0:
-        iterations -= 1
-        node_last = nodes.new("ShaderNodeGroup")
-        node_last.node_tree = bpy.data.node_groups["CP-Steep_Steps_last"]
-        node_last.location = location
-        location[0] -= move# location
-        node_last.parent = node_frame
-        for input in input_lates:
-            links.new(node_last.outputs["Current_Depth"], input)
-
-        node_height = nodes.new("ShaderNodeTexImage")
-        node_height.image = node_tex_normal.image
-        node_height.location = location
-        location[0] -= move# location
-        node_height.parent = node_frame
-        if smooth:
-            node_height.interpolation = "Linear"
-        else:
-            node_height.interpolation = "Closest"
-        links.new(node_height.outputs["Alpha"], node_last.inputs["Height"])
-
-        node_first = nodes.new("ShaderNodeGroup")
-        node_first.node_tree = bpy.data.node_groups["CP-Steep_Steps_first"]
-        node_first.location = location
-        location[0] -= move# location
-        node_first.parent = node_frame
-        links.new(node_first.outputs["Vector"], node_height.inputs["Vector"])
-        if info_moving[0]:
-            links.new(node_Moving_texture.outputs["Vector"], node_first.inputs["UV"])
-        else:
-            links.new(output_cycleing_UV, node_first.inputs["UV"])
-
-        input_lates = [node_first.inputs["Current_Depth"],node_last.inputs["Current_Depth"]]
-
-    
-    if info_moving[0]:
-        node_Moving_texture.location = (location[0], location[1] + 200)
-        node_tex_UV.location = (location[0] - move, location[1] + 200)
-    else:
-        node_tex_UV.location = (location[0] - move, location[1] + 200)
-
-    link_node_UV(node=node,node_UV=node_UV,info_moving=info_moving,links=links)
-    return node_UV
-
-def link_node_UV(node,node_UV,info_moving,links):
-    output_UV = node_UV.outputs["UV"]
-    if info_moving[0]:
-        links.new(output_UV, node.inputs["Vector"])
-    else:
-        links.new(output_UV, node.inputs["Vector"])
-    return None
+    return node_final
 
 def is_alpha_channel_all_one(image_node):
     """

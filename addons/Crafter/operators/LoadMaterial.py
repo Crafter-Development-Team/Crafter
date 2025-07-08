@@ -351,18 +351,18 @@ class VIEW3D_OT_CrafterLoadParallax(bpy.types.Operator):
 
             node_final_depth, node_frame = creat_parallax_node(node_tex_base=node_tex_base, node_tex_normal=node_tex_normal, iterations=iterations, smooth=smooth, info_moving_normal=info_normal, nodes=nodes, links=links)
 
-            # node_UV_base = make_parallax_node(node=node_tex_base,node_tex_normal=node_tex_normal,iterations=iterations,smooth=soomth,info_moving=info_base,nodes=nodes,links=links)
-            # if info_normal == info_base:
-            #     link_node_UV(node=node_tex_normal,node_UV=node_UV_base,info_moving=info_normal,links=links)
-            # else:
-            #     node_UV_normal = make_parallax_node(node=node_tex_normal,node_tex_normal=node_tex_normal,iterations=iterations,smooth=soomth,info_moving=info_normal,nodes=nodes,links=links)
-            # if node_tex_PBR != None:
-            #     if info_PBR == info_base:
-            #         link_node_UV(node=node_tex_PBR,node_UV=node_UV_base,info_moving=info_PBR,links=links)
-            #     elif info_PBR == info_normal:
-            #         link_node_UV(node=node_tex_PBR,node_UV=node_UV_normal,info_moving=info_PBR,links=links)
-            #     else:
-            #         make_parallax_node(node=node_tex_PBR,node_tex_normal=node_tex_normal,iterations=iterations,smooth=soomth,info_moving=info_PBR,nodes=nodes,links=links)
+            node_fianl_normal = create_parallax_final(node=node_tex_normal, node_final_depth=node_final_depth, node_frame=node_frame, info_moving=info_normal, nodes=nodes, links=links)
+            if info_base == info_normal:
+                links.new(node_fianl_normal.outputs["UV"], node_tex_base.inputs["Vector"])
+            else:
+                node_fianl_base = create_parallax_final(node=node_tex_base, node_final_depth=node_final_depth, node_frame=node_frame, info_moving=info_base, nodes=nodes, links=links)
+            if node_tex_PBR != None:
+                if info_PBR == info_normal:
+                    links.new(node_fianl_normal.outputs["UV"], node_tex_PBR.inputs["Vector"])
+                elif info_PBR == info_base:
+                    links.new(node_fianl_base.outputs["UV"], node_tex_PBR.inputs["Vector"])
+                else:
+                    create_parallax_final(node=node_tex_PBR, node_final_depth=node_final_depth, node_frame=node_frame, info_moving=info_PBR, nodes=nodes, links=links)
             bpy.ops.crafter.set_parallax_depth()
             bpy.ops.crafter.set_parallax_iterations()
 
@@ -589,6 +589,7 @@ class VIEW3D_OT_CrafterAddCrafterTime(bpy.types.Operator):
                 add_Crafter_time(object)
 
         return {'FINISHED'}
+
 class VIEW3D_OT_CrafterRemoveCrafterTime(bpy.types.Operator):
     bl_label = "Remove Crafter-time"
     bl_idname = "crafter.remove_craftertime"
