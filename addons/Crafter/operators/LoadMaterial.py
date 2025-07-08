@@ -6,7 +6,7 @@ from ..config import __addon_name__
 from ....common.i18n.i18n import i18n
 from bpy.props import *
 from ..__init__ import dir_cafter_data, dir_resourcepacks_plans, dir_materials, dir_classification_basis, dir_blend_append, dir_init_main
-from .dfs import *
+from .Defs import *
 
 # ==================== 加载材质 ====================
 
