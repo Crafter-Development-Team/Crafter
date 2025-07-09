@@ -372,6 +372,7 @@ class VIEW3D_OT_CrafterLoadParallax(bpy.types.Operator):
         return {'FINISHED'}
 
 # ==================== 去除视差 ====================
+
 class VIEW3D_OT_CrafterRemoveParallax(bpy.types.Operator):
     bl_label = "Remove Parallax"
     bl_idname = "crafter.remove_parallax"
@@ -410,9 +411,83 @@ class VIEW3D_OT_CrafterRemoveParallax(bpy.types.Operator):
                 continue
             nodes = node_tree_material.nodes
             links = node_tree_material.links
+
+            node_frame = None
+            nodes_wait_delete = []
+            for node in nodes:
+                if node.type == "FRAME":
+                    if node.label == "Crafter_Parallax":
+                        node_frame = node
+                        nodes_wait_delete.append(node)
+                        break
+            if node_frame != None:
+                for node in nodes:
+                    if node.parent == node_frame:
+                        nodes_wait_delete.append(node)
+                    elif node.type == "GROUP":
+                        if node.node_tree == None:
+                            nodes_wait_delete.append(node)
+            for node in nodes_wait_delete:
+                nodes.remove(node)
+
+            nodes_texture = []
+            nodes_moving = []
+            for node in nodes:
+                if node.type == "TEX_IMAGE":
+                    if node.image.name.endswith(".png"):
+                        nodes_texture.append(node)
+                if node.type == "GROUP":
+                    if node.node_tree.name == "Crafter-Moving_texture":
+                        nodes_moving.append(node)
+            for node in nodes_moving:
+                if len(nodes_texture) == 0:
+                    continue
+                xy = [node.location.x, node.location.y]
+                info_closest = [(((nodes_texture[0].location.x - xy[0]) ** 2) + ((nodes_texture[0].location.y - xy[1]) ** 2)) ** 0.5,nodes_texture[0]]
+                for i in range(1,len(nodes_texture)):
+                    distance = (((nodes_texture[i].location.x - xy[0]) ** 2) + ((nodes_texture[i].location.y - xy[1]) ** 2)) ** 0.5
+                    if info_closest[0] > distance:
+                        info_closest = [distance,nodes_texture[i]]
+                links.new(node.outputs["Vector"], info_closest[1].inputs["Vector"])
+
+                        
+
+            
         return {'FINISHED'}
-    
+
 # ==================== 设置视差迭代 ====================
+
+class VIEW3D_OT_CrafterSetParallax(bpy.types.Operator):
+    bl_label = "Parallax Setting"
+    bl_idname = "crafter.set_parallax"
+    bl_description = " "
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context: bpy.types.Context):
+        return True
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(self)
+    
+    def draw(self, context):
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
+
+        layout = self.layout
+
+        row1 = layout.row()
+        row1.prop(addon_prefs,"Parallax_Iterations",text="Iterations")
+
+        row2 = layout.row()
+        row2.prop(addon_prefs,"Parallax_Depth",text="Depth")
+
+        row3 = layout.row()
+        row3.prop(addon_prefs,"Parallax_Smooth",text="Smooth")
+        
+    def execute(self, context):
+        return {"FINISHED"}
+# ==================== 设置视差迭代 ====================
+
 class VIEW3D_OT_CrafterSetParallaxIterations(bpy.types.Operator):
     bl_label = "Set Parallax Iterations"
     bl_idname = "crafter.set_parallax_iterations"
@@ -434,6 +509,7 @@ class VIEW3D_OT_CrafterSetParallaxIterations(bpy.types.Operator):
         return {'FINISHED'}
 
 # ==================== 设置视差深度 ====================
+
 class VIEW3D_OT_CrafterSetParallaxDepth(bpy.types.Operator):
     bl_label = "Set Parallax Depth"
     bl_idname = "crafter.set_parallax_depth"
