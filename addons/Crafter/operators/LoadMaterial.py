@@ -266,6 +266,7 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):
         # 添加选中物体的材质到合集
         for obj in context.selected_objects:
             if obj.type == "MESH":
+                add_to_mcmts_collection(object=obj,context=context)
                 add_to_crafter_mcmts_collection(object=obj,context=context)
                 add_Crafter_time(obj=obj)
                 
