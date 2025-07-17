@@ -117,11 +117,20 @@ def register():
 
 # ========== 注销 ==========
 def unregister():
-    # 注销icon
-    bpy.utils.previews.remove(icons_world)
-    bpy.utils.previews.remove(icons_game_resource)
-    bpy.utils.previews.remove(icons_game_unuse_resource)
-    bpy.utils.previews.remove(icons_plan_resource)
+    # 注销图标预览资源，但先检查它们是否已经被正确加载
+        # if hasattr(...) | 检查该图标对象是否具有 _uuid 属性（表示它曾被初始化） 
+        # and ... in bpy.utils.previews._uuid_open | 确保该 _uuid 当前存在于 Blender 的预览资源池中，避免尝试删除一个已经释放的对象
+    if hasattr(icons_world, '_uuid') and icons_world._uuid in bpy.utils.previews._uuid_open:
+        bpy.utils.previews.remove(icons_world)
+    
+    if hasattr(icons_game_resource, '_uuid') and icons_game_resource._uuid in bpy.utils.previews._uuid_open:
+        bpy.utils.previews.remove(icons_game_resource)
+    
+    if hasattr(icons_game_unuse_resource, '_uuid') and icons_game_unuse_resource._uuid in bpy.utils.previews._uuid_open:
+        bpy.utils.previews.remove(icons_game_unuse_resource)
+
+    if hasattr(icons_plan_resource, '_uuid') and icons_plan_resource._uuid in bpy.utils.previews._uuid_open:
+        bpy.utils.previews.remove(icons_plan_resource)
     # Internationalization
     bpy.app.translations.unregister(__addon_name__)
     # unRegister classes
