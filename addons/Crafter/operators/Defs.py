@@ -19,6 +19,7 @@ from..properties import dirs_temp
 
 donot = ["Crafter Materials Settings"]
 len_color_jin = 21
+name_library = "Crafter"
 
 
 def load_icon_from_zip(zip_path, icons, name_icons, index):

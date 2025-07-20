@@ -36,3 +36,29 @@ class VIEW3D_OT_CrafterUIAsset(bpy.types.Operator):
 
 
         return {'FINISHED'}
+
+# ==================== 注册资产库 ====================
+
+class VIEW3D_OT_CrafterBuildAssetLibrary(bpy.types.Operator):
+    bl_label = "Build Asset Library"
+    bl_idname = "crafter.build_asset_library"
+    bl_description = " "
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context: bpy.types.Context):
+        return True
+
+    def execute(self, context: bpy.types.Context):
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
+        libraries = bpy.context.preferences.filepaths.asset_libraries
+
+        for lib in libraries:
+            if lib.name == name_library:
+                return {'FINISHED'}
+        for lib in libraries:
+            print(lib.name)
+        lib_crafter = libraries.new(name=name_library)
+        # lib_crafter.path = os.path.join(get_dir_save(context), "Crafter_Library")
+            
+        return {'FINISHED'}

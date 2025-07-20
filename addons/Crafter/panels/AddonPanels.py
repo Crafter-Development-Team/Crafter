@@ -152,6 +152,9 @@ class VIEW3D_PT_CrafterOthers(bpy.types.Panel):
         
         if addon_prefs.Other_index == 0:
             row_Asset = layout.row()
+
+            row_Asset.operator("crafter.build_asset_library",text="Replace Resources",icon="NODE_COMPOSITING")
+            
             
         # ========== 加载资源包面板 ==========
         if addon_prefs.Other_index == 1:

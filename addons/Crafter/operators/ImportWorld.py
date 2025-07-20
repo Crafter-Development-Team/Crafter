@@ -885,7 +885,6 @@ class VIEW3D_OT_CrafterUseGameResource(bpy.types.Operator):
         return {'FINISHED'}
 
 
-
 # ==================== 游戏资源包优先级 ====================
 
 class VIEW3D_OT_CrafterUpGameResource(bpy.types.Operator):#提高 游戏资源包 优先级
