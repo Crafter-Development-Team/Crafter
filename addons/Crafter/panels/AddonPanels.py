@@ -49,7 +49,11 @@ class VIEW3D_PT_CrafterImportWorld(bpy.types.Panel):
         row_XYZ1.prop(addon_prefs, "XYZ_1",text="")
         row_XYZ2 = box.row()
         row_XYZ2.prop(addon_prefs, "XYZ_2",text="")
-        
+
+        # 添加地图选择器按钮
+        row_map_selector = box.row()
+        row_map_selector.operator("crafter.map_selector", text="打开选择器", icon="WORLD")
+
         row_setting = box.row()
         # row_setting.prop(addon_prefs, "Point_Cloud_Mode")
         # row_setting.operator("crafter.use_history_worlds",icon="TIME",text="")
