@@ -526,9 +526,13 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
                     else:
                         node_tex_base = node
                         node.interpolation = "Closest"
+                elif node.type == "BSDF_PRINCIPLED":
+                    node_principled = node
             for node in nodes_wait_remove:
                 nodes.remove(node)
-            #添加群系着色纹理,PBR、法线纹理
+            # 连接Alpha
+            links.new(node_tex_base.outputs["Alpha"], node_principled.inputs["Alpha"])
+            # 添加群系着色纹理,PBR、法线纹理
             node_liomeTex = nodes.new("ShaderNodeGroup")
             node_liomeTex.location = (node_output_EEVEE.location.x - 400, node_output_EEVEE.location.y - 550)
             node_liomeTex.node_tree = node_group_biomeTex_copy
@@ -540,6 +544,12 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         except Exception as e:
             print(e)
             
+        if addon_prefs.Auto_Load_Material:
+            material_start_time = time.perf_counter()
+            bpy.ops.crafter.load_material()
+            material_used_time = time.perf_counter() - material_start_time
+            report_text = report_text + i18n(", Material time: ") + str(material_used_time)[:6] + "s"
+
         #完成导入
         world_imported_time = time.perf_counter()
         #定位到视图
@@ -547,8 +557,8 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         for object in new_objects:
             if object.type == "MESH":
                 object.select_set(True)
-        view_2_active_object(context)
-                            
+        view_2_active_object(context)   
+
         #保存历史世界
         dir_json_history_worlds = os.path.join(dir_cafter_data, "history_worlds.json")
         #读取json，若不存在则创建一个空的json文件
@@ -627,12 +637,6 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         context.scene.Crafter_import_time += 1
 
         report_text = i18n("Import time: ") + str(world_imported_time - prepared_time)[:6] + "s"
-
-        if addon_prefs.Auto_Load_Material:
-            material_start_time = time.perf_counter()
-            bpy.ops.crafter.load_material()
-            material_used_time = time.perf_counter() - material_start_time
-            report_text = report_text + i18n(", Material time: ") + str(material_used_time)[:6] + "s"
 
         self.report({'INFO'},report_text)
 

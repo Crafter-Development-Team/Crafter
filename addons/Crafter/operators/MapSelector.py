@@ -5,7 +5,10 @@ import json
 import tempfile
 import threading
 import time
+
+from ..config import __addon_name__
 from bpy.props import *
+from .Defs import *
 
 # 地图选择器操作符
 class VIEW3D_OT_CrafterMapSelector(bpy.types.Operator):
@@ -22,42 +25,33 @@ class VIEW3D_OT_CrafterMapSelector(bpy.types.Operator):
     def execute(self, context):
         self.report({'INFO'}, "启动地图选择器...")
         
-        # 获取Crafter插件的preferences
-        try:
-            addon_prefs = None
-            for addon_name in context.preferences.addons.keys():
-                if "Crafter" in addon_name:
-                    addon_prefs = context.preferences.addons[addon_name].preferences
-                    break
-            
-            if not addon_prefs:
-                self.report({'ERROR'}, "找不到Crafter插件设置")
-                return {'CANCELLED'}
-                
-            world_path = getattr(addon_prefs, 'World_Path', None)
-            
-        except Exception as e:
-            self.report({'ERROR'}, f"无法访问Crafter插件设置: {str(e)}")
-            return {'CANCELLED'}
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
+
+        #获取世界路径，检测路径合法性
+        bpy.ops.crafter.reload_all()
+        bpy.ops.crafter.reload_resources()
+        worldPath = os.path.normpath(addon_prefs.World_Path)
+        dir_saves = os.path.dirname(worldPath)
+        dir_level_dat = os.path.join(worldPath, "level.dat")
+        if not os.path.exists(dir_level_dat):
+            self.report({'ERROR'}, "It's not a world path!")
+            return {"CANCELLED"}
         
-        # 检查世界路径
-        if not world_path:
-            self.report({'ERROR'}, "请先在上方输入框中设置世界路径")
-            return {'CANCELLED'}
-            
-        if not os.path.exists(world_path):
-            self.report({'ERROR'}, f"世界路径不存在: {world_path}")
-            return {'CANCELLED'}
-        
-        self.report({'INFO'}, f"使用世界路径: {world_path}")
+        dir_jar_resource = ""
+        addon_prefs.is_Game_Path = True
+        #计算游戏文件路径
+        dir_saves = os.path.dirname(worldPath)
+        dir_back_saves = os.path.dirname(dir_saves)
+
+        if not os.path.basename(dir_back_saves) == ".minecraft":# 判断是否开启版本隔离
+            dir_version = dir_back_saves_2_dir_version(dir_back_saves)
+            dir_jar_resource = dir_version_2_dir_jar(dir_version)
+
+        self.report({'INFO'}, f"使用世界路径: {worldPath}")
 
         # JAR文件路径 - 动态获取插件目录
-        addon_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        jar_path = os.path.join(addon_dir, "importer", "minecraft-map-selector-1.0.0.jar")
-
-        print(f"Debug: addon_dir = {addon_dir}")
-        print(f"Debug: jar_path = {jar_path}")
-        print(f"Debug: jar exists = {os.path.exists(jar_path)}")
+        dir_importer = os.path.join(dir_init_main, "importer")
+        jar_path = os.path.join(dir_importer, "minecraft-map-selector-1.0.0.jar")
 
         if not os.path.exists(jar_path):
             self.report({'ERROR'}, f"找不到地图选择器JAR文件: {jar_path}")
@@ -92,7 +86,8 @@ class VIEW3D_OT_CrafterMapSelector(bpy.types.Operator):
             # 构建命令
             cmd = [
                 "java", "-jar", jar_path,
-                "--world-path", world_path,
+                "--world-path", worldPath,
+                # "--jar-path", dir_jar_resource,
                 "--output-file", coord_file,
                 "--min-y", str(min_y),
                 "--max-y", str(max_y)
@@ -123,18 +118,13 @@ class VIEW3D_OT_CrafterMapSelector(bpy.types.Operator):
                                     coords = json.load(f)
                                 
                                 # 更新Blender中的坐标
-                                def update_coords():
-                                    addon_prefs.XYZ_1 = (coords['minX'], coords['minY'], coords['minZ'])
-                                    addon_prefs.XYZ_2 = (coords['maxX'], coords['maxY'], coords['maxZ'])
-                                    
-                                    # 强制刷新UI
-                                    for area in bpy.context.screen.areas:
-                                        area.tag_redraw()
-                                    
-                                    print(f"坐标已更新: XYZ_1={addon_prefs.XYZ_1}, XYZ_2={addon_prefs.XYZ_2}")
+                                addon_prefs.XYZ_1 = (coords['minX'], coords['minY'], coords['minZ'])
+                                addon_prefs.XYZ_2 = (coords['maxX'], coords['maxY'], coords['maxZ'])
                                 
-                                # 在主线程中更新坐标
-                                bpy.app.timers.register(update_coords, first_interval=0.1)
+                                # 强制刷新UI
+                                reloadwindow()
+                                print(f"坐标已更新: XYZ_1={addon_prefs.XYZ_1}, XYZ_2={addon_prefs.XYZ_2}")
+                                
                                 
                                 # 清理临时文件
                                 os.remove(coord_file)
