@@ -161,30 +161,3 @@ class VIEW3D_OT_CrafterMapSelector(bpy.types.Operator):
         except Exception as e:
             self.report({'ERROR'}, f"启动地图选择器失败: {str(e)}")
             return {'CANCELLED'}
-
-# 注册类
-classes = [
-    VIEW3D_OT_CrafterMapSelector,
-]
-
-def register():
-    for cls in classes:
-        try:
-            bpy.utils.register_class(cls)
-        except ValueError:
-            # 类已经注册，先注销再注册
-            try:
-                bpy.utils.unregister_class(cls)
-                bpy.utils.register_class(cls)
-            except:
-                pass
-
-def unregister():
-    for cls in reversed(classes):
-        try:
-            bpy.utils.unregister_class(cls)
-        except:
-            pass
-
-if __name__ == "__main__":
-    register()
