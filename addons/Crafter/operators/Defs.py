@@ -90,7 +90,8 @@ def dir_version_2_dir_jar(dir_version):
     if name_versions == "Instances":
         list_floder_version = os.listdir(dir_version)
         if ("instance.cfg" in list_floder_version) and ("mmc-pack.json" in list_floder_version):
-             dir_jar = dir_version
+            
+            dir_jar = dir_version# 暂未支持prime laucher（似乎与官方启动器使用同样的jar存储方式）
         else:
             dir_json_Instance = os.path.join(dir_version, "minecraftinstance.json")
             with open(dir_json_Instance, "r", encoding="utf-8") as file:
