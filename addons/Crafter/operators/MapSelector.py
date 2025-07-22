@@ -47,6 +47,12 @@ class VIEW3D_OT_CrafterMapSelector(bpy.types.Operator):
             dir_version = dir_back_saves_2_dir_version(dir_back_saves)
             dir_jar_resource = dir_version_2_dir_jar(dir_version)
 
+        # 检查JAR文件是否存在
+        if dir_jar_resource and os.path.exists(dir_jar_resource):
+            self.report({'INFO'}, f"找到Minecraft JAR文件: {dir_jar_resource}")
+        else:
+            self.report({'WARNING'}, "未找到Minecraft JAR文件，将使用默认颜色")
+
         self.report({'INFO'}, f"使用世界路径: {worldPath}")
 
         # JAR文件路径 - 动态获取插件目录
@@ -87,14 +93,19 @@ class VIEW3D_OT_CrafterMapSelector(bpy.types.Operator):
             cmd = [
                 "java", "-jar", jar_path,
                 "--world-path", worldPath,
-                # "--jar-path", dir_jar_resource,
                 "--output-file", coord_file,
                 "--min-y", str(min_y),
                 "--max-y", str(max_y)
             ]
+
+            # 如果找到了JAR文件，添加JAR路径参数
+            if dir_jar_resource and os.path.exists(dir_jar_resource):
+                cmd.extend(["--jar-path", dir_jar_resource])
             
             print(f"传递Y坐标范围: {min_y} 到 {max_y}")
-            
+            if dir_jar_resource and os.path.exists(dir_jar_resource):
+                print(f"传递JAR路径: {dir_jar_resource}")
+
             self.report({'INFO'}, "正在启动地图选择器...")
             
             # 在后台线程中启动进程
