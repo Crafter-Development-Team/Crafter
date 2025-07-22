@@ -548,11 +548,17 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             material_start_time = time.perf_counter()
             bpy.ops.crafter.load_material()
             material_used_time = time.perf_counter() - material_start_time
+
+        # 完成导入计时
+        world_imported_time = time.perf_counter()
+        report_text = i18n("Import time: ") + str(world_imported_time - prepared_time)[:6] + "s"
+        if addon_prefs.Auto_Load_Material:
+            material_start_time = time.perf_counter()
+            bpy.ops.crafter.load_material()
+            material_used_time = time.perf_counter() - material_start_time
             report_text = report_text + i18n(", Material time: ") + str(material_used_time)[:6] + "s"
 
-        #完成导入
-        world_imported_time = time.perf_counter()
-        #定位到视图
+        # 定位到视图
         new_objects = list(set(bpy.data.objects) - before_objects)
         for object in new_objects:
             if object.type == "MESH":
@@ -635,8 +641,6 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         addon_prefs.History_World_Settings_List_index = 0
         #增加Crafter_import_time计数
         context.scene.Crafter_import_time += 1
-
-        report_text = i18n("Import time: ") + str(world_imported_time - prepared_time)[:6] + "s"
 
         self.report({'INFO'},report_text)
 
