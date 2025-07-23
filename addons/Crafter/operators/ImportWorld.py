@@ -6,7 +6,11 @@ import json
 import shutil
 import sys
 import ctypes
-from ctypes import wintypes
+import platform
+
+# 只在Windows上导入wintypes
+if platform.system() == "Windows":
+    from ctypes import wintypes
 from ..nbt import nbt
 
 from ..config import __addon_name__
@@ -390,14 +394,23 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             "solid": 0,
         }
 
-        dir_config = os.path.join(dir_importer, "config")
+        # 根据平台选择配置目录和可执行文件
+        current_platform = platform.system()
+        if current_platform == "Darwin":  # macOS
+            dir_config = os.path.join(dir_importer, "config_macos")
+            dir_exe_importer = os.path.join(dir_importer, "WorldImporter")
+        else:  # Windows和其他平台
+            dir_config = os.path.join(dir_importer, "config")
+            dir_exe_importer = os.path.join(dir_importer, "WorldImporter.exe")
+
+        # 确保配置目录存在
+        if not os.path.exists(dir_config):
+            os.makedirs(dir_config)
+
         dir_json_config = os.path.join(dir_config, "config.json")
 
         with open(dir_json_config, 'w', encoding='utf-8') as config:
             json.dump(worldconfig, config, indent=4)
-
-        #删去之前导出的obj
-        dir_exe_importer = os.path.join(dir_importer, "WorldImporter.exe")
         for file in os.listdir(dir_importer):
             if file.endswith(".obj"):
                 os.remove(os.path.join(dir_importer, file))
@@ -544,21 +557,18 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         except Exception as e:
             print(e)
             
+        # 初始化报告文本
+        report_text = ""
+
         if addon_prefs.Auto_Load_Material:
             material_start_time = time.perf_counter()
             bpy.ops.crafter.load_material()
             material_used_time = time.perf_counter() - material_start_time
+            report_text = i18n("Material time: ") + str(material_used_time)[:6] + "s"
 
-        # 完成导入计时
+        #完成导入
         world_imported_time = time.perf_counter()
-        report_text = i18n("Import time: ") + str(world_imported_time - prepared_time)[:6] + "s"
-        if addon_prefs.Auto_Load_Material:
-            material_start_time = time.perf_counter()
-            bpy.ops.crafter.load_material()
-            material_used_time = time.perf_counter() - material_start_time
-            report_text = report_text + i18n(", Material time: ") + str(material_used_time)[:6] + "s"
-
-        # 定位到视图
+        #定位到视图
         new_objects = list(set(bpy.data.objects) - before_objects)
         for object in new_objects:
             if object.type == "MESH":
@@ -641,6 +651,12 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         addon_prefs.History_World_Settings_List_index = 0
         #增加Crafter_import_time计数
         context.scene.Crafter_import_time += 1
+
+        import_time_text = i18n("Import time: ") + str(world_imported_time - prepared_time)[:6] + "s"
+        if report_text:
+            report_text = import_time_text + ", " + report_text
+        else:
+            report_text = import_time_text
 
         self.report({'INFO'},report_text)
 
