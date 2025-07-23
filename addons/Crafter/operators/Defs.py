@@ -9,7 +9,9 @@ import ctypes
 import tempfile
 import textwrap
 
-from ctypes import wintypes
+# 只在Windows上导入wintypes
+if platform.system() == "Windows":
+    from ctypes import wintypes
 
 from ..config import __addon_name__
 from ....common.i18n.i18n import i18n
@@ -162,61 +164,172 @@ def draw_multiline_label( text, parent,context):
     for line in lines:
         parent.label(text=line)
 
-def run_as_admin_and_wait(exe_path, work_dir=None,shell = False):
-    # 定义SHELLEXECUTEINFOW结构体
-    class SHELLEXECUTEINFOW(ctypes.Structure):
-        _fields_ = [
-            ("cbSize", wintypes.DWORD),
-            ("fMask", ctypes.c_ulong),
-            ("hwnd", wintypes.HWND),
-            ("lpVerb", wintypes.LPCWSTR),
-            ("lpFile", wintypes.LPCWSTR),
-            ("lpParameters", wintypes.LPCWSTR),
-            ("lpDirectory", wintypes.LPCWSTR),
-            ("nShow", ctypes.c_int),
-            ("hInstApp", wintypes.HINSTANCE),
-            ("lpIDList", ctypes.c_void_p),
-            ("lpClass", wintypes.LPCWSTR),
-            ("hKeyClass", wintypes.HKEY),
-            ("dwHotKey", wintypes.DWORD),
-            ("hIcon", wintypes.HANDLE),
-            ("hProcess", wintypes.HANDLE)
-        ]
+def run_as_admin_and_wait(exe_path, work_dir=None, shell=False):
+    """
+    跨平台运行可执行文件并等待完成
+    Windows: 使用管理员权限运行
+    macOS/Linux: 使用普通权限运行
+    """
+    current_platform = platform.system()
+    print(f"[DEBUG] Platform detected: {current_platform}")
+    print(f"[DEBUG] Executable path: {exe_path}")
+    print(f"[DEBUG] Working directory: {work_dir}")
 
-    # 配置结构体参数
-    sei = SHELLEXECUTEINFOW()
-    sei.cbSize = ctypes.sizeof(SHELLEXECUTEINFOW)
-    sei.fMask = 0x00000040  # SEE_MASK_NOCLOSEPROCESS
-    sei.lpVerb = 'runas'    # 管理员权限
-    sei.lpFile = exe_path.replace("\\", "\\\\")  # 处理Windows路径转义
-    sei.lpDirectory = work_dir.replace("\\", "\\\\") if work_dir else None
-    sei.nShow = shell  # SW_SHOWNORMAL
+    if current_platform == "Windows":
+        print("[DEBUG] Using Windows execution path")
+        return _run_windows_admin(exe_path, work_dir, shell)
+    elif current_platform == "Darwin":  # macOS
+        print("[DEBUG] Using macOS execution path")
+        return _run_macos(exe_path, work_dir, shell)
+    else:  # Linux或其他Unix系统
+        print(f"[DEBUG] Using Unix execution path for {current_platform}")
+        return _run_unix(exe_path, work_dir, shell)
 
-    # 调用ShellExecuteExW
-    if not ctypes.windll.shell32.ShellExecuteExW(ctypes.byref(sei)):
-        error_code = ctypes.GetLastError()
-        error_msg = ctypes.FormatError(error_code)
+def _run_windows_admin(exe_path, work_dir=None, shell=False):
+    """Windows平台使用管理员权限运行"""
+    # 只在Windows平台上执行
+    if platform.system() != "Windows":
         return False
 
-    # 等待进程结束
-    WAIT_TIMEOUT = 0x00000102
-    WAIT_OBJECT_0 = 0x0
-    while True:
-        wait_result = ctypes.windll.kernel32.WaitForSingleObject(sei.hProcess, 100)  # 100ms间隔
-        if wait_result == WAIT_OBJECT_0:
-            break
-        elif wait_result == WAIT_TIMEOUT:
-            continue
-        else:
-            ctypes.windll.kernel32.CloseHandle(sei.hProcess)
+    try:
+        # 确保wintypes可用
+        if 'wintypes' not in globals():
+            from ctypes import wintypes
+
+        # 定义SHELLEXECUTEINFOW结构体
+        class SHELLEXECUTEINFOW(ctypes.Structure):
+            _fields_ = [
+                ("cbSize", wintypes.DWORD),
+                ("fMask", ctypes.c_ulong),
+                ("hwnd", wintypes.HWND),
+                ("lpVerb", wintypes.LPCWSTR),
+                ("lpFile", wintypes.LPCWSTR),
+                ("lpParameters", wintypes.LPCWSTR),
+                ("lpDirectory", wintypes.LPCWSTR),
+                ("nShow", ctypes.c_int),
+                ("hInstApp", wintypes.HINSTANCE),
+                ("lpIDList", ctypes.c_void_p),
+                ("lpClass", wintypes.LPCWSTR),
+                ("hKeyClass", wintypes.HKEY),
+                ("dwHotKey", wintypes.DWORD),
+                ("hIcon", wintypes.HANDLE),
+                ("hProcess", wintypes.HANDLE)
+            ]
+
+        # 配置结构体参数
+        sei = SHELLEXECUTEINFOW()
+        sei.cbSize = ctypes.sizeof(SHELLEXECUTEINFOW)
+        sei.fMask = 0x00000040  # SEE_MASK_NOCLOSEPROCESS
+        sei.lpVerb = 'runas'    # 管理员权限
+        sei.lpFile = exe_path.replace("\\", "\\\\")  # 处理Windows路径转义
+        sei.lpDirectory = work_dir.replace("\\", "\\\\") if work_dir else None
+        sei.nShow = shell  # SW_SHOWNORMAL
+
+        # 调用ShellExecuteExW
+        if not ctypes.windll.shell32.ShellExecuteExW(ctypes.byref(sei)):
+            error_code = ctypes.GetLastError()
+            error_msg = ctypes.FormatError(error_code)
             return False
 
-    # 获取退出码
-    exit_code = wintypes.DWORD()
-    ctypes.windll.kernel32.GetExitCodeProcess(sei.hProcess, ctypes.byref(exit_code))
-    ctypes.windll.kernel32.CloseHandle(sei.hProcess)
-    
-    return exit_code.value == 0, 
+        # 等待进程结束
+        WAIT_TIMEOUT = 0x00000102
+        WAIT_OBJECT_0 = 0x0
+        while True:
+            wait_result = ctypes.windll.kernel32.WaitForSingleObject(sei.hProcess, 100)  # 100ms间隔
+            if wait_result == WAIT_OBJECT_0:
+                break
+            elif wait_result == WAIT_TIMEOUT:
+                continue
+            else:
+                ctypes.windll.kernel32.CloseHandle(sei.hProcess)
+                return False
+
+        # 获取退出码
+        exit_code = wintypes.DWORD()
+        ctypes.windll.kernel32.GetExitCodeProcess(sei.hProcess, ctypes.byref(exit_code))
+        ctypes.windll.kernel32.CloseHandle(sei.hProcess)
+
+        return exit_code.value == 0
+
+    except Exception as e:
+        print(f"Windows execution error: {e}")
+        return False
+
+def _run_macos(exe_path, work_dir=None, shell=False):
+    """macOS平台运行"""
+    try:
+        # 检查是否是Windows可执行文件，如果是则替换为macOS版本
+        if exe_path.endswith("WorldImporter.exe"):
+            macos_exe_path = exe_path.replace("WorldImporter.exe", "WorldImporter")
+            if os.path.exists(macos_exe_path):
+                exe_path = macos_exe_path
+                print("macOS")  # 输出给Blender
+            else:
+                print(f"macOS executable not found: {macos_exe_path}")
+                return False
+
+        print(f"[DEBUG] Final executable path: {exe_path}")
+        print(f"[DEBUG] Working directory: {work_dir}")
+
+        # 检查配置文件是否存在
+        config_path = os.path.join(work_dir, "config_macos", "config.json")
+        print(f"[DEBUG] Expected config path: {config_path}")
+        if os.path.exists(config_path):
+            print(f"[DEBUG] Config file exists and size: {os.path.getsize(config_path)} bytes")
+        else:
+            print(f"[DEBUG] Config file does not exist!")
+
+        # 使用subprocess运行程序
+        process = subprocess.Popen(
+            [exe_path],
+            cwd=work_dir,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+
+        # 等待进程完成
+        stdout, stderr = process.communicate()
+
+        # 打印输出（可选）
+        if stdout:
+            print("=== STDOUT ===")
+            print(stdout.decode('utf-8'))
+        if stderr:
+            print("=== STDERR ===")
+            print(stderr.decode('utf-8'))
+
+        print(f"[DEBUG] Process return code: {process.returncode}")
+        return process.returncode == 0
+
+    except Exception as e:
+        print(f"macOS execution error: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+def _run_unix(exe_path, work_dir=None, shell=False):
+    """Unix/Linux平台运行"""
+    try:
+        process = subprocess.Popen(
+            [exe_path],
+            cwd=work_dir,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+
+        stdout, stderr = process.communicate()
+
+        if stdout:
+            print(stdout.decode('utf-8'))
+        if stderr:
+            print(stderr.decode('utf-8'))
+
+        return process.returncode == 0
+
+    except Exception as e:
+        print(f"Unix execution error: {e}")
+        return False
+
 
 def open_folder(folder_path: str):
     '''
