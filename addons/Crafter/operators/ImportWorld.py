@@ -1179,11 +1179,14 @@ class VIEW3D_OT_CrafterReloadLatestWorldsList(bpy.types.Operator):#刷新 最近
 
     def execute(self, context: bpy.types.Context):
         addon_prefs = context.preferences.addons[__addon_name__].preferences
-
         bpy.ops.crafter.reload_history_worlds_list()
 
         dir_json_latest_worlds = os.path.join(dir_cafter_data, "latest_worlds.json")
+        if not os.path.exists(dir_json_latest_worlds):
+            return {"FINISHED"}
         with open(dir_json_latest_worlds, 'r', encoding='utf-8') as file:
+        if not os.path.exists(dir_json_history_worlds):
+            return {"FINISHED"}
             json_latest_worlds = json.load(file)
         
         addon_prefs.Latest_World_List.clear()
@@ -1241,6 +1244,8 @@ class VIEW3D_OT_CrafterReloadHistoryWorldsList(bpy.types.Operator):#刷新 历�
         addon_prefs = context.preferences.addons[__addon_name__].preferences
 
         dir_json_history_worlds = os.path.join(dir_cafter_data, "history_worlds.json")
+        if not os.path.exists(dir_json_history_worlds):
+            return {"FINISHED"}
         with open(dir_json_history_worlds, 'r', encoding='utf-8') as file:
             json_history_worlds = json.load(file)
 
