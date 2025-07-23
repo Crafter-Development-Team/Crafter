@@ -12,6 +12,8 @@ import textwrap
 # 只在Windows上导入wintypes
 if platform.system() == "Windows":
     from ctypes import wintypes
+    print("[DEBUG] Windows")
+
 
 from ..config import __addon_name__
 from ....common.i18n.i18n import i18n
@@ -192,10 +194,6 @@ def _run_windows_admin(exe_path, work_dir=None, shell=False):
         return False
 
     try:
-        # 确保wintypes可用
-        if 'wintypes' not in globals():
-            from ctypes import wintypes
-
         # 定义SHELLEXECUTEINFOW结构体
         class SHELLEXECUTEINFOW(ctypes.Structure):
             _fields_ = [
