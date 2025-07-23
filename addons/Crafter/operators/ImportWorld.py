@@ -544,7 +544,8 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             for node in nodes_wait_remove:
                 nodes.remove(node)
             # 连接Alpha
-            links.new(node_tex_base.outputs["Alpha"], node_principled.inputs["Alpha"])
+            if node_tex_base != None:
+                links.new(node_tex_base.outputs["Alpha"], node_principled.inputs["Alpha"])
             # 添加群系着色纹理,PBR、法线纹理
             node_liomeTex = nodes.new("ShaderNodeGroup")
             node_liomeTex.location = (node_output_EEVEE.location.x - 400, node_output_EEVEE.location.y - 550)
