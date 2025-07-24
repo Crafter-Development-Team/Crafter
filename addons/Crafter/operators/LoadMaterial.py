@@ -53,10 +53,7 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):
         for node_group in node_groups_use_fake_user:
             bpy.data.node_groups[node_group].use_fake_user = True
         # 导入Crafter-Moving_texture节点组
-        if not "Crafter-Moving_texture" in bpy.data.node_groups:# 若不存在则导入Crafter-Moving_texture节点组
-            with bpy.data.libraries.load(dir_blend_append, link=False) as (data_from, data_to):
-                data_to.node_groups = ["Crafter-Moving_texture"]
-            bpy.data.node_groups["Crafter-Moving_texture"].use_fake_user = True
+        add_node_group_if_not_exists(names_Crafter_Moving_texture)
         # 导入Crafter Materials Settings物体、材质、startswith(CI-)
         blend_material_dir = os.path.join(dir_materials, addon_prefs.Materials_List[addon_prefs.Materials_List_index].name + ".blend")
         with bpy.data.libraries.load(blend_material_dir, link=False) as (data_from, data_to):

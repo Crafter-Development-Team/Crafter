@@ -24,6 +24,7 @@ from..properties import dirs_temp
 donot = ["Crafter Materials Settings"]
 len_color_jin = 21
 name_library = "Crafter"
+names_Crafter_Moving_texture = ["Crafter-Moving_texture_Start", "Crafter-Moving_texture_Start_interpolate", "Crafter-Moving_texture_End"]
 
 
 def load_icon_from_zip(zip_path, icons, name_icons, index):
@@ -369,6 +370,16 @@ def unzip(zip_path, extract_to):
     with zipfile.ZipFile(zip_path, 'r') as zip_ref:
         zip_ref.extractall(extract_to)
 
+def add_node_group_if_not_exists(names):
+    for name in names:
+        if name not in bpy.data.node_groups:
+            try:
+                with bpy.data.libraries.load(dir_blend_append, link=False) as (data_from, data_to):
+                    data_to.node_groups = [name]
+                bpy.data.node_groups[name].use_fake_user = True
+            except Exception as e:
+                print(f"Error loading node group '{name}': {e}")
+                continue
 def add_node_moving_texture(node_tex, nodes, links):
     '''
     为基础色节点添加动态纹理节点并连接
@@ -377,32 +388,108 @@ def add_node_moving_texture(node_tex, nodes, links):
     links:目标材质连接组
     return:动态纹理节点
     '''
+    # ["Crafter-Moving_texture_Start", "Crafter-Moving_texture_Start_interpolate", "Crafter-Moving_texture_End"]
+    if node_tex.image.size[0] == 0:
+        return None
+    else:
+        row = node_tex.image.size[1] / node_tex.image.size[0]
+
     dir_image = os.path.dirname(node_tex.image.filepath)
     dir_mcmeta = os.path.join(bpy.path.abspath(dir_image), fuq_bl_dot_number(node_tex.image.name) + ".mcmeta")
+    if not os.path.exists(dir_mcmeta):
+        return None
+    
     if os.path.exists(dir_mcmeta):
-        node_Moving_texture = nodes.new(type="ShaderNodeGroup")
-        node_Moving_texture.location = (node_tex.location.x - 200, node_tex.location.y)
-        node_Moving_texture.node_tree = bpy.data.node_groups["Crafter-Moving_texture"]
-        try:
-            with open(dir_mcmeta, 'r', encoding='utf-8') as file:
-                mcmeta = json.load(file)
+        node_Moving_texture_end = nodes.new(type="ShaderNodeGroup")
+        node_Moving_texture_end.location = (node_tex.location.x - 200, node_tex.location.y)
+        node_Moving_texture_end.node_tree = bpy.data.node_groups["Crafter-Moving_texture_End"]
+
+        node_Moving_texture_Fac = nodes.new(type="ShaderNodeValToRGB")
+        node_Moving_texture_Fac.location = (node_tex.location.x - 850, node_tex.location.y)
+        node_Moving_texture_Fac.color_ramp.interpolation = "CONSTANT"
+
+        node_Moving_texture_start = nodes.new(type="ShaderNodeGroup")
+        node_Moving_texture_start.location = (node_tex.location.x - 1000, node_tex.location.y)
+        
+        with open(dir_mcmeta, 'r', encoding='utf-8') as file:
+            mcmeta = json.load(file)
+        frametime = 1
+        interpolate = False
+        frames = row
+        list_frames = []
+        if "animation" in mcmeta:
+            if "frametime" in mcmeta["animation"]:
                 frametime = mcmeta["animation"]["frametime"]
-                node_Moving_texture.inputs["frametime"].default_value = frametime
-        except:
-            pass
-        try:
-            with open(dir_mcmeta, 'r', encoding='utf-8') as file:
-                mcmeta = json.load(file)
-                frametime = mcmeta["animation"]["interpolate"]
-                node_Moving_texture.inputs["interpolate"].default_value = frametime
-        except:
-            pass
-        if not node_tex.image.size[0] == 0:
-            node_Moving_texture.inputs["row"].default_value = node_tex.image.size[1] / node_tex.image.size[0]
+            if "interpolate" in mcmeta["animation"]:
+                interpolate = mcmeta["animation"]["interpolate"]
+            if "height" in mcmeta["animation"] and "width" in mcmeta["animation"]:
+                row = mcmeta["animation"]["height"] / mcmeta["animation"]["width"]
+                frames = row
+            if "frames" in mcmeta["animation"]:
+                frames = 0
+                for frame in mcmeta["animation"]["frames"]:
+                    if type(frame) == int:
+                        frames += 1
+                        list_frames.append([frame,1])
+                    else:
+                        info_frame = json.loads(frame)
+                        frames += info_frame["time"] / frametime
+                        list_frames.append([info_frame["index"],info_frame["time"] / frametime])
+
+        if interpolate:
+            node_Moving_texture_start.node_tree = bpy.data.node_groups["Crafter-Moving_texture_Start_interpolate"]
+            node_Moving_texture_start.inputs["frametime"].default_value = frametime
+            node_Moving_texture_start.inputs["frames"].default_value = frames
         else:
-            node_Moving_texture.inputs["row"].default_value = 1
-        links.new(node_Moving_texture.outputs["Vector"], node_tex.inputs["Vector"])
-        return node_Moving_texture
+            node_Moving_texture_start.node_tree = bpy.data.node_groups["Crafter-Moving_texture_Start"]
+            node_Moving_texture_start.inputs["frametime * frames"].default_value = frametime * frames
+            
+        links.new(node_Moving_texture_end.outputs["Vector"], node_tex.inputs["Vector"])
+        links.new(node_Moving_texture_start.outputs["Fac"], node_Moving_texture_Fac.inputs["Fac"])
+
+        n = 0
+        adding_frames = 0
+        for i in list_frames:
+            if (n // 32 > 0) and (n % 32 == 0):
+                if n // 32 ==1:
+                    last_out_put_alpha = node_Moving_texture_Fac.outputs["Alpha"]
+                else:
+                    last_out_put_alpha = node_Mix.outputs["Result"]
+                node_Moving_texture_Fac = nodes.new(type="ShaderNodeValToRGB")
+                node_Moving_texture_Fac.location = (node_tex.location.x - 850, node_tex.location.y - ((n // 32) * 200))
+                node_Moving_texture_Fac.color_ramp.interpolation = "CONSTANT"
+
+                node_Math = nodes.new(type="ShaderNodeMath")
+                node_Math.location = (node_tex.location.x - 500, node_tex.location.y + ((n // 32) * 200) - 200)
+                node_Math.operation = "LESS_THAN"
+                node_Math.use_clamp = False
+                links.new(node_Moving_texture_start.outputs["Fac"], node_Math.inputs["Value"])
+                node_Math.inputs["Value_001"].default_value = adding_frames / frames
+
+                node_Mix = nodes.new(type="ShaderNodeMix")
+                node_Mix.location = (node_tex.location.x - 350, node_tex.location.y + ((n // 32) * 200) - 200)
+                node_Mix.data_type = "FLOAT"
+                node_Mix.clamp_factor = False
+                links.new(node_Math.outputs["Value"], node_Mix.inputs["Factor"])
+                links.new(node_Moving_texture_Fac.outputs["Alpha"], node_Mix.inputs["A"])
+                links.new(last_out_put_alpha, node_Mix.inputs["B"])
+            if (n % 32) > 1:
+                node_Moving_texture_Fac.color_ramp.elements.new(1)
+            frame_chu_row = i[0] / row
+            node_Moving_texture_Fac.color_ramp.elements[n % 32].position = adding_frames / frames
+            node_Moving_texture_Fac.color_ramp.elements[n % 32].color = [frame_chu_row, frame_chu_row, frame_chu_row, frame_chu_row]
+            adding_frames  += i[1]
+            n += 1
+        if n // 32 == 0:
+            last_out_put_alpha = node_Moving_texture_Fac.outputs["Alpha"]
+        else:
+            last_out_put_alpha = node_Mix.outputs["Result"]
+
+        links.new(last_out_put_alpha, node_Moving_texture_end.inputs["frame / row"])
+
+        return node_Moving_texture_end
+    else:
+        return None
 
 def fuq_bl_dot_number(name: str):
     '''

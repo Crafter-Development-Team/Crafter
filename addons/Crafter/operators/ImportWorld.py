@@ -483,18 +483,10 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             self.report({'ERROR'}, "WorldImporter didn't export obj!")
             return {"CANCELLED"}
         
-        #若不存在，则导入Crafter-Moving_texture节点组
-        if not "Crafter-Moving_texture" in bpy.data.node_groups:
-            with bpy.data.libraries.load(dir_blend_append, link=False) as (data_from, data_to):
-                data_to.node_groups = ["Crafter-Moving_texture"]
-            bpy.data.node_groups["Crafter-Moving_texture"].use_fake_user = True
-        #若不存在，则导入群系着色纹理节点
-        if not "Crafter-biomeTex" in bpy.data.node_groups:
-            node_groups_use_fake_user = ["Crafter-biomeTex"]
-            with bpy.data.libraries.load(dir_blend_append, link=False) as (data_from, data_to):
-                data_to.node_groups = [name for name in data_from.node_groups if name in node_groups_use_fake_user]
-            for node_group in node_groups_use_fake_user:
-                bpy.data.node_groups[node_group].use_fake_user = True
+        #若不存在，则导入Crafter-Moving_texture节点组，群系颜色纹理节点
+        add_node_group_if_not_exists(names_Crafter_Moving_texture)
+        add_node_group_if_not_exists(["Crafter-biomeTex"])
+        
         #复制并修改Crafter-biomeTex
         dir_biomeTex = os.path.join(dir_importer, "biomeTex")
         dir_biomeTex_num = os.path.join(dir_biomeTex, imported_time)
