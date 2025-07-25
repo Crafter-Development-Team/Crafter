@@ -433,6 +433,7 @@ def add_node_moving_texture(node_tex, nodes, links):
         interpolate = False
         frames = row
         list_frames = []
+        haveframe = True
         if "animation" in mcmeta:
             if "frametime" in mcmeta["animation"]:
                 frametime = mcmeta["animation"]["frametime"]
@@ -452,9 +453,13 @@ def add_node_moving_texture(node_tex, nodes, links):
                         frames += info_frame["time"] / frametime
                         list_frames.append([info_frame["index"],info_frame["time"] / frametime])
             else:
-                frames = row
-                for i in range(int(frames)):
-                    list_frames.append([i,1])
+                haveframe = False
+        else:
+            haveframe = False
+        if not haveframe:
+            frames = row
+            for i in range(int(frames)):
+                list_frames.append([i,1])
 
         if interpolate:
             node_Moving_texture_start.node_tree = bpy.data.node_groups["Crafter-Moving_texture_Start_interpolate"]
@@ -468,9 +473,10 @@ def add_node_moving_texture(node_tex, nodes, links):
         links.new(node_Moving_texture_end.outputs["Vector"], node_tex.inputs["Vector"])
         links.new(node_Moving_texture_start.outputs["Fac"], node_Fac.inputs["Fac"])
 
-        n = 0
+        n = -1
         adding_frames = 0
         for i in list_frames:
+            n += 1
             if (n // 32 > 0) and (n % 32 == 0):
                 if n // 32 ==1:
                     last_out_put_alpha = node_Fac.outputs["Alpha"]
@@ -492,16 +498,17 @@ def add_node_moving_texture(node_tex, nodes, links):
                 node_Mix.location = (node_tex.location.x - 350, node_tex.location.y + ((n // 32) * 250) - 250)
                 node_Mix.data_type = "FLOAT"
                 node_Mix.clamp_factor = False
+
                 links.new(node_Math.outputs["Value"], node_Mix.inputs["Factor"])
                 links.new(node_Fac.outputs["Alpha"], node_Mix.inputs["A"])
                 links.new(last_out_put_alpha, node_Mix.inputs["B"])
             if (n % 32) > 1:
                 node_Fac.color_ramp.elements.new(1)
+                
             frame_chu_row = i[0] / row
             node_Fac.color_ramp.elements[n % 32].position = adding_frames / frames
             node_Fac.color_ramp.elements[n % 32].color = [frame_chu_row, frame_chu_row, frame_chu_row, frame_chu_row]
             adding_frames  += i[1]
-            n += 1
         if n // 32 == 0:
             last_out_put_alpha = node_Fac.outputs["Alpha"]
         else:
