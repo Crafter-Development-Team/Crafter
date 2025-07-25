@@ -44,16 +44,28 @@ def get_dir_saves(context):
     addon_prefs = context.preferences.addons[__addon_name__].preferences
 
     dir_root = addon_prefs.History_World_Roots_List[addon_prefs.History_World_Roots_List_index].name
-    dir_undivided_saves = os.path.join(dir_root,"saves")
-    if os.path.exists(dir_undivided_saves):
-        
-        return dir_undivided_saves
-    else:
+
+    divided = False
+
+    list_folder_minecraft = os.listdir(dir_root)
+    dir_versions = dir_root_2_dir_versions(dir_root)
+    list_folder_versions = os.listdir(dir_versions)
+    if len(list_folder_versions) > 0:
+        dir_version = os.path.join(dir_versions, list_folder_versions[0])
+        dir_saves = os.path.join(dir_version, "saves")
+        if os.path.exists(dir_saves):
+            divided = True
+
+    if divided:
         dir_verisons = dir_root_2_dir_versions(dir_root)
         dir_version = os.path.join(dir_verisons,addon_prefs.History_World_Versions_List[addon_prefs.History_World_Versions_List_index].name)
         dir_saves = dir_version_2_dir_saves(dir_version)
         
         return dir_saves
+    else:
+        dir_undivided_saves = os.path.join(dir_root,"saves")
+        
+        return dir_undivided_saves
 
 def get_dir_save(context):
     addon_prefs = context.preferences.addons[__addon_name__].preferences
@@ -439,6 +451,10 @@ def add_node_moving_texture(node_tex, nodes, links):
                         info_frame = json.loads(frame)
                         frames += info_frame["time"] / frametime
                         list_frames.append([info_frame["index"],info_frame["time"] / frametime])
+            else:
+                frames = row
+                for i in range(int(frames)):
+                    list_frames.append([i,1])
 
         if interpolate:
             node_Moving_texture_start.node_tree = bpy.data.node_groups["Crafter-Moving_texture_Start_interpolate"]
