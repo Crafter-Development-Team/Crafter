@@ -404,9 +404,9 @@ def add_node_moving_texture(node_tex, nodes, links):
         node_Moving_texture_end.location = (node_tex.location.x - 200, node_tex.location.y)
         node_Moving_texture_end.node_tree = bpy.data.node_groups["Crafter-Moving_texture_End"]
 
-        node_Moving_texture_Fac = nodes.new(type="ShaderNodeValToRGB")
-        node_Moving_texture_Fac.location = (node_tex.location.x - 850, node_tex.location.y)
-        node_Moving_texture_Fac.color_ramp.interpolation = "CONSTANT"
+        node_Fac = nodes.new(type="ShaderNodeValToRGB")
+        node_Fac.location = (node_tex.location.x - 850, node_tex.location.y)
+        node_Fac.color_ramp.interpolation = "CONSTANT"
 
         node_Moving_texture_start = nodes.new(type="ShaderNodeGroup")
         node_Moving_texture_start.location = (node_tex.location.x - 1000, node_tex.location.y)
@@ -445,19 +445,20 @@ def add_node_moving_texture(node_tex, nodes, links):
             node_Moving_texture_start.inputs["20 / frametime / frames"].default_value = 20 / frametime / frames
             
         links.new(node_Moving_texture_end.outputs["Vector"], node_tex.inputs["Vector"])
-        links.new(node_Moving_texture_start.outputs["Fac"], node_Moving_texture_Fac.inputs["Fac"])
+        links.new(node_Moving_texture_start.outputs["Fac"], node_Fac.inputs["Fac"])
 
         n = 0
         adding_frames = 0
         for i in list_frames:
             if (n // 32 > 0) and (n % 32 == 0):
                 if n // 32 ==1:
-                    last_out_put_alpha = node_Moving_texture_Fac.outputs["Alpha"]
+                    last_out_put_alpha = node_Fac.outputs["Alpha"]
                 else:
                     last_out_put_alpha = node_Mix.outputs["Result"]
-                node_Moving_texture_Fac = nodes.new(type="ShaderNodeValToRGB")
-                node_Moving_texture_Fac.location = (node_tex.location.x - 850, node_tex.location.y - ((n // 32) * 200))
-                node_Moving_texture_Fac.color_ramp.interpolation = "CONSTANT"
+                node_Fac = nodes.new(type="ShaderNodeValToRGB")
+                node_Fac.location = (node_tex.location.x - 850, node_tex.location.y - ((n // 32) * 200))
+                node_Fac.color_ramp.interpolation = "CONSTANT"
+                links.new(node_Moving_texture_start.outputs["Fac"], node_Fac.inputs["Fac"])
 
                 node_Math = nodes.new(type="ShaderNodeMath")
                 node_Math.location = (node_tex.location.x - 500, node_tex.location.y + ((n // 32) * 200) - 200)
@@ -471,21 +472,22 @@ def add_node_moving_texture(node_tex, nodes, links):
                 node_Mix.data_type = "FLOAT"
                 node_Mix.clamp_factor = False
                 links.new(node_Math.outputs["Value"], node_Mix.inputs["Factor"])
-                links.new(node_Moving_texture_Fac.outputs["Alpha"], node_Mix.inputs["A"])
+                links.new(node_Fac.outputs["Alpha"], node_Mix.inputs["A"])
                 links.new(last_out_put_alpha, node_Mix.inputs["B"])
             if (n % 32) > 1:
-                node_Moving_texture_Fac.color_ramp.elements.new(1)
-            frame_chu_row = i[0] / row
-            node_Moving_texture_Fac.color_ramp.elements[n % 32].position = adding_frames / frames
-            node_Moving_texture_Fac.color_ramp.elements[n % 32].color = [frame_chu_row, frame_chu_row, frame_chu_row, frame_chu_row]
+                node_Fac.color_ramp.elements.new(1)
+            frame_chu_row = i[0]
+            node_Fac.color_ramp.elements[n % 32].position = adding_frames / frames
+            node_Fac.color_ramp.elements[n % 32].color = [frame_chu_row, frame_chu_row, frame_chu_row, frame_chu_row]
             adding_frames  += i[1]
             n += 1
         if n // 32 == 0:
-            last_out_put_alpha = node_Moving_texture_Fac.outputs["Alpha"]
+            last_out_put_alpha = node_Fac.outputs["Alpha"]
         else:
             last_out_put_alpha = node_Mix.outputs["Result"]
 
-        links.new(last_out_put_alpha, node_Moving_texture_end.inputs["frame / row"])
+        links.new(last_out_put_alpha, node_Moving_texture_end.inputs["frame"])
+        node_Moving_texture_end.inputs["row"].default_value = row
 
         return node_Moving_texture_end
     else:
