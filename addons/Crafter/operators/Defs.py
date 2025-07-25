@@ -405,11 +405,11 @@ def add_node_moving_texture(node_tex, nodes, links):
         node_Moving_texture_end.node_tree = bpy.data.node_groups["Crafter-Moving_texture_End"]
 
         node_Fac = nodes.new(type="ShaderNodeValToRGB")
-        node_Fac.location = (node_tex.location.x - 850, node_tex.location.y)
+        node_Fac.location = (node_tex.location.x - 750, node_tex.location.y)
         node_Fac.color_ramp.interpolation = "CONSTANT"
 
         node_Moving_texture_start = nodes.new(type="ShaderNodeGroup")
-        node_Moving_texture_start.location = (node_tex.location.x - 1000, node_tex.location.y)
+        node_Moving_texture_start.location = (node_tex.location.x - 900, node_tex.location.y)
         
         with open(dir_mcmeta, 'r', encoding='utf-8') as file:
             mcmeta = json.load(file)
@@ -456,19 +456,19 @@ def add_node_moving_texture(node_tex, nodes, links):
                 else:
                     last_out_put_alpha = node_Mix.outputs["Result"]
                 node_Fac = nodes.new(type="ShaderNodeValToRGB")
-                node_Fac.location = (node_tex.location.x - 850, node_tex.location.y - ((n // 32) * 200))
+                node_Fac.location = (node_tex.location.x - 750, node_tex.location.y + ((n // 32) * 250))
                 node_Fac.color_ramp.interpolation = "CONSTANT"
                 links.new(node_Moving_texture_start.outputs["Fac"], node_Fac.inputs["Fac"])
 
                 node_Math = nodes.new(type="ShaderNodeMath")
-                node_Math.location = (node_tex.location.x - 500, node_tex.location.y + ((n // 32) * 200) - 200)
+                node_Math.location = (node_tex.location.x - 500, node_tex.location.y + ((n // 32) * 250) - 250)
                 node_Math.operation = "LESS_THAN"
                 node_Math.use_clamp = False
                 links.new(node_Moving_texture_start.outputs["Fac"], node_Math.inputs["Value"])
                 node_Math.inputs["Value_001"].default_value = adding_frames / frames
 
                 node_Mix = nodes.new(type="ShaderNodeMix")
-                node_Mix.location = (node_tex.location.x - 350, node_tex.location.y + ((n // 32) * 200) - 200)
+                node_Mix.location = (node_tex.location.x - 350, node_tex.location.y + ((n // 32) * 250) - 250)
                 node_Mix.data_type = "FLOAT"
                 node_Mix.clamp_factor = False
                 links.new(node_Math.outputs["Value"], node_Mix.inputs["Factor"])
@@ -476,7 +476,7 @@ def add_node_moving_texture(node_tex, nodes, links):
                 links.new(last_out_put_alpha, node_Mix.inputs["B"])
             if (n % 32) > 1:
                 node_Fac.color_ramp.elements.new(1)
-            frame_chu_row = i[0]
+            frame_chu_row = i[0] / row
             node_Fac.color_ramp.elements[n % 32].position = adding_frames / frames
             node_Fac.color_ramp.elements[n % 32].color = [frame_chu_row, frame_chu_row, frame_chu_row, frame_chu_row]
             adding_frames  += i[1]
@@ -486,8 +486,7 @@ def add_node_moving_texture(node_tex, nodes, links):
         else:
             last_out_put_alpha = node_Mix.outputs["Result"]
 
-        links.new(last_out_put_alpha, node_Moving_texture_end.inputs["frame"])
-        node_Moving_texture_end.inputs["row"].default_value = row
+        links.new(last_out_put_alpha, node_Moving_texture_end.inputs["frame / row"])
 
         return node_Moving_texture_end
     else:
