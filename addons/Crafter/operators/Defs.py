@@ -438,11 +438,11 @@ def add_node_moving_texture(node_tex, nodes, links):
 
         if interpolate:
             node_Moving_texture_start.node_tree = bpy.data.node_groups["Crafter-Moving_texture_Start_interpolate"]
-            node_Moving_texture_start.inputs["frametime"].default_value = frametime
+            node_Moving_texture_start.inputs["20 / frametime"].default_value = 20 / frametime
             node_Moving_texture_start.inputs["frames"].default_value = frames
         else:
             node_Moving_texture_start.node_tree = bpy.data.node_groups["Crafter-Moving_texture_Start"]
-            node_Moving_texture_start.inputs["frametime * frames"].default_value = frametime * frames
+            node_Moving_texture_start.inputs["20 / frametime / frames"].default_value = 20 / frametime / frames
             
         links.new(node_Moving_texture_end.outputs["Vector"], node_tex.inputs["Vector"])
         links.new(node_Moving_texture_start.outputs["Fac"], node_Moving_texture_Fac.inputs["Fac"])
