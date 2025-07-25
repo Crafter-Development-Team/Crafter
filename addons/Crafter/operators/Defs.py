@@ -804,7 +804,7 @@ def creat_parallax_node(node_tex_base, node_tex_normal, iterations, smooth, info
             else:
                 node_TexCoord = nodes.new("ShaderNodeTexCoord")
                 node_TexCoord.location = location
-                links.new(node_TexCoord.outputs["UV"], node_height.inputs["UV"])
+                links.new(node_TexCoord.outputs["UV"], node_height.inputs["Vector"])
 
         i += 1
 
