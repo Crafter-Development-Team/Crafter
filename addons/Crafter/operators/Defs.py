@@ -380,6 +380,7 @@ def add_node_group_if_not_exists(names):
             except Exception as e:
                 print(f"Error loading node group '{name}': {e}")
                 continue
+
 def add_node_moving_texture(node_tex, nodes, links):
     '''
     为基础色节点添加动态纹理节点并连接
@@ -410,6 +411,9 @@ def add_node_moving_texture(node_tex, nodes, links):
 
         node_Moving_texture_start = nodes.new(type="ShaderNodeGroup")
         node_Moving_texture_start.location = (node_tex.location.x - 900, node_tex.location.y)
+
+        node_TexCoord = nodes.new(type="ShaderNodeTexCoord")
+        node_TexCoord.location = (node_tex.location.x - 1000, node_tex.location.y)
         
         with open(dir_mcmeta, 'r', encoding='utf-8') as file:
             mcmeta = json.load(file)
@@ -444,6 +448,7 @@ def add_node_moving_texture(node_tex, nodes, links):
             node_Moving_texture_start.node_tree = bpy.data.node_groups["Crafter-Moving_texture_Start"]
             node_Moving_texture_start.inputs["20 / frametime / frames"].default_value = 20 / frametime / frames
             
+        links.new(node_TexCoord.outputs["UV"], node_Moving_texture_end.inputs["UV"])
         links.new(node_Moving_texture_end.outputs["Vector"], node_tex.inputs["Vector"])
         links.new(node_Moving_texture_start.outputs["Fac"], node_Fac.inputs["Fac"])
 
@@ -487,6 +492,7 @@ def add_node_moving_texture(node_tex, nodes, links):
             last_out_put_alpha = node_Mix.outputs["Result"]
 
         links.new(last_out_put_alpha, node_Moving_texture_end.inputs["frame / row"])
+        node_Moving_texture_end.inputs["row"].default_value = row
 
         return node_Moving_texture_end
     else:
@@ -744,35 +750,41 @@ def node_moving_tex_info(node):
         return info
     if len(node.inputs["Vector"].links) >0:
         info[0] = True
-        info[1] = node.inputs["Vector"].links[0].from_node.inputs["row"].default_value
-        info[2] = node.inputs["Vector"].links[0].from_node.inputs["frametime"].default_value
-        info[3] = node.inputs["Vector"].links[0].from_node.inputs["interpolate"].default_value
+        info[1] = node.inputs["Vector"].links[0].from_node
 
     return info
 
 def creat_parallax_node(node_tex_base, node_tex_normal, iterations, smooth, info_moving_normal, nodes, links):
     # 创建框，方便清除
     node_frame = nodes.new(type="NodeFrame")
-    location = [node_tex_base.location.x - 1000, node_tex_base.location.y]
+    location = [node_tex_base.location.x - 1200, node_tex_base.location.y]
     node_frame.location = location
     node_frame.label = "Crafter_Parallax"
 
     move = 190
     iterations = max(iterations, 1)
-    node_final_depth = None
-    input_lates = []
 
-    while iterations > 0:
-        iterations -= 1
-        node_last = nodes.new("ShaderNodeGroup")
-        node_last.node_tree = bpy.data.node_groups["CP-Steep_Steps_last"]
-        node_last.location = location
+    if info_moving_normal[0]:
+        row_dao = 1 / info_moving_normal[1].inputs["row"].default_value
+    else:
+        row_dao = 1
+
+    i = 1
+    while iterations >= i:
+
+        node_parallax = nodes.new("ShaderNodeGroup")
+        node_parallax.node_tree = bpy.data.node_groups["CP-Parallax"]
+        node_parallax.location = location
+        node_parallax.inputs["1 / row"].default_value = row_dao
         location[0] -= 1.5 * move# location
-        node_last.parent = node_frame
-        for input in input_lates:
-            links.new(node_last.outputs["Current_Depth"], input)
-        if node_final_depth == None:
-            node_final_depth = node_last
+        node_parallax.parent = node_frame
+        if i == 1:
+            node_final_parallax = node_parallax
+        else:
+            links.new(node_parallax.outputs["Next Start"], node_last.inputs["Start"])
+            links.new(node_parallax.outputs["UV"], node_last.inputs["UV"])
+            links.new(node_parallax.outputs["UV"], node_height.inputs["Vector"])
+        node_last = node_parallax
 
         node_height = nodes.new("ShaderNodeTexImage")
         node_height.image = node_tex_normal.image
@@ -783,24 +795,20 @@ def creat_parallax_node(node_tex_base, node_tex_normal, iterations, smooth, info
             node_height.interpolation = "Linear"
         else:
             node_height.interpolation = "Closest"
-        links.new(node_height.outputs["Alpha"], node_last.inputs["Height"])
 
-        node_first = nodes.new("ShaderNodeGroup")
-        if info_moving_normal[0]:
-            node_first.node_tree = bpy.data.node_groups["CP-Steep_Steps_first_moving"]
-            node_first.inputs["row"].default_value = info_moving_normal[1]
-            node_first.inputs["frametime"].default_value = info_moving_normal[2]
-            node_first.inputs["interpolate"].default_value = info_moving_normal[3]
-        else:
-            node_first.node_tree = bpy.data.node_groups["CP-Steep_Steps_first"]
-        links.new(node_first.outputs["Vector"], node_height.inputs["Vector"])
-        node_first.location = location
-        location[0] -= move# location
-        node_first.parent = node_frame
+        links.new(node_height.outputs["Alpha"], node_last.inputs["Depth"])
 
-        input_lates = [node_first.inputs["Current_Depth"],node_last.inputs["Current_Depth"]]
+        if i == iterations:
+            if info_moving_normal[0]:
+                pass
+            else:
+                node_TexCoord = nodes.new("ShaderNodeTexCoord")
+                node_TexCoord.location = location
+                links.new(node_TexCoord.outputs["UV"], node_height.inputs["UV"])
 
-    return node_final_depth, node_frame
+        i += 1
+
+    return node_final_parallax
 
 def create_parallax_final(node, node_final_depth, node_frame, info_moving, nodes, links):
     node_final = nodes.new("ShaderNodeGroup")

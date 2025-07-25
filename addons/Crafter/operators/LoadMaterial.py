@@ -292,11 +292,7 @@ class VIEW3D_OT_CrafterLoadParallax(bpy.types.Operator):
             bpy.ops.object.mode_set(mode='OBJECT')
         bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
         # 导入CP-节点组
-        node_groups_use_fake_user = ["CP-Steep_Steps_first","CP-Steep_Steps_last","CP-Final_Parallax","CP-Steep_Steps_first_moving","CP-Final_Parallax_moving"]
-        with bpy.data.libraries.load(dir_blend_append, link=False) as (data_from, data_to):
-            data_to.node_groups = [name for name in data_from.node_groups if name in node_groups_use_fake_user]
-        for node_group in node_groups_use_fake_user:
-            bpy.data.node_groups[node_group].use_fake_user = True
+        add_node_group_if_not_exists(["CP-Parallax"])
         # 开始遍历
         for_collection = []
         for mcmt in context.scene.Crafter_mcmts:
@@ -347,22 +343,25 @@ class VIEW3D_OT_CrafterLoadParallax(bpy.types.Operator):
             info_normal = node_moving_tex_info(node_tex_normal)
             info_PBR = node_moving_tex_info(node_tex_PBR)
 
-            node_final_depth, node_frame = creat_parallax_node(node_tex_base=node_tex_base, node_tex_normal=node_tex_normal, iterations=iterations, smooth=smooth, info_moving_normal=info_normal, nodes=nodes, links=links)
+            node_final_depth = creat_parallax_node(node_tex_base=node_tex_base, node_tex_normal=node_tex_normal, iterations=iterations, smooth=smooth, info_moving_normal=info_normal, nodes=nodes, links=links)
 
-            node_fianl_normal = create_parallax_final(node=node_tex_normal, node_final_depth=node_final_depth, node_frame=node_frame, info_moving=info_normal, nodes=nodes, links=links)
-            if info_base == info_normal:
-                links.new(node_fianl_normal.outputs["UV"], node_tex_base.inputs["Vector"])
-            else:
-                node_fianl_base = create_parallax_final(node=node_tex_base, node_final_depth=node_final_depth, node_frame=node_frame, info_moving=info_base, nodes=nodes, links=links)
-            if node_tex_PBR != None:
-                if info_PBR == info_normal:
-                    links.new(node_fianl_normal.outputs["UV"], node_tex_PBR.inputs["Vector"])
-                elif info_PBR == info_base:
-                    links.new(node_fianl_base.outputs["UV"], node_tex_PBR.inputs["Vector"])
-                else:
-                    create_parallax_final(node=node_tex_PBR, node_final_depth=node_final_depth, node_frame=node_frame, info_moving=info_PBR, nodes=nodes, links=links)
+            # node_fianl_normal = create_parallax_final(node=node_tex_normal, node_final_depth=node_final_depth, node_frame=node_frame, info_moving=info_normal, nodes=nodes, links=links)
+            # if info_base == info_normal:
+            #     links.new(node_fianl_normal.outputs["UV"], node_tex_base.inputs["Vector"])
+            # else:
+            #     node_fianl_base = create_parallax_final(node=node_tex_base, node_final_depth=node_final_depth, node_frame=node_frame, info_moving=info_base, nodes=nodes, links=links)
+            # if node_tex_PBR != None:
+            #     if info_PBR == info_normal:
+            #         links.new(node_fianl_normal.outputs["UV"], node_tex_PBR.inputs["Vector"])
+            #     elif info_PBR == info_base:
+            #         links.new(node_fianl_base.outputs["UV"], node_tex_PBR.inputs["Vector"])
+            #     else:
+            #         create_parallax_final(node=node_tex_PBR, node_final_depth=node_final_depth, node_frame=node_frame, info_moving=info_PBR, nodes=nodes, links=links)
             bpy.ops.crafter.set_parallax_depth()
-            bpy.ops.crafter.set_parallax_iterations()
+        for node in bpy.data.node_groups["CP-1 / Iterations"].nodes:
+            if node.type == "GROUP_OUTPUT":
+                node_output = node
+        node_output.inputs["1 / Iterations"].default_value = 1 / addon_prefs.Parallax_Iterations
 
 
 
@@ -428,25 +427,24 @@ class VIEW3D_OT_CrafterRemoveParallax(bpy.types.Operator):
             for node in nodes_wait_delete:
                 nodes.remove(node)
 
-            nodes_texture = []
+            nodes_tex_coord = []
             nodes_moving = []
             for node in nodes:
-                if node.type == "TEX_IMAGE":
-                    if node.image.name.endswith(".png"):
-                        nodes_texture.append(node)
+                if node.type == "TEX_COORD":
+                    nodes_tex_coord.append(node)
                 if node.type == "GROUP":
-                    if node.node_tree.name == "Crafter-Moving_texture":
+                    if node.node_tree.name == "Crafter-Moving_texture_End":
                         nodes_moving.append(node)
-            for node in nodes_moving:
-                if len(nodes_texture) == 0:
+            for node_moving in nodes_moving:
+                if len(nodes_tex_coord) == 0:
                     continue
-                xy = [node.location.x, node.location.y]
-                info_closest = [(((nodes_texture[0].location.x - xy[0]) ** 2) + ((nodes_texture[0].location.y - xy[1]) ** 2)) ** 0.5,nodes_texture[0]]
-                for i in range(1,len(nodes_texture)):
-                    distance = (((nodes_texture[i].location.x - xy[0]) ** 2) + ((nodes_texture[i].location.y - xy[1]) ** 2)) ** 0.5
-                    if info_closest[0] > distance:
-                        info_closest = [distance,nodes_texture[i]]
-                links.new(node.outputs["Vector"], info_closest[1].inputs["Vector"])
+                xy = [node_moving.location.x, node_moving.location.y]
+                list_closest = [(((nodes_tex_coord[0].location.x - xy[0]) ** 2) + ((nodes_tex_coord[0].location.y - xy[1]) ** 2)) ** 0.5,nodes_tex_coord[0]]
+                for i in range(1,len(nodes_tex_coord)):
+                    distance = (((nodes_tex_coord[i].location.x - xy[0]) ** 2) + ((nodes_tex_coord[i].location.y - xy[1]) ** 2)) ** 0.5
+                    if list_closest[0] > distance:
+                        list_closest = [distance,nodes_tex_coord[i]]
+                links.new(list_closest[1].outputs["UV"], node_moving.inputs["UV"])
 
                         
 
@@ -484,28 +482,7 @@ class VIEW3D_OT_CrafterSetParallax(bpy.types.Operator):
         
     def execute(self, context):
         return {"FINISHED"}
-# ==================== 设置视差迭代 ====================
-
-class VIEW3D_OT_CrafterSetParallaxIterations(bpy.types.Operator):
-    bl_label = "Set Parallax Iterations"
-    bl_idname = "crafter.set_parallax_iterations"
-    bl_description = " "
-    bl_options = {"REGISTER", "UNDO"}
-
-    @classmethod
-    def poll(cls, context: bpy.types.Context):
-        return True
-
-    def execute(self, context: bpy.types.Context):
-        addon_prefs = context.preferences.addons[__addon_name__].preferences
-        
-        for node in bpy.data.node_groups["CP-Parallax_Iterations"].nodes:
-            if node.type == "GROUP_OUTPUT":
-                node_output = node
-        node_output.inputs["Parallax_Iterations"].default_value = addon_prefs.Parallax_Iterations
-
-        return {'FINISHED'}
-
+    
 # ==================== 设置视差深度 ====================
 
 class VIEW3D_OT_CrafterSetParallaxDepth(bpy.types.Operator):
@@ -521,10 +498,10 @@ class VIEW3D_OT_CrafterSetParallaxDepth(bpy.types.Operator):
     def execute(self, context: bpy.types.Context):
         addon_prefs = context.preferences.addons[__addon_name__].preferences
         
-        for node in bpy.data.node_groups["CP-Parallax_Depth"].nodes:
+        for node in bpy.data.node_groups["CP-1 / Depth"].nodes:
             if node.type == "GROUP_OUTPUT":
                 node_output = node
-        node_output.inputs["Parallax_Depth"].default_value = addon_prefs.Parallax_Depth
+        node_output.inputs["1 / Depth"].default_value = 1 / addon_prefs.Parallax_Depth
         
         return {'FINISHED'}
 

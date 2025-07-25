@@ -103,6 +103,8 @@ BLENDER_EXE_PATH = "C:/Program Files/Blender Foundation/Blender 4.2/blender.exe"
 
 - 群系着色图像映射
 - EEVEE着色器材质解惑
+- 动态纹理按序播放思路提供
+- 基于传递UV的视差的制作
 
 ---
 
