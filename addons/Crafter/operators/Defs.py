@@ -47,7 +47,6 @@ def get_dir_saves(context):
 
     divided = False
 
-    list_folder_minecraft = os.listdir(dir_root)
     dir_versions = dir_root_2_dir_versions(dir_root)
     list_folder_versions = os.listdir(dir_versions)
     if len(list_folder_versions) > 0:
@@ -425,7 +424,7 @@ def add_node_moving_texture(node_tex, nodes, links):
         node_Moving_texture_start.location = (node_tex.location.x - 900, node_tex.location.y)
 
         node_TexCoord = nodes.new(type="ShaderNodeTexCoord")
-        node_TexCoord.location = (node_tex.location.x - 1000, node_tex.location.y)
+        node_TexCoord.location = (node_tex.location.x - 1100, node_tex.location.y)
         
         with open(dir_mcmeta, 'r', encoding='utf-8') as file:
             mcmeta = json.load(file)
@@ -777,10 +776,10 @@ def node_moving_tex_info(node):
 
     return info
 
-def creat_parallax_node(node_tex_base, node_tex_normal, iterations, smooth, info_moving_normal, nodes, links):
+def creat_parallax_node(node_tex_normal, iterations, smooth, info_moving_normal, nodes, links):
     # 创建框，方便清除
     node_frame = nodes.new(type="NodeFrame")
-    location = [node_tex_base.location.x - 1200, node_tex_base.location.y]
+    location = [node_tex_normal.location.x - 1500, node_tex_normal.location.y]
     node_frame.location = location
     node_frame.label = "Crafter_Parallax"
 
@@ -823,13 +822,21 @@ def creat_parallax_node(node_tex_base, node_tex_normal, iterations, smooth, info
 
         if i == iterations:
             if info_moving_normal[0]:
-                pass
+                node_moving = copy_node_tree_recursive(source_node=info_moving_normal[1], nodes=nodes, links=links, to_location=location, parent=node_frame)
+
+                links.new(node_moving.outputs["Vector"], node_height.inputs["Vector"])
+                links.new(node_moving.outputs["Vector"], node_last.inputs["UV"])
             else:
                 node_TexCoord = nodes.new("ShaderNodeTexCoord")
                 node_TexCoord.location = location
+                node_TexCoord.parent = node_frame
+
                 links.new(node_TexCoord.outputs["UV"], node_height.inputs["Vector"])
+                links.new(node_TexCoord.outputs["UV"], node_last.inputs["UV"])
 
         i += 1
+
+        links.new(node_final_parallax.outputs["UV"], node_tex_normal.inputs["Vector"])
 
     return node_final_parallax
 
@@ -872,3 +879,128 @@ def is_alpha_channel_all_one(image_node):
             return False  # 发现非1的alpha值，直接返回False
 
     return True  # 所有alpha值都是1
+
+
+def copy_node_tree_recursive(source_node, nodes, links, node_mapping=None, to_location=[0,0], parent=None):
+    """
+    递归复制节点及其所有上游节点，并保持它们之间的连接关系
+    
+    参数:
+        source_node: 要复制的源节点
+        target_nodes: 目标节点集合 (nodes)
+        target_links: 目标连接集合 (links)
+        node_mapping: 用于跟踪已复制节点的字典，避免重复复制
+    
+    返回:
+        复制后的新节点
+    """
+    
+
+    # 初始化映射字典
+    if node_mapping is None:
+        node_mapping = {}
+    
+    # 如果节点已经复制过，直接返回已复制的节点
+    if source_node in node_mapping:
+        return node_mapping[source_node]
+    
+    # 复制当前节点
+    new_node = nodes.new(type=source_node.bl_idname)
+
+    new_node.location = to_location[0], to_location[1]
+    if parent != None:
+        new_node.parent = parent
+    
+    # 复制特殊属性（根据节点类型）
+    if hasattr(source_node, 'node_tree') and source_node.node_tree:
+        new_node.node_tree = source_node.node_tree
+    
+    if source_node.type == 'TEX_IMAGE' and source_node.image:
+        new_node.image = source_node.image
+        new_node.projection = source_node.projection
+        new_node.interpolation = source_node.interpolation
+        
+    # 复制颜色渐变的插值模式
+    if source_node.type == 'VALTORGB' and hasattr(source_node, 'color_ramp'):
+        new_node.color_ramp.interpolation = source_node.color_ramp.interpolation
+        new_node.color_ramp.color_mode = source_node.color_ramp.color_mode
+        new_node.color_ramp.hue_interpolation = source_node.color_ramp.hue_interpolation
+        
+        # 复制所有颜色元素
+        for i, element in enumerate(source_node.color_ramp.elements):
+            if i == 0:
+                # 第一个元素已经存在，只需设置其属性
+                new_element = new_node.color_ramp.elements[0]
+                new_element.position = element.position
+                new_element.color = element.color
+            else:
+                # 添加新元素
+                new_element = new_node.color_ramp.elements.new(element.position)
+                new_element.color = element.color
+    
+    # 复制节点属性
+    for input in source_node.inputs:
+        new_node.inputs[input.name].default_value = input.default_value
+        
+    # 将新节点添加到映射字典中
+    node_mapping[source_node] = new_node
+    
+    # 递归处理所有上游节点（输入连接）
+    for input_socket in source_node.inputs:
+        for link in input_socket.links:
+            from_node = link.from_node
+            from_socket = link.from_socket
+            to_socket = link.to_socket
+            
+            # 递归复制上游节点
+            new_from_node = copy_node_tree_recursive(from_node, nodes, links, node_mapping, to_location=[from_node.location.x - source_node.location.x + to_location[0], from_node.location.y - source_node.location.y + to_location[1]], parent=parent)
+            
+            # 找到对应的输出socket
+            new_from_socket = None
+            if from_socket.name in new_from_node.outputs:
+                new_from_socket = new_from_node.outputs[from_socket.name]
+            else:
+                # 如果名称不匹配，尝试按索引查找
+                try:
+                    socket_index = list(from_node.outputs).index(from_socket)
+                    if socket_index < len(new_from_node.outputs):
+                        new_from_socket = new_from_node.outputs[socket_index]
+                except ValueError:
+                    pass
+            
+            # 找到新节点上对应的输入socket
+            new_to_socket = None
+            if to_socket.name in new_node.inputs:
+                new_to_socket = new_node.inputs[to_socket.name]
+            else:
+                # 如果名称不匹配，尝试按索引查找
+                try:
+                    socket_index = list(source_node.inputs).index(to_socket)
+                    if socket_index < len(new_node.inputs):
+                        new_to_socket = new_node.inputs[socket_index]
+                except ValueError:
+                    pass
+            
+            # 创建连接
+            if new_from_socket and new_to_socket:
+                links.new(new_from_socket, new_to_socket)
+    
+    return new_node
+
+def nodes_distance(node1, node2):
+    """
+    计算两个节点之间的欧几里得距离
+    
+    参数:
+        node1: 第一个节点对象
+        node2: 第二个节点对象
+        
+    返回:
+        float: 两个节点之间的距离
+    """
+    loc1 = node1.location
+    loc2 = node2.location
+    
+    # 使用欧几里得距离公式计算距离
+    distance = ((loc1.x - loc2.x) ** 2 + (loc1.y - loc2.y) ** 2) ** 0.5
+    return distance

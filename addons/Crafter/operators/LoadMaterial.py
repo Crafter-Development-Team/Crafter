@@ -343,7 +343,7 @@ class VIEW3D_OT_CrafterLoadParallax(bpy.types.Operator):
             info_normal = node_moving_tex_info(node_tex_normal)
             info_PBR = node_moving_tex_info(node_tex_PBR)
 
-            node_final_depth = creat_parallax_node(node_tex_base=node_tex_base, node_tex_normal=node_tex_normal, iterations=iterations, smooth=smooth, info_moving_normal=info_normal, nodes=nodes, links=links)
+            node_final_depth = creat_parallax_node(node_tex_normal=node_tex_normal, iterations=iterations, smooth=smooth, info_moving_normal=info_normal, nodes=nodes, links=links)
 
             # node_fianl_normal = create_parallax_final(node=node_tex_normal, node_final_depth=node_final_depth, node_frame=node_frame, info_moving=info_normal, nodes=nodes, links=links)
             # if info_base == info_normal:
@@ -427,27 +427,42 @@ class VIEW3D_OT_CrafterRemoveParallax(bpy.types.Operator):
             for node in nodes_wait_delete:
                 nodes.remove(node)
 
-            nodes_tex_coord = []
-            nodes_moving = []
+            # nodes_tex_coord = []
+            # nodes_moving = []
+            # for node in nodes:
+            #     if node.type == "TEX_COORD":
+            #         nodes_tex_coord.append(node)
+            #     if node.type == "GROUP":
+            #         if node.node_tree.name == "Crafter-Moving_texture_End":
+            #             nodes_moving.append(node)
+            # for node_moving in nodes_moving:
+            #     if len(nodes_tex_coord) == 0:
+            #         continue
+            #     xy = [node_moving.location.x, node_moving.location.y]
+            #     list_closest = [(((nodes_tex_coord[0].location.x - xy[0]) ** 2) + ((nodes_tex_coord[0].location.y - xy[1]) ** 2)) ** 0.5,nodes_tex_coord[0]]
+            #     for i in range(1,len(nodes_tex_coord)):
+            #         distance = (((nodes_tex_coord[i].location.x - xy[0]) ** 2) + ((nodes_tex_coord[i].location.y - xy[1]) ** 2)) ** 0.5
+            #         if list_closest[0] > distance:
+            #             list_closest = [distance,nodes_tex_coord[i]]
+            #     links.new(list_closest[1].outputs["UV"], node_moving.inputs["UV"])
+
+            nodes_moving_end = []
+            nodes_tex = []
             for node in nodes:
-                if node.type == "TEX_COORD":
-                    nodes_tex_coord.append(node)
+                if node.type == "TEX_IMAGE":
+                    nodes_tex.append(node)
                 if node.type == "GROUP":
                     if node.node_tree.name == "Crafter-Moving_texture_End":
-                        nodes_moving.append(node)
-            for node_moving in nodes_moving:
-                if len(nodes_tex_coord) == 0:
+                        nodes_moving_end.append(node)
+            for node_tex in nodes_tex:
+                if len(nodes_moving_end) == 0:
                     continue
-                xy = [node_moving.location.x, node_moving.location.y]
-                list_closest = [(((nodes_tex_coord[0].location.x - xy[0]) ** 2) + ((nodes_tex_coord[0].location.y - xy[1]) ** 2)) ** 0.5,nodes_tex_coord[0]]
-                for i in range(1,len(nodes_tex_coord)):
-                    distance = (((nodes_tex_coord[i].location.x - xy[0]) ** 2) + ((nodes_tex_coord[i].location.y - xy[1]) ** 2)) ** 0.5
+                list_closest = [nodes_distance(node_tex, nodes_moving_end[0]),nodes_moving_end[0]]
+                for i in range(1,len(nodes_moving_end)):
+                    distance = nodes_distance(node_tex, nodes_moving_end[i])
                     if list_closest[0] > distance:
-                        list_closest = [distance,nodes_tex_coord[i]]
-                links.new(list_closest[1].outputs["UV"], node_moving.inputs["UV"])
-
-                        
-
+                        list_closest = [distance,nodes_moving_end[i]]
+                links.new(list_closest[1].outputs["Vector"], node_tex.inputs["Vector"])
             
         return {'FINISHED'}
 
