@@ -150,7 +150,7 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):
                 # 添加startswith(CI-)节点组
                 group_CI = nodes.new(type="ShaderNodeGroup")
                 group_CI.location = (node_output_EEVEE.location.x - 200, node_output_EEVEE.location.y)
-                real_name = fuq_bl_dot_number(name_material.name)
+                real_name = fuq_bl_dot_number(name_material)
                 if len(real_name) > len_color_jin:
                     last_mao_index = real_name.rfind(':')
                     real_block_name = real_name[last_mao_index+1:]
