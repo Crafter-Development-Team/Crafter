@@ -422,9 +422,6 @@ def add_node_moving_texture(node_tex, nodes, links):
 
         node_Moving_texture_start = nodes.new(type="ShaderNodeGroup")
         node_Moving_texture_start.location = (node_tex.location.x - 900, node_tex.location.y)
-
-        node_TexCoord = nodes.new(type="ShaderNodeTexCoord")
-        node_TexCoord.location = (node_tex.location.x - 1100, node_tex.location.y)
         
         with open(dir_mcmeta, 'r', encoding='utf-8') as file:
             mcmeta = json.load(file)
@@ -468,7 +465,6 @@ def add_node_moving_texture(node_tex, nodes, links):
             node_Moving_texture_start.node_tree = bpy.data.node_groups["Crafter-Moving_texture_Start"]
             node_Moving_texture_start.inputs["20 / frametime / frames"].default_value = 20 / frametime / frames
             
-        links.new(node_TexCoord.outputs["UV"], node_Moving_texture_end.inputs["UV"])
         links.new(node_Moving_texture_end.outputs["Vector"], node_tex.inputs["Vector"])
         links.new(node_Moving_texture_start.outputs["Fac"], node_Fac.inputs["Fac"])
 
@@ -767,7 +763,7 @@ def reload_Undivided_Vsersions(context: bpy.types.Context,dir_versions):#刷新�
             addon_prefs.Undivided_Vsersions_List_index = 0
     
 def node_moving_tex_info(node):
-    info = [False,None,None,None]
+    info = [False,None]
     if node == None:
         return info
     if len(node.inputs["Vector"].links) >0:
@@ -838,7 +834,7 @@ def creat_parallax_node(node_tex_normal, iterations, smooth, info_moving_normal,
 
         links.new(node_final_parallax.outputs["UV"], node_tex_normal.inputs["Vector"])
 
-    return node_final_parallax
+    return node_final_parallax, node_frame
 
 def create_parallax_final(node, node_final_depth, node_frame, info_moving, nodes, links):
     node_final = nodes.new("ShaderNodeGroup")
@@ -1004,3 +1000,126 @@ def nodes_distance(node1, node2):
     # 使用欧几里得距离公式计算距离
     distance = ((loc1.x - loc2.x) ** 2 + (loc1.y - loc2.y) ** 2) ** 0.5
     return distance
+
+def similar_nodes(node1, node2, visited_pairs=None):
+    """
+    递归向上游对比两个节点及其所有上游节点，检查每个接口的数值是否相同
+    
+    参数:
+        node1: 第一个节点对象
+        node2: 第二个节点对象
+        visited_pairs: 已经对比过的节点对，防止无限循环
+    
+    返回:
+        bool: 如果所有节点及其接口数值都相同返回True，否则返回False
+    """
+    # 初始化已访问节点对集合
+    if visited_pairs is None:
+        visited_pairs = set()
+    
+    # 如果节点对已经对比过，跳过以防止循环引用导致的无限递归
+    node_pair = (node1, node2)
+    if node_pair in visited_pairs:
+        return True  # 假设已经对比过的节点对是相同的
+    
+    # 将当前节点对添加到已访问集合中
+    visited_pairs.add(node_pair)
+    
+    # 首先检查节点本身是否相同类型
+    if node1.bl_idname != node2.bl_idname:
+        return False
+    
+    # 检查节点属性是否相同
+    if hasattr(node1, 'node_tree') and hasattr(node2, 'node_tree'):
+        if node1.node_tree != node2.node_tree:
+            return False
+    
+    # 检查输入接口数量是否相同
+    if len(node1.inputs) != len(node2.inputs):
+        return False
+    
+    # 检查输出接口数量是否相同
+    if len(node1.outputs) != len(node2.outputs):
+        return False
+    
+    # 检查输入接口的默认值是否相同
+    for i in range(len(node1.inputs)):
+        input1 = node1.inputs[i]
+        input2 = node2.inputs[i]
+        
+        # 检查接口名称是否相同
+        if input1.name != input2.name:
+            return False
+        
+        # 检查默认值是否相同
+        if input1.default_value != input2.default_value:
+            # 对于颜色等向量值，需要特殊处理
+            if hasattr(input1.default_value, '__iter__') and hasattr(input2.default_value, '__iter__'):
+                try:
+                    if tuple(input1.default_value) != tuple(input2.default_value):
+                        return False
+                except:
+                    # 如果无法转换为元组，则直接比较
+                    if input1.default_value != input2.default_value:
+                        return False
+            else:
+                return False
+    
+    # 检查特殊属性（如图像纹理节点的图像）
+    if node1.type == 'TEX_IMAGE' and node2.type == 'TEX_IMAGE':
+        if node1.image != node2.image:
+            return False
+        if node1.projection != node2.projection:
+            return False
+        if node1.interpolation != node2.interpolation:
+            return False
+    
+    # 检查颜色渐变节点
+    if node1.type == 'VALTORGB' and node2.type == 'VALTORGB':
+        if node1.color_ramp.interpolation != node2.color_ramp.interpolation:
+            return False
+        if len(node1.color_ramp.elements) != len(node2.color_ramp.elements):
+            return False
+        for i in range(len(node1.color_ramp.elements)):
+            if node1.color_ramp.elements[i].position != node2.color_ramp.elements[i].position:
+                return False
+            if tuple(node1.color_ramp.elements[i].color) != tuple(node2.color_ramp.elements[i].color):
+                return False
+    
+    # 递归检查所有上游连接的节点
+    upstream_nodes1 = {}
+    upstream_nodes2 = {}
+    
+    # 收集第一个节点的所有上游节点
+    for input_socket in node1.inputs:
+        for link in input_socket.links:
+            from_node = link.from_node
+            from_socket_name = link.from_socket.name
+            to_socket_name = link.to_socket.name
+            upstream_nodes1[(from_socket_name, to_socket_name)] = from_node
+    
+    # 收集第二个节点的所有上游节点
+    for input_socket in node2.inputs:
+        for link in input_socket.links:
+            from_node = link.from_node
+            from_socket_name = link.from_socket.name
+            to_socket_name = link.to_socket.name
+            upstream_nodes2[(from_socket_name, to_socket_name)] = from_node
+    
+    # 检查上游连接是否相同
+    if set(upstream_nodes1.keys()) != set(upstream_nodes2.keys()):
+        return False
+    
+    # 递归对比所有上游节点
+    for key in upstream_nodes1.keys():
+        if key not in upstream_nodes2:
+            return False
+        
+        upstream_node1 = upstream_nodes1[key]
+        upstream_node2 = upstream_nodes2[key]
+        
+        # 递归对比上游节点
+        if not similar_nodes(upstream_node1, upstream_node2, visited_pairs):
+            return False
+    
+    return True
