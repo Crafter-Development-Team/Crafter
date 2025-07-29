@@ -21,10 +21,10 @@ from bpy.props import *
 from ..__init__ import dir_blend_append, dir_init_main
 from..properties import dirs_temp
 
-donot = ["Crafter Materials Settings"]
+donot = ["材质设置/Material Settings"]
 len_color_jin = 21
 name_library = "Crafter"
-names_Crafter_Moving_texture = ["Crafter-Moving_texture_Start", "Crafter-Moving_texture_Start_interpolate", "Crafter-Moving_texture_End"]
+names_Crafter_Moving_texture = ["Crafter-动态纹理_首", "Crafter-动态纹理_首_渐变", "Crafter-动态纹理_尾"]
 
 
 def load_icon_from_zip(zip_path, icons, name_icons, index):
@@ -400,7 +400,7 @@ def add_node_moving_texture(node_tex, nodes, links):
     links:目标材质连接组
     return:动态纹理节点
     '''
-    # ["Crafter-Moving_texture_Start", "Crafter-Moving_texture_Start_interpolate", "Crafter-Moving_texture_End"]
+    # ["Crafter-动态纹理_首", "Crafter-动态纹理_首_渐变", "Crafter-动态纹理_尾"]
     if node_tex.image.size[0] == 0:
         return None
     else:
@@ -412,16 +412,22 @@ def add_node_moving_texture(node_tex, nodes, links):
         return None
     
     if os.path.exists(dir_mcmeta):
+        node_frame = nodes.new(type="NodeFrame")
+        node_frame.label = "Crafter-动态纹理"
+
         node_Moving_texture_end = nodes.new(type="ShaderNodeGroup")
         node_Moving_texture_end.location = (node_tex.location.x - 200, node_tex.location.y)
-        node_Moving_texture_end.node_tree = bpy.data.node_groups["Crafter-Moving_texture_End"]
+        node_Moving_texture_end.node_tree = bpy.data.node_groups["Crafter-动态纹理_尾"]
+        node_Moving_texture_end.parent = node_frame
 
         node_Fac = nodes.new(type="ShaderNodeValToRGB")
         node_Fac.location = (node_tex.location.x - 750, node_tex.location.y)
         node_Fac.color_ramp.interpolation = "CONSTANT"
+        node_Fac.parent = node_frame
 
         node_Moving_texture_start = nodes.new(type="ShaderNodeGroup")
         node_Moving_texture_start.location = (node_tex.location.x - 900, node_tex.location.y)
+        node_Moving_texture_start.parent = node_frame
         
         with open(dir_mcmeta, 'r', encoding='utf-8') as file:
             mcmeta = json.load(file)
@@ -458,11 +464,11 @@ def add_node_moving_texture(node_tex, nodes, links):
                 list_frames.append([i,1])
 
         if interpolate:
-            node_Moving_texture_start.node_tree = bpy.data.node_groups["Crafter-Moving_texture_Start_interpolate"]
+            node_Moving_texture_start.node_tree = bpy.data.node_groups["Crafter-动态纹理_首_渐变"]
             node_Moving_texture_start.inputs["20 / frametime"].default_value = 20 / frametime
             node_Moving_texture_start.inputs["frames"].default_value = frames
         else:
-            node_Moving_texture_start.node_tree = bpy.data.node_groups["Crafter-Moving_texture_Start"]
+            node_Moving_texture_start.node_tree = bpy.data.node_groups["Crafter-动态纹理_首"]
             node_Moving_texture_start.inputs["20 / frametime / frames"].default_value = 20 / frametime / frames
             
         links.new(node_Moving_texture_end.outputs["Vector"], node_tex.inputs["Vector"])
@@ -480,12 +486,14 @@ def add_node_moving_texture(node_tex, nodes, links):
                 node_Fac = nodes.new(type="ShaderNodeValToRGB")
                 node_Fac.location = (node_tex.location.x - 750, node_tex.location.y + ((n // 32) * 250))
                 node_Fac.color_ramp.interpolation = "CONSTANT"
+                node_Fac.parent = node_frame
                 links.new(node_Moving_texture_start.outputs["Fac"], node_Fac.inputs["Fac"])
 
                 node_Math = nodes.new(type="ShaderNodeMath")
                 node_Math.location = (node_tex.location.x - 500, node_tex.location.y + ((n // 32) * 250) - 250)
                 node_Math.operation = "LESS_THAN"
                 node_Math.use_clamp = False
+                node_Math.parent = node_frame
                 links.new(node_Moving_texture_start.outputs["Fac"], node_Math.inputs["Value"])
                 node_Math.inputs["Value_001"].default_value = adding_frames / frames
 
@@ -493,6 +501,7 @@ def add_node_moving_texture(node_tex, nodes, links):
                 node_Mix.location = (node_tex.location.x - 350, node_tex.location.y + ((n // 32) * 250) - 250)
                 node_Mix.data_type = "FLOAT"
                 node_Mix.clamp_factor = False
+                node_Mix.parent = node_frame
 
                 links.new(node_Math.outputs["Value"], node_Mix.inputs["Factor"])
                 links.new(node_Fac.outputs["Alpha"], node_Mix.inputs["A"])
@@ -777,7 +786,7 @@ def creat_parallax_node(node_tex_normal, iterations, smooth, info_moving_normal,
     node_frame = nodes.new(type="NodeFrame")
     location = [node_tex_normal.location.x - 1500, node_tex_normal.location.y]
     node_frame.location = location
-    node_frame.label = "Crafter_Parallax"
+    node_frame.label = "Crafter-视差"
 
     move = 190
     iterations = max(iterations, 1)
@@ -791,7 +800,7 @@ def creat_parallax_node(node_tex_normal, iterations, smooth, info_moving_normal,
     while iterations >= i:
 
         node_parallax = nodes.new("ShaderNodeGroup")
-        node_parallax.node_tree = bpy.data.node_groups["CP-Parallax"]
+        node_parallax.node_tree = bpy.data.node_groups["CP-视差"]
         node_parallax.location = location
         node_parallax.inputs["1 / row"].default_value = row_dao
         location[0] -= 1.5 * move# location

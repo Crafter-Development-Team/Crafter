@@ -37,13 +37,13 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):
                 node_delete.append(node)
         for node in node_delete:
             bpy.data.node_groups.remove(node)
-        # 删除Crafter Materials Settings物体、材质
+        # 删除材质设置/Material Settings物体、材质
         try:
-            bpy.data.objects.remove(bpy.data.objects["Crafter Materials Settings"])
+            bpy.data.objects.remove(bpy.data.objects["材质设置/Material Settings"])
         except:
             pass
         try:
-            bpy.data.materials.remove(bpy.data.materials["Crafter Materials Settings"], do_unlink=True)
+            bpy.data.materials.remove(bpy.data.materials["材质设置/Material Settings"], do_unlink=True)
         except:
             pass
         # 导入C-节点组
@@ -54,18 +54,18 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):
             bpy.data.node_groups[node_group].use_fake_user = True
         # 导入Crafter-Moving_texture节点组
         add_node_group_if_not_exists(names_Crafter_Moving_texture)
-        # 导入Crafter Materials Settings物体、材质、startswith(CI-)
+        # 导入材质设置/Material Settings物体、材质、startswith(CI-)
         blend_material_dir = os.path.join(dir_materials, addon_prefs.Materials_List[addon_prefs.Materials_List_index].name + ".blend")
         with bpy.data.libraries.load(blend_material_dir, link=False) as (data_from, data_to):
-            data_to.objects = [name for name in data_from.objects if name == "Crafter Materials Settings"]
-        if "Crafter Materials Settings"  in bpy.data.collections:
-            collection_Crafter_Materials_Settings = bpy.data.collections["Crafter Materials Settings"]
+            data_to.objects = [name for name in data_from.objects if name == "材质设置/Material Settings"]
+        if "材质设置/Material Settings"  in bpy.data.collections:
+            collection_Crafter_Materials_Settings = bpy.data.collections["材质设置/Material Settings"]
         else:
-            collection_Crafter_Materials_Settings = bpy.data.collections.new(name="Crafter Materials Settings")
+            collection_Crafter_Materials_Settings = bpy.data.collections.new(name="材质设置/Material Settings")
             bpy.context.scene.collection.children.link(collection_Crafter_Materials_Settings)
-        collection_Crafter_Materials_Settings.objects.link(bpy.data.objects["Crafter Materials Settings"])
-        bpy.data.objects["Crafter Materials Settings"].hide_viewport = True
-        bpy.data.objects["Crafter Materials Settings"].hide_render = True
+        collection_Crafter_Materials_Settings.objects.link(bpy.data.objects["材质设置/Material Settings"])
+        bpy.data.objects["材质设置/Material Settings"].hide_viewport = True
+        bpy.data.objects["材质设置/Material Settings"].hide_render = True
         # 获取分类依据地址
         classification_folder_name = addon_prefs.Classification_Basis_List[addon_prefs.Classification_Basis_List_index].name
         classification_folder_dir = os.path.join(dir_classification_basis, classification_folder_name)
@@ -292,7 +292,7 @@ class VIEW3D_OT_CrafterLoadParallax(bpy.types.Operator):
             bpy.ops.object.mode_set(mode='OBJECT')
         bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
         # 导入CP-节点组
-        add_node_group_if_not_exists(["CP-Parallax"])
+        add_node_group_if_not_exists(["CP-视差"])
         # 开始遍历
         for_collection = []
         for mcmt in context.scene.Crafter_mcmts:
@@ -428,7 +428,7 @@ class VIEW3D_OT_CrafterRemoveParallax(bpy.types.Operator):
             nodes_wait_delete = []
             for node in nodes:
                 if node.type == "FRAME":
-                    if node.label == "Crafter_Parallax":
+                    if node.label == "Crafter-视差":
                         node_frame = node
                         nodes_wait_delete.append(node)
                         break
@@ -448,7 +448,7 @@ class VIEW3D_OT_CrafterRemoveParallax(bpy.types.Operator):
             #     if node.type == "TEX_COORD":
             #         nodes_tex_coord.append(node)
             #     if node.type == "GROUP":
-            #         if node.node_tree.name == "Crafter-Moving_texture_End":
+            #         if node.node_tree.name == "Crafter-动态纹理_尾":
             #             nodes_moving.append(node)
             # for node_moving in nodes_moving:
             #     if len(nodes_tex_coord) == 0:
@@ -467,7 +467,7 @@ class VIEW3D_OT_CrafterRemoveParallax(bpy.types.Operator):
                 if node.type == "TEX_IMAGE":
                     nodes_tex.append(node)
                 if node.type == "GROUP":
-                    if node.node_tree.name == "Crafter-Moving_texture_End":
+                    if node.node_tree.name == "Crafter-动态纹理_尾":
                         nodes_moving_end.append(node)
             for node_tex in nodes_tex:
                 if len(nodes_moving_end) == 0:

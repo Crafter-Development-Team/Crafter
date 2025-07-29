@@ -76,7 +76,6 @@ dictionary = {
         "default":"默认",
         "Open Classification Basis":"打开材质分类依据文件夹",
         "Reload Classification Basis":"刷新材质分类依据列表",
-        "Crafter Materials Settings":"Crafter材质设置",
             # ==========导入物品==========
         "Minecraft Item":"Minecraft物品",
         # ==========操作介绍==========
