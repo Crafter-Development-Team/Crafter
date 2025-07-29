@@ -810,6 +810,7 @@ def creat_parallax_node(node_tex_normal, iterations, smooth, info_moving_normal,
         else:
             links.new(node_parallax.outputs["Next Start"], node_last.inputs["Start"])
             links.new(node_parallax.outputs["UV"], node_last.inputs["UV"])
+            links.new(node_parallax.outputs["Current Depth"], node_last.inputs["Current Depth"])
             links.new(node_parallax.outputs["UV"], node_height.inputs["Vector"])
         node_last = node_parallax
 
