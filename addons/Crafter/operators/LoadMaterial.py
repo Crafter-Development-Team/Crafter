@@ -427,6 +427,10 @@ class VIEW3D_OT_CrafterLoadParallax(bpy.types.Operator):
                         node_bump.parent = node_frame_Bump
                         links.new(node_bump.outputs["Normal"], input)
                         links.new(node_final_depth.outputs["Current Depth"], node_bump.inputs["Height"])
+                        for input in node_bump.inputs:
+                            if input.name == "Filter Width":
+                                input.default_value = 2
+                                node_bump.inputs["Distance"].default_value = 1
                         if addon_prefs.Parallax_Based_on_Parsed_Normal:
                             links.new(node_C_PBR_Parser.outputs["Parsed Normal"], node_bump.inputs["Normal"])
                         break
