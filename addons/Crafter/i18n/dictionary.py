@@ -76,6 +76,11 @@ dictionary = {
         "default":"默认",
         "Open Classification Basis":"打开材质分类依据文件夹",
         "Reload Classification Basis":"刷新材质分类依据列表",
+        "Calculate Normal":"计算法向",
+        "Based on Parsed Normal":"基于已解析法向",
+        "Use base color as height":"使用基础色作为高度",
+        "Guess Height":"猜测高度",
+        "Scale of Guess Height":"缩放",
             # ==========导入物品==========
         "Minecraft Item":"Minecraft物品",
         # ==========操作介绍==========

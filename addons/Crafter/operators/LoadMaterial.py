@@ -300,6 +300,16 @@ class VIEW3D_OT_CrafterLoadParallax(bpy.types.Operator):
 
         row3 = layout.row()
         row3.prop(addon_prefs,"Parallax_Smooth",text="Smooth")
+
+        row4 = layout.row()
+        row4.prop(addon_prefs,"Parallax_Calculate_Normal")
+        if addon_prefs.Parallax_Calculate_Normal:
+            row4.prop(addon_prefs,"Parallax_Based_on_Parsed_Normal")
+        
+        row5 = layout.row()
+        row5.prop(addon_prefs,"Parallax_Guess_Height")
+        if addon_prefs.Parallax_Guess_Height:
+            row5.prop(addon_prefs,"Parallax_Guess_Height_Scale")
     def execute(self, context: bpy.types.Context):
         addon_prefs = context.preferences.addons[__addon_name__].preferences
 
@@ -329,6 +339,9 @@ class VIEW3D_OT_CrafterLoadParallax(bpy.types.Operator):
             node_tex_base = None
             node_tex_normal = None
             node_tex_PBR = None
+            node_output = None
+            node_CI = None
+            node_C_PBR_Parser = None
             for node in nodes:
                 if node.type == "TEX_IMAGE" and node.image != None:
                     name_image = fuq_bl_dot_number(node.image.name)
@@ -341,8 +354,15 @@ class VIEW3D_OT_CrafterLoadParallax(bpy.types.Operator):
                         nodes_wait_remove.append(node)
                     else:
                         node_tex_base = node
-                if node.type == "GROUP":
+                elif node.type == "GROUP":
+                    if node.node_tree != None:
+                        if node.node_tree.name.startswith("CI-"):
+                            node_CI = node
+                        if node.node_tree.name == "C-PBR_Parser":
+                            node_C_PBR_Parser = node
                     have_loaded_material = True
+                elif node.type == "OUTPUT_MATERIAL" and node.target == "EEVEE":
+                    node_output = node
             if not have_loaded_material:
                 continue
             if node_tex_base == None or node_tex_normal == None:# 若没有基础纹理或没有法向纹理，则跳过
@@ -350,7 +370,12 @@ class VIEW3D_OT_CrafterLoadParallax(bpy.types.Operator):
             # 查看法线贴图alpha是否存在视差信息
             not_parallax = is_alpha_channel_all_one(node_tex_normal)
             if not_parallax:
-                continue
+                if addon_prefs.Parallax_Guess_Height:
+                    base_as_height = True
+                else:
+                    continue
+            else:
+                base_as_height = False
 
             iterations = addon_prefs.Parallax_Iterations
             smooth = addon_prefs.Parallax_Smooth
@@ -359,43 +384,58 @@ class VIEW3D_OT_CrafterLoadParallax(bpy.types.Operator):
             info_normal = node_moving_tex_info(node_tex_normal)
             info_PBR = node_moving_tex_info(node_tex_PBR)
 
-            node_final_depth, node_frame = creat_parallax_node(node_tex_normal=node_tex_normal, iterations=iterations, smooth=smooth, info_moving_normal=info_normal, nodes=nodes, links=links)
+            if base_as_height:
+                node_tex_height = node_tex_base
+                node_tex = node_tex_normal
+                info_height = info_base
+                info_tex = info_normal
+                node_final_depth, node_frame = creat_parallax_node(node_tex_height=node_tex_height, iterations=iterations, smooth=smooth, info_moving_normal=info_normal, nodes=nodes, links=links, height_output="Color", scale=addon_prefs.Parallax_Guess_Height_Scale)
+            else:
+                node_tex_height = node_tex_normal
+                node_tex = node_tex_base
+                info_height = info_normal
+                info_tex = info_base
+                node_final_depth, node_frame = creat_parallax_node(node_tex_height=node_tex_height, iterations=iterations, smooth=smooth, info_moving_normal=info_normal, nodes=nodes, links=links, height_output="Alpha", scale=1)
 
-            moving_same_base = False
-            moving_same_PBR = False
-            if info_base[0] == info_normal[0]:
-                if info_base[0]:
-                    moving_same_base = similar_nodes(info_base[1], info_normal[1])
+
+            def final_link(node_tex, node_height, info_tex, info_height, node_final_depth, node_frame=None):
+                moving_same = False
+                if info_height[0] == info_tex[0]:
+                    if info_height[0]:
+                        moving_same = similar_nodes(info_tex[1], info_height[1])
+                    else:
+                        moving_same = True
+                if moving_same:
+                    links.new(node_final_depth.outputs["UV"], node_tex.inputs["Vector"])
                 else:
-                    moving_same_base = True
+                    pass
+                    # node_fianl_base = create_parallax_final(node=node_tex_base, node_final_depth=node_final_depth, node_frame=node_frame, info_moving=info_base, nodes=nodes, links=links)
+            final_link(node_tex=node_tex, node_height=node_tex_height, info_tex=info_tex, info_height=info_height, node_final_depth=node_final_depth, node_frame=node_frame,)
 
             if node_tex_PBR != None:
-                if info_PBR[0] == info_normal[0]:
-                    if info_PBR[0]:
-                        moving_same_PBR = similar_nodes(info_PBR[1], info_normal[1])
-                    else:
-                        moving_same_PBR = True
+                final_link(node_tex=node_tex_PBR, node_height=node_tex_height, info_tex=info_PBR, info_height=info_height, node_final_depth=node_final_depth, node_frame=node_frame,)
 
-            if moving_same_base:
-                links.new(node_final_depth.outputs["UV"], node_tex_base.inputs["Vector"])
-            else:
-                pass
-                # node_fianl_base = create_parallax_final(node=node_tex_base, node_final_depth=node_final_depth, node_frame=node_frame, info_moving=info_base, nodes=nodes, links=links)
-            
-            if moving_same_PBR:
-                links.new(node_final_depth.outputs["UV"], node_tex_PBR.inputs["Vector"])
-            else:
-                pass
-                # node_fianl_base = create_parallax_final(node=node_tex_base, node_final_depth=node_final_depth, node_frame=node_frame, info_moving=info_base, nodes=nodes, links=links)
-            
+            if addon_prefs.Parallax_Calculate_Normal and node_output != None and node_CI !=None:
+                for input in node_CI.inputs:
+                    if input.name == "Parsed Normal":
+                        node_frame_Bump = nodes.new(type="NodeFrame")
+                        node_frame_Bump.label = "Crafter-凹凸"
+
+                        node_bump = nodes.new(type="ShaderNodeBump")
+                        node_bump.location = (node_output.location.x - 400, node_output.location.y + 100)
+                        node_bump.invert = True
+                        node_bump.parent = node_frame_Bump
+                        links.new(node_bump.outputs["Normal"], input)
+                        links.new(node_final_depth.outputs["Current Depth"], node_bump.inputs["Height"])
+                        if addon_prefs.Parallax_Based_on_Parsed_Normal:
+                            links.new(node_C_PBR_Parser.outputs["Parsed Normal"], node_bump.inputs["Normal"])
+                        break
+                
             bpy.ops.crafter.set_parallax_depth()
         for node in bpy.data.node_groups["CP-1 / Iterations"].nodes:
             if node.type == "GROUP_OUTPUT":
                 node_output = node
         node_output.inputs["1 / Iterations"].default_value = 1 / addon_prefs.Parallax_Iterations
-
-
-
 
         return {'FINISHED'}
 
@@ -441,20 +481,37 @@ class VIEW3D_OT_CrafterRemoveParallax(bpy.types.Operator):
             links = node_tree_material.links
 
             node_frame = None
+            node_frame_Bump = None
+            node_CI = None
+            node_C_PBR_Parser = None
             nodes_wait_delete = []
             for node in nodes:
                 if node.type == "FRAME":
                     if node.label == "Crafter-视差":
                         node_frame = node
                         nodes_wait_delete.append(node)
-                        break
-            if node_frame != None:
-                for node in nodes:
+                    elif node.label == "Crafter-凹凸":
+                        node_frame_Bump = node
+                        nodes_wait_delete.append(node)
+                elif node.type == "GROUP":
+                    if node.node_tree != None:
+                        if node.node_tree.name.startswith("CI-"):
+                            node_CI = node
+                        if node.node_tree.name == "C-PBR_Parser":
+                            node_C_PBR_Parser = node
+            for node in nodes:
+                if node_frame != None:
                     if node.parent == node_frame:
                         nodes_wait_delete.append(node)
-                    elif node.type == "GROUP":
-                        if node.node_tree == None:
-                            nodes_wait_delete.append(node)
+                        continue
+                if node_frame_Bump != None:
+                    if node.parent == node_frame_Bump:
+                        nodes_wait_delete.append(node)
+                        continue
+                    
+                if node.type == "GROUP":
+                    if node.node_tree == None:
+                        nodes_wait_delete.append(node)
             for node in nodes_wait_delete:
                 nodes.remove(node)
 
@@ -494,6 +551,11 @@ class VIEW3D_OT_CrafterRemoveParallax(bpy.types.Operator):
                     if list_closest[0] > distance:
                         list_closest = [distance,nodes_moving_end[i]]
                 links.new(list_closest[1].outputs["Vector"], node_tex.inputs["Vector"])
+
+            if node_CI != None and node_C_PBR_Parser !=None:
+                for inpupt in node_CI.inputs:
+                    if inpupt.name == "Parsed Normal":
+                        links.new(node_C_PBR_Parser.outputs["Parsed Normal"], inpupt)
             
         return {'FINISHED'}
     

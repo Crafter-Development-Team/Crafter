@@ -218,6 +218,18 @@ class CrafterAddonPreferences(AddonPreferences):
                                   min=0.001,
                                   max=2.0,
                                   update=lambda self, context: self.set_parallax_depth(context))# type: ignore
+    Parallax_Calculate_Normal: BoolProperty(name="Calculate Normal",
+                                            default=True)# type: ignore
+    Parallax_Based_on_Parsed_Normal: BoolProperty(name="Based on Parsed Normal",
+                                                  default=True)# type: ignore
+    Parallax_Guess_Height: BoolProperty(name="Guess Height",
+                                        description="Use base color as height",
+                                        default=False)# type: ignore
+    Parallax_Guess_Height_Scale: FloatProperty(name="Scale of Guess Height",
+                                             default=0.5,
+                                             max=1,
+                                             min=0)# type: ignore
+    
 # ========== 其他功能属性 ==========
     Other_index: IntProperty(name="Other Function's Index",
                                       default=0)# type: ignore

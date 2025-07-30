@@ -781,10 +781,10 @@ def node_moving_tex_info(node):
 
     return info
 
-def creat_parallax_node(node_tex_normal, iterations, smooth, info_moving_normal, nodes, links):
+def creat_parallax_node(node_tex_height, iterations, smooth, info_moving_normal, nodes, links, height_output="Alpha", scale=1):
     # 创建框，方便清除
     node_frame = nodes.new(type="NodeFrame")
-    location = [node_tex_normal.location.x - 1500, node_tex_normal.location.y]
+    location = [node_tex_height.location.x - 1500, node_tex_height.location.y]
     node_frame.location = location
     node_frame.label = "Crafter-视差"
 
@@ -815,7 +815,7 @@ def creat_parallax_node(node_tex_normal, iterations, smooth, info_moving_normal,
         node_last = node_parallax
 
         node_height = nodes.new("ShaderNodeTexImage")
-        node_height.image = node_tex_normal.image
+        node_height.image = node_tex_height.image
         node_height.location = location
         location[0] -= move# location
         node_height.parent = node_frame
@@ -823,8 +823,18 @@ def creat_parallax_node(node_tex_normal, iterations, smooth, info_moving_normal,
             node_height.interpolation = "Linear"
         else:
             node_height.interpolation = "Closest"
-
-        links.new(node_height.outputs["Alpha"], node_last.inputs["Depth"])
+        if scale == 1:
+            links.new(node_height.outputs[height_output], node_last.inputs["Depth"])
+        else:
+            node_math = nodes.new("ShaderNodeMath")
+            node_math.operation = "MULTIPLY_ADD"
+            node_math.location = location
+            location[0] -= move# location
+            node_math.inputs["Value_001"].default_value = scale
+            node_math.inputs["Value_002"].default_value = 1 - scale
+            links.new(node_height.outputs[height_output], node_math.inputs["Value"])
+            links.new(node_math.outputs["Value"], node_last.inputs["Depth"])
+            node_math.parent = node_frame
 
         if i == iterations:
             if info_moving_normal[0]:
@@ -842,7 +852,7 @@ def creat_parallax_node(node_tex_normal, iterations, smooth, info_moving_normal,
 
         i += 1
 
-        links.new(node_final_parallax.outputs["UV"], node_tex_normal.inputs["Vector"])
+        links.new(node_final_parallax.outputs["UV"], node_tex_height.inputs["Vector"])
 
     return node_final_parallax, node_frame
 
@@ -934,9 +944,9 @@ def copy_node_tree_recursive(source_node, nodes, links, node_mapping=None, to_lo
         
         # 复制所有颜色元素
         for i, element in enumerate(source_node.color_ramp.elements):
-            if i == 0:
+            if i == 0 or i == 1:
                 # 第一个元素已经存在，只需设置其属性
-                new_element = new_node.color_ramp.elements[0]
+                new_element = new_node.color_ramp.elements[i]
                 new_element.position = element.position
                 new_element.color = element.color
             else:
@@ -1039,7 +1049,7 @@ def similar_nodes(node1, node2, visited_pairs=None):
     if node1.bl_idname != node2.bl_idname:
         return False
     
-    # 检查节点属性是否相同
+    # 检查节点节点树
     if hasattr(node1, 'node_tree') and hasattr(node2, 'node_tree'):
         if node1.node_tree != node2.node_tree:
             return False
@@ -1056,11 +1066,6 @@ def similar_nodes(node1, node2, visited_pairs=None):
     for i in range(len(node1.inputs)):
         input1 = node1.inputs[i]
         input2 = node2.inputs[i]
-        
-        # 检查接口名称是否相同
-        if input1.name != input2.name:
-            return False
-        
         # 检查默认值是否相同
         if input1.default_value != input2.default_value:
             # 对于颜色等向量值，需要特殊处理
