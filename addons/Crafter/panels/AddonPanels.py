@@ -122,8 +122,6 @@ class VIEW3D_PT_CrafterMaterials(bpy.types.Panel):
         row_col2_parallax = col2_parallax.row(align=True)
         row_col2_parallax.operator("crafter.load_parallax",icon="ADD",text="Load Parallax")
         row_col2_parallax.operator("crafter.remove_parallax",icon="X",text="Remove Parallax")
-        col3_parallax = row_parallax.column()
-        col3_parallax.operator("crafter.set_parallax",icon="PREFERENCES",text="")
 
         box_classification = box.box()
         box_classification.label(text="Classification Basis",icon="PACKAGE")

@@ -284,6 +284,22 @@ class VIEW3D_OT_CrafterLoadParallax(bpy.types.Operator):
     def poll(cls, context: bpy.types.Context):
         return True
 
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(self)
+    
+    def draw(self, context):
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
+
+        layout = self.layout
+
+        row1 = layout.row()
+        row1.prop(addon_prefs,"Parallax_Iterations",text="Iterations")
+
+        row2 = layout.row()
+        row2.prop(addon_prefs,"Parallax_Depth",text="Depth")
+
+        row3 = layout.row()
+        row3.prop(addon_prefs,"Parallax_Smooth",text="Smooth")
     def execute(self, context: bpy.types.Context):
         addon_prefs = context.preferences.addons[__addon_name__].preferences
 
@@ -480,38 +496,6 @@ class VIEW3D_OT_CrafterRemoveParallax(bpy.types.Operator):
                 links.new(list_closest[1].outputs["Vector"], node_tex.inputs["Vector"])
             
         return {'FINISHED'}
-
-# ==================== 设置视差迭代 ====================
-
-class VIEW3D_OT_CrafterSetParallax(bpy.types.Operator):
-    bl_label = "Parallax Setting"
-    bl_idname = "crafter.set_parallax"
-    bl_description = " "
-    bl_options = {"REGISTER", "UNDO"}
-
-    @classmethod
-    def poll(cls, context: bpy.types.Context):
-        return True
-
-    def invoke(self, context, event):
-        return context.window_manager.invoke_props_dialog(self)
-    
-    def draw(self, context):
-        addon_prefs = context.preferences.addons[__addon_name__].preferences
-
-        layout = self.layout
-
-        row1 = layout.row()
-        row1.prop(addon_prefs,"Parallax_Iterations",text="Iterations")
-
-        row2 = layout.row()
-        row2.prop(addon_prefs,"Parallax_Depth",text="Depth")
-
-        row3 = layout.row()
-        row3.prop(addon_prefs,"Parallax_Smooth",text="Smooth")
-        
-    def execute(self, context):
-        return {"FINISHED"}
     
 # ==================== 设置视差深度 ====================
 
