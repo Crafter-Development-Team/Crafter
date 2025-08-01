@@ -856,19 +856,24 @@ def creat_parallax_node(node_tex_height, iterations, smooth, info_moving_normal,
 
     return node_final_parallax, node_frame
 
-def create_parallax_final(node, node_final_depth, node_frame, info_moving, nodes, links):
+def create_parallax_final(node, node_final_depth, info_height, info_moving, nodes, links, node_frame=None):
     node_final = nodes.new("ShaderNodeGroup")
-    if info_moving[0]:
-        node_final.node_tree = bpy.data.node_groups["CP-Final_Parallax_moving"]
-        node_final.inputs["row"].default_value = info_moving[1]
-        node_final.inputs["frametime"].default_value = info_moving[2]
-        node_final.inputs["interpolate"].default_value = info_moving[3]
-    else:
-        node_final.node_tree = bpy.data.node_groups["CP-Final_Parallax"]
-    node_final.location = node.location.x - 600, node.location.y
-    node_final.parent = node_frame
+    node_final.node_tree = bpy.data.node_groups["CP-视差转换"]
+    Scale = 1
+    if info_height[0]:
+        Scale = info_height[1].inputs["row"].default_value
+        links.new(info_height[1].inputs["frame / row"].links[0].from_node.outputs["Alpha"], node_final.inputs["old move"])
 
-    links.new(node_final_depth.outputs["Current_Depth"], node_final.inputs["Depth"])
+    if info_moving[0]:
+        Scale /= info_moving[1].inputs["row"].default_value
+        links.new(info_moving[1].inputs["frame / row"].links[0].from_node.outputs["Alpha"], node_final.inputs["new move"])
+
+    node_final.location = node.location.x - 1400, node.location.y
+    node_final.inputs["Scale"].default_value = Scale
+
+    if node_frame != None:
+        node_final.parent = node_frame
+    links.new(node_final_depth.outputs["UV"], node_final.inputs["UV"])
     links.new(node_final.outputs["UV"], node.inputs["Vector"])
 
     return node_final
@@ -895,7 +900,6 @@ def is_alpha_channel_all_one(image_node):
             return False  # 发现非1的alpha值，直接返回False
 
     return True  # 所有alpha值都是1
-
 
 def copy_node_tree_recursive(source_node, nodes, links, node_mapping=None, to_location=[0,0], parent=None):
     """
@@ -1022,6 +1026,7 @@ def nodes_distance(node1, node2):
     return distance
 
 def similar_nodes(node1, node2, visited_pairs=None):
+    
     """
     递归向上游对比两个节点及其所有上游节点，检查每个接口的数值是否相同
     
@@ -1138,3 +1143,15 @@ def similar_nodes(node1, node2, visited_pairs=None):
             return False
     
     return True
+
+def is_moving_same(info_tex, info_height):
+    moving_same = False
+    if info_height[0] == info_tex[0]:
+        if info_height[0]:
+            moving_same = similar_nodes(info_tex[1], info_height[1])
+        else:
+            moving_same = True
+    return moving_same 
+
+
+

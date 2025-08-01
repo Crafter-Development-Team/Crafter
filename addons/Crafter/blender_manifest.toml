@@ -4,7 +4,7 @@ schema_version = "1.0.0"
 # Change the values according to your extension
 # id must be the same as the directory name, and must be unique
 id = "Crafter"
-version = "0.7.2"
+version = "0.7.4"
 name = "Crafter"
 tagline = "目标是成为从Minecraft到Blender全流程的Blender插件"
 maintainer = "Crafter Development Team"
