@@ -5,7 +5,7 @@ from ..config import __addon_name__
 from ....common.i18n.i18n import i18n
 from ....common.types.framework import reg_order
 from ..__init__ import dir_resourcepacks_plans
-
+from ..operators.Defs import *
 # @reg_order(0)# ==========加载预设面板==========
 # class VIEW3D_PT_CrafterPlans(bpy.types.Panel):
 #     bl_label = "Plans"
@@ -155,10 +155,24 @@ class VIEW3D_PT_CrafterOthers(bpy.types.Panel):
         row_function1.operator("crafter.ui_replace_resources",text="Replace Resources",icon="NODE_COMPOSITING",depress=addon_prefs.Other_index == 1)
         
         if addon_prefs.Other_index == 0:
-            row_Asset = layout.row()
-
-            # row_Asset.operator("crafter.build_asset_library",text="Replace Resources",icon="NODE_COMPOSITING")
             
+            libraries = bpy.context.preferences.filepaths.asset_libraries
+            have_assets = False
+            for lib in libraries:
+                if lib.name == name_library:
+                    have_assets = True
+            if not have_assets:
+                row_Asset1 = layout.row()
+                row_Asset1.label(text="Select an path to build asset library")
+
+                row_Asset2 = layout.row()
+                row_Asset2.prop(addon_prefs,"Asset_Path",text="")
+
+                row_Asset3 = layout.row()
+                row_Asset3.operator("crafter.build_asset_library",icon="NODE_COMPOSITING")
+            else:
+                row_Asset4 = layout.row()
+                row_Asset4.label(text="Asset is ready")
             
         # ========== 加载资源包面板 ==========
         if addon_prefs.Other_index == 1:

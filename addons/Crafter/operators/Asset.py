@@ -12,8 +12,7 @@ from ..nbt import nbt
 from ..config import __addon_name__
 from ....common.i18n.i18n import i18n
 from bpy.props import *
-from .. import dir_cafter_data, dir_resourcepacks_plans, dir_blend_append, dir_init_main, dir_no_lod_blocks
-from .. import icons_world, icons_game_resource, icons_game_unuse_resource
+from ..__init__ import dir_default_Asset
 from .Defs import *
 
 # ==================== UI切换至资产 ====================
@@ -56,9 +55,25 @@ class VIEW3D_OT_CrafterBuildAssetLibrary(bpy.types.Operator):
         for lib in libraries:
             if lib.name == name_library:
                 return {'FINISHED'}
-        for lib in libraries:
-            print(lib.name)
-        lib_crafter = libraries.new(name=name_library)
-        # lib_crafter.path = os.path.join(get_dir_save(context), "Crafter_Library")
+        dir_asset = os.path.normpath(addon_prefs.Asset_Path)
+        if not os.path.exists(dir_asset):
+            self.report({'ERROR'}, "Path does not exist")
+            return {'CANCELLED'}
+        lib_crafter = libraries.new(name=name_library, directory=dir_asset)
+        list_asset_files = os.listdir(dir_asset)
+
+        for file in os.listdir(dir_default_Asset):
+            if os.path.isfile(os.path.join(dir_default_Asset, file)):
+                if file.endswith(".blend"):
+                    shutil.copy(os.path.join(dir_default_Asset, file), os.path.join(dir_asset, file))
+        
+        if len(list_asset_files) == 0:
+            for file in os.listdir(dir_default_Asset):
+                if os.path.isfile(os.path.join(dir_default_Asset, file)):
+                    if file.endswith(".txt"):
+                        shutil.copy(os.path.join(dir_default_Asset, file), os.path.join(dir_asset, file))
+        
+            
+
             
         return {'FINISHED'}

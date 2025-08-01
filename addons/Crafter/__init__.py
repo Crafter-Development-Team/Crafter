@@ -68,6 +68,7 @@ dir_defaults = os.path.join(dir_init_main, "defaults")
 dir_defaults_materials = os.path.join(dir_defaults, "materials")
 dir_defaults_classification_basis = os.path.join(dir_defaults, "classification basis")
 dir_defaults_no_lod_blocks = os.path.join(dir_defaults,"no_lod_blocks")
+dir_default_Asset = os.path.join(dir_defaults, "Asset")
 
 dir_cafter_data = os.path.join(dir_extensions, "cafter_data")
 dir_resourcepacks_plans = os.path.join(dir_cafter_data, "resourcepacks")

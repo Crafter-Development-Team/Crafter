@@ -233,6 +233,11 @@ class CrafterAddonPreferences(AddonPreferences):
 # ========== 其他功能属性 ==========
     Other_index: IntProperty(name="Other Function's Index",
                                       default=0)# type: ignore
+    
+    # ========== 其他功能属性 ==========
+    Asset_Path: StringProperty(name="Asset Path",
+                               subtype="FILE_PATH",
+                               default="Asset Path")# type: ignore
 # ========== 偏好设置面板 ==========
     def draw(self, context: bpy.types.Context):
         layout = self.layout
