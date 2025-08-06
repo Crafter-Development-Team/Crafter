@@ -10,6 +10,7 @@ dictionary = {
         "Load Environment":"加载环境",
             # ==========导入世界==========
         "Import World":"导入世界",
+        "Reimport World":"重导入世界",
         "Import Editable Area":"导入可编辑区域",
         "Minecraft Saves":"Minecraft存档",
         "World path":"存档地址",
@@ -90,6 +91,7 @@ dictionary = {
         "History":"历史",
         "Area Selector":"坐标选择器",
         "Import the surface world":"导入表面世界",
+        "Reimport the surface world":"重导入表面世界",
         "Import the solid area":"导入实心区域",
         "Starting coordinates":"起始坐标",
         "Ending coordinates":"结束坐标",
@@ -122,6 +124,7 @@ dictionary = {
         "Parsed Normal":"已解析法向",
         "Porosity":"孔隙率",
         # ==========提示==========
+        "Config file not found!":"未找到配置文件!",
         "Path not found!":"路径未找到!",
         "It's not a jar file!":"这不是一个jar文件!",
         "It's not a folder!":"这不是一个文件夹!",

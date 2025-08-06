@@ -505,10 +505,10 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
                 except:
                     pass
             if node.type == "GROUP":
-                node.inputs["min X"].default_value = min(addon_prefs.XYZ_1[0],addon_prefs.XYZ_2[0])
-                node.inputs["min Y"].default_value = min(0 - addon_prefs.XYZ_1[2],0 - addon_prefs.XYZ_2[2]) - 1
-                node.inputs["max X"].default_value = 1 + max(addon_prefs.XYZ_1[0],addon_prefs.XYZ_2[0])
-                node.inputs["max Y"].default_value = max(0 - addon_prefs.XYZ_1[2],0 - addon_prefs.XYZ_2[2])
+                node.inputs["min X"].default_value = worldconfig["minX"]
+                node.inputs["min Y"].default_value = worldconfig["minY"] - 1
+                node.inputs["max X"].default_value = 1 + worldconfig["maxX"]
+                node.inputs["max Y"].default_value = worldconfig["maxY"]
 
         #查找所需节点
         for name_material in real_name_dic.values():
@@ -651,6 +651,165 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         self.report({'INFO'},report_text)
 
         return {'FINISHED'}
+
+# ==================== 重导入世界 ====================
+
+class VIEW3D_OT_CrafterReimportSurfaceWorld(bpy.types.Operator):# 重导入表层世界
+    bl_label = "Reimport World"
+    bl_idname = "crafter.reimport_surface_world"
+    bl_description = "Reimport the surface world"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context: bpy.types.Context):
+        return True
+    def execute(self, context: bpy.types.Context):
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
+        
+        prepared_time = time.perf_counter()
+
+        # 根据平台选择配置目录和可执行文件
+        current_platform = platform.system()
+        if current_platform == "Darwin":  # macOS
+            dir_config = os.path.join(dir_importer, "config_macos")
+        else:  # Windows和其他平台
+            dir_config = os.path.join(dir_importer, "config")
+        dir_json_config = os.path.join(dir_config, "config.json")
+
+        if not os.path.exists(dir_json_config):
+            self.report({'ERROR'}, "Config file not found!")
+            return {'CANCELLED'}
+        try:
+            with open(dir_json_config, 'r', encoding='utf-8') as config:
+                worldconfig = json.load(config)
+        except:
+            self.report({'ERROR'}, "Config file not found!")
+            return {'CANCELLED'}
+
+        imported_time = str(context.scene.Crafter_import_time)
+        have_obj = False
+        real_name_dic = {}
+        material_should_delete = []
+        before_objects = set(bpy.data.objects)#记录当前场景最初对象
+        for file in os.listdir(dir_importer):
+            if file.endswith(".obj"):
+                pre_import_objects = set(bpy.data.objects)#记录当前场景中的所有对象
+                
+                bpy.ops.wm.obj_import(filepath=os.path.join(dir_importer, file))
+                bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
+                have_obj = True
+                
+                imported_objects = list(set(bpy.data.objects) - pre_import_objects)#计算新增对象
+                for obj in imported_objects:
+                    for i in range(len(obj.data.materials)):
+                        material = obj.data.materials[i]
+                        if material.name.startswith("color#"):
+                            if len(material.name) > len_color_jin:
+                                real_material_name = fuq_bl_dot_number(material.name)
+                            else:
+                                real_material_name = material.name
+                        else:
+                            real_material_name = fuq_bl_dot_number(material.name)
+                        if real_material_name in real_name_dic:
+                            obj.data.materials[i] = bpy.data.materials[real_name_dic[real_material_name]]
+                            material_should_delete.append(material.name)
+                        else:
+                            real_name_dic[real_material_name] = material.name
+                    add_to_mcmts_collection(object=obj,context=context)
+                    add_to_crafter_mcmts_collection(object=obj,context=context)
+                    add_Crafter_time(obj=obj)
+                    #定位到视图
+                    view_2_active_object(context)
+
+        for material in material_should_delete:
+            bpy.data.materials.remove(bpy.data.materials[material])
+        if not have_obj:
+            self.report({'ERROR'}, "WorldImporter didn't export obj!")
+            return {"CANCELLED"}
+        
+        #若不存在，则导入Crafter-Moving_texture节点组，群系颜色纹理节点
+        add_node_group_if_not_exists(names_Crafter_Moving_texture)
+        add_node_group_if_not_exists(["Crafter-biomeTex"])
+        
+        #复制并修改Crafter-biomeTex
+        dir_biomeTex = os.path.join(dir_importer, "biomeTex")
+        dir_biomeTex_num = os.path.join(dir_biomeTex, imported_time)
+        node_group_biomeTex = bpy.data.node_groups["Crafter-biomeTex"]
+        copyname = "Crafter-biomeTex_" + imported_time
+        node_group_biomeTex_copy = node_group_biomeTex.copy()
+        node_group_biomeTex_copy.name = copyname
+        for node in node_group_biomeTex_copy.nodes:
+            if node.type == "TEX_IMAGE":
+                try:
+                    node.image = bpy.data.images.load(os.path.join(dir_biomeTex_num, fuq_bl_dot_number(node.image.name)))
+                except:
+                    pass
+            if node.type == "GROUP":
+                node.inputs["min X"].default_value = worldconfig["minX"]
+                node.inputs["min Y"].default_value = worldconfig["minY"] - 1
+                node.inputs["max X"].default_value = 1 + worldconfig["maxX"]
+                node.inputs["max Y"].default_value = worldconfig["maxY"]
+        #查找所需节点
+        for name_material in real_name_dic.values():
+            if name_material.startswith("color#"):
+                continue
+            material = bpy.data.materials[name_material]
+            nodes = material.node_tree.nodes
+            links = material.node_tree.links
+            nodes_wait_remove = []
+            node_tex_base = None
+            for node in nodes:
+                if node.type == "OUTPUT_MATERIAL":
+                    if node.target == "EEVEE":
+                        node_output_EEVEE = node
+                    if node.target == "ALL":
+                        node_output_EEVEE = node
+                elif node.type == "TEX_IMAGE":
+                    if node_tex_base != None:
+                        nodes_wait_remove.append(node)
+                    else:
+                        node_tex_base = node
+                        node.interpolation = "Closest"
+                elif node.type == "BSDF_PRINCIPLED":
+                    node_principled = node
+            for node in nodes_wait_remove:
+                nodes.remove(node)
+            # 连接Alpha
+            if node_tex_base != None:
+                links.new(node_tex_base.outputs["Alpha"], node_principled.inputs["Alpha"])
+            # 添加群系着色纹理,PBR、法线纹理
+            node_liomeTex = nodes.new("ShaderNodeGroup")
+            node_liomeTex.location = (node_output_EEVEE.location.x - 400, node_output_EEVEE.location.y - 550)
+            node_liomeTex.node_tree = node_group_biomeTex_copy
+            if node_tex_base != None:
+                load_normal_and_PBR(node_tex_base=node_tex_base, nodes=nodes, links=links,)
+                nodes.active = node_tex_base
+        try:
+            bpy.ops.file.pack_all()
+        except Exception as e:
+            print(e)
+            
+        if addon_prefs.Auto_Load_Material:
+            material_start_time = time.perf_counter()
+            bpy.ops.crafter.load_material()
+            material_used_time = time.perf_counter() - material_start_time
+
+        # 完成导入计时
+        world_imported_time = time.perf_counter()
+        report_text = i18n("Import time: ") + str(world_imported_time - prepared_time)[:6] + "s"
+        if addon_prefs.Auto_Load_Material:
+            material_start_time = time.perf_counter()
+            bpy.ops.crafter.load_material()
+            material_used_time = time.perf_counter() - material_start_time
+            report_text = report_text + i18n(", Material time: ") + str(material_used_time)[:6] + "s"
+
+        # 定位到视图
+        new_objects = list(set(bpy.data.objects) - before_objects)
+        for object in new_objects:
+            if object.type == "MESH":
+                object.select_set(True)
+        view_2_active_object(context)
+        return {"FINISHED"}
 
 class VIEW3D_OT_CrafterImportSolidArea(bpy.types.Operator):#导入可编辑区域 ==========未完善==========
     bl_label = "Import Solid Area"

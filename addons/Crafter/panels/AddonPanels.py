@@ -64,7 +64,9 @@ class VIEW3D_PT_CrafterImportWorld(bpy.types.Panel):
 
         row_ImportWorld = box.row()
         row_ImportWorld.label(icon="MOD_BUILD")
-        row_ImportWorld.operator("crafter.import_surface_world",text="Import World")
+        row_ImportWorld_main = row_ImportWorld.row(align=True)
+        row_ImportWorld_main.operator("crafter.import_surface_world",text="Import World")
+        row_ImportWorld_main.operator("crafter.reimport_surface_world",text="",icon="FILE_REFRESH")
         row_ImportWorld.operator("crafter.open_worldimporter_folder",text="",icon="FILE_FOLDER")
         if addon_prefs.Point_Cloud_Mode:
             row_ImportWorld.operator("crafter.import_solid_area",text="Import Editable Area")
@@ -161,18 +163,18 @@ class VIEW3D_PT_CrafterOthers(bpy.types.Panel):
             for lib in libraries:
                 if lib.name == name_library:
                     have_assets = True
-            if not have_assets:
-                row_Asset1 = layout.row()
-                row_Asset1.label(text="Select an path to build asset library")
+            # if not have_assets:
+            #     row_Asset1 = layout.row()
+            #     row_Asset1.label(text="Select an path to build asset library")
 
-                row_Asset2 = layout.row()
-                row_Asset2.prop(addon_prefs,"Asset_Path",text="")
+            #     row_Asset2 = layout.row()
+            #     row_Asset2.prop(addon_prefs,"Asset_Path",text="")
 
-                row_Asset3 = layout.row()
-                row_Asset3.operator("crafter.build_asset_library",icon="NODE_COMPOSITING")
-            else:
-                row_Asset4 = layout.row()
-                row_Asset4.label(text="Asset is ready")
+            #     row_Asset3 = layout.row()
+            #     row_Asset3.operator("crafter.build_asset_library",icon="NODE_COMPOSITING")
+            # else:
+            #     row_Asset4 = layout.row()
+            #     row_Asset4.label(text="Asset is ready")
             
         # ========== 加载资源包面板 ==========
         if addon_prefs.Other_index == 1:
