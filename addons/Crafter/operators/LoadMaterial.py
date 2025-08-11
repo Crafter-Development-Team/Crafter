@@ -27,8 +27,7 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):
         bpy.ops.crafter.reload_all()
         if not (-1 < addon_prefs.Materials_List_index and addon_prefs.Materials_List_index < len(addon_prefs.Materials_List)):
             return {"CANCELLED"}
-        if context.active_object:
-            bpy.ops.object.mode_set(mode='OBJECT')
+        make_true_object_mode(context)
         bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
         # 删除startswith(CO-)、startswith(CI-)节点组、startswith(C-)节点组
         node_delete = []
@@ -637,6 +636,54 @@ class VIEW3D_OT_CrafterSetPBRParser(bpy.types.Operator):
                         if node.node_tree.name == "C-PBR_Parser":
                             node.inputs["PBR"].default_value = PBR_value
         return {'FINISHED'}
+
+class VIEW3D_OT_CrafterMaterialPanel(bpy.types.Operator):
+    bl_label = "Material Panel"
+    bl_idname = "crafter.material_panel"
+    bl_description = "Show Material Panel"
+
+    @classmethod
+    def poll(cls, context: bpy.types.Context):
+
+        for obj in bpy.data.objects:
+            if obj.name == "材质设置/Material Settings":
+                return True
+        else:
+            return False
+
+    def execute(self, context: bpy.types.Context):
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
+
+        for obj in bpy.data.objects:
+            if obj.name == "材质设置/Material Settings":
+                break
+        else:
+            return {'FINISHED'}
+
+
+        make_true_object_mode(context)
+
+        obj.hide_select = False
+        obj.hide_viewport = False
+        context.view_layer.objects.active = obj
+
+        bpy.ops.wm.window_new()
+        window = bpy.context.window_manager.windows[-1]
+        area = window.screen.areas[0]
+        area.ui_type = 'ShaderNodeTree'
+        
+        for mat in obj.data.materials:
+            if mat.use_nodes == True:
+                nodes = mat.node_tree.nodes
+                for node in nodes:
+                    if node.type == "FRAME":
+                        frame_node = node
+                        nodes.active = node
+                    
+        obj.hide_viewport = True
+
+        return {'FINISHED'}
+
 
 # ==================== 打开材质列表文件夹 ====================
 

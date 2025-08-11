@@ -82,6 +82,7 @@ dictionary = {
         "Use base color as height":"使用基础色作为高度",
         "Guess Height":"猜测高度",
         "Scale of Guess Height":"缩放",
+        "Material Panel": "材质面板",
             # ==========导入物品==========
         "Minecraft Item":"Minecraft物品",
         # ==========操作介绍==========
@@ -110,6 +111,7 @@ dictionary = {
         "Remove Parallax": "移除视差",
         "Parallax Setting": "视差设置",
         "Iterations": "迭代次数",
+        "Show Material Panel": "显示材质面板",
             # ==========导入物品==========
         "Import Minecraft item":"导入Minecraft物品",
             # ==========其余功能==========

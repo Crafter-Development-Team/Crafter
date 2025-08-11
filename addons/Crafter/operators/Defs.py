@@ -1153,5 +1153,7 @@ def is_moving_same(info_tex, info_height):
             moving_same = True
     return moving_same 
 
-
+def make_true_object_mode(context):
+    if context.active_object:
+        bpy.ops.object.mode_set(mode='OBJECT')
 

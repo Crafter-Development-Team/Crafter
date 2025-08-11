@@ -125,6 +125,11 @@ class VIEW3D_PT_CrafterMaterials(bpy.types.Panel):
         row_col2_parallax.operator("crafter.load_parallax",icon="ADD",text="Load Parallax")
         row_col2_parallax.operator("crafter.remove_parallax",icon="X",text="Remove Parallax")
 
+        box_material_panel = box.box()
+        row_material_panel = box_material_panel.row()
+        row_material_panel.label(icon="NODE")
+        row_material_panel.operator("crafter.material_panel",text="Material Panel")
+
         box_classification = box.box()
         box_classification.label(text="Classification Basis",icon="PACKAGE")
         row_Classification_Basis = box_classification.row()
