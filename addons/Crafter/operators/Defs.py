@@ -451,9 +451,8 @@ def add_node_moving_texture(node_tex, nodes, links):
                         frames += 1
                         list_frames.append([frame,1])
                     else:
-                        info_frame = json.loads(frame)
-                        frames += info_frame["time"] / frametime
-                        list_frames.append([info_frame["index"],info_frame["time"] / frametime])
+                        frames += frame["time"] / frametime
+                        list_frames.append([frame["index"],frame["time"] / frametime])
             else:
                 haveframe = False
         else:
