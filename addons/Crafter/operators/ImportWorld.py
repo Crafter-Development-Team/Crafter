@@ -1421,6 +1421,9 @@ class VIEW3D_OT_CrafterReloadHistoryWorldsList(bpy.types.Operator):#刷新 历�
                 for save in json_history_worlds[addon_prefs.History_World_Roots_List[addon_prefs.History_World_Roots_List_index].name][0]:
                     history_world_save = addon_prefs.History_World_Saves_List.add()
                     history_world_save.name = save
+                    dir_icon = os.path.join(get_dir_saves(context), save, "icon.png")
+                    icons_world.load("world_icon_" + str(world_index), dir_icon, 'IMAGE')
+                    world_index += 1
                     if len(addon_prefs.History_World_Saves_List) > 0:
                         if addon_prefs.History_World_Saves_List_index < 0 or addon_prefs.History_World_Saves_List_index >= len(addon_prefs.History_World_Saves_List):
                             addon_prefs.History_World_Saves_List_index = 0
