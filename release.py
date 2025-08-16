@@ -1,6 +1,7 @@
 from framework import get_init_file_path, release_addon
-from main import ACTIVE_ADDON, IS_EXTENSION
-
+from main import ACTIVE_ADDON, IS_EXTENSION, DEFAULT_RELEASE_DIR
+import os
+import shutil
 # 发布前请修改ACTIVE_ADDON参数
 
 # The name of the addon to be released, this name is defined in the config.py of the addon as __addon_name__
@@ -31,17 +32,24 @@ if __name__ == '__main__':
     parser.add_argument('--with_timestamp', default=False, action='store_true', help='Append a timestamp to the zip '
                                                                                      'file name.')
     args = parser.parse_args()
+    # for file in os.listdir(DEFAULT_RELEASE_DIR):
+    print("===============================================================================")
+    dir_file = os.path.normpath(DEFAULT_RELEASE_DIR)
+    if os.path.exists(dir_file):
+        shutil.rmtree(dir_file)
+        print("removed",dir_file)
     release_addon(target_init_file=get_init_file_path(args.addon),
+                  release_dir=DEFAULT_RELEASE_DIR,
                   addon_name=args.addon,
                   need_zip=not args.disable_zip,
                   is_extension=True,
-                  with_timestamp=args.with_timestamp,
-                  with_version=args.with_version,
+                  with_timestamp=True,
+                  with_version=True,
                   )
-    release_addon(target_init_file=get_init_file_path(args.addon),
-                  addon_name=args.addon,
-                  need_zip=not args.disable_zip,
-                  is_extension=False,
-                  with_timestamp=args.with_timestamp,
-                  with_version=args.with_version,
-                  )
+    # release_addon(target_init_file=get_init_file_path(args.addon),
+    #               addon_name=args.addon,
+    #               need_zip=not args.disable_zip,
+    #               is_extension=False,
+    #               with_timestamp=args.with_timestamp,
+    #               with_version=args.with_version,
+    #               )

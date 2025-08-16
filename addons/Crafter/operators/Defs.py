@@ -750,6 +750,7 @@ def add_Crafter_time(obj):
         # 添加几何节点修改器
         new_mod = obj.modifiers.new("Crafter-time", 'NODES')
         new_mod.node_group = bpy.data.node_groups["Crafter-time"]
+        new_mod.use_pin_to_last = True
 
 def link_biome_tex(node_biomeTex, group_CI, links):
     if not node_biomeTex == None:
