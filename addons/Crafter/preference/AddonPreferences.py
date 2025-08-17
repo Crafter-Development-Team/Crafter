@@ -116,6 +116,8 @@ class CrafterAddonPreferences(AddonPreferences):
                                    default=False,)# type: ignore
     useGreedyMesh: BoolProperty(name="Greedy Mesh",
                                 default=True,)# type: ignore
+    useRandomBlockModels: BoolProperty(name="Random Models",
+                                      default=True,)#type: ignore
     isLODAutoCenter: BoolProperty(name="LOD Auto Center",
                                   default=True,)# type: ignore
     LODCenterX: IntProperty(name="LOD Center X",

@@ -74,6 +74,7 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         col_1.prop(addon_prefs, "strictDeduplication")
         col_1.prop(addon_prefs, "allowDoubleFace")
         col_1.prop(addon_prefs, "Auto_Load_Material")
+        col_1.prop(addon_prefs, "useRandomBlockModels")
         col_1.prop(addon_prefs, "exportLightBlock")
 
         col_2 = row_cols.column()
@@ -381,6 +382,7 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             "activeLOD3":int(addon_prefs.Max_LOD_Level) > 2,
             "activeLOD4":int(addon_prefs.Max_LOD_Level) > 3,
             "useBiomeColors":addon_prefs.useBiomeColors,
+            "useRandomBlockModels":addon_prefs.useRandomBlockModels,
             "useUnderwaterLOD":addon_prefs.useUnderwaterLOD,
             "useGreedyMesh":addon_prefs.useGreedyMesh,
             "isLODAutoCenter":addon_prefs.isLODAutoCenter,
