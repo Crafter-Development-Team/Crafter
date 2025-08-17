@@ -105,6 +105,7 @@ BLENDER_EXE_PATH = "C:/Program Files/Blender Foundation/Blender 4.2/blender.exe"
 - EEVEE着色器材质解惑
 - 动态纹理按序播放思路提供
 - 基于传递UV的视差的制作
+- 改进时间获取方式
 
 ---
 
@@ -112,7 +113,7 @@ BLENDER_EXE_PATH = "C:/Program Files/Blender Foundation/Blender 4.2/blender.exe"
 
 [![-blueish-](https://i2.hdslb.com/bfs/face/e7ebd5fd6c2267d6bab44a2e89b9d1671a818f13.jpg@100w_100h_1c_1s.png)](https://space.bilibili.com/3546391456516604)
 
-- 提供了视差节点
+- 提供了视差节点(为适配修改后更复杂的动态纹理实现方式而弃用)
 
 ---
 
