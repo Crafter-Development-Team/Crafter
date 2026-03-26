@@ -35,6 +35,9 @@ class CrafterAddonPreferences(AddonPreferences):
                                                    default=0)# type: ignore
     Point_Cloud_Mode: BoolProperty(name="Point Cloud Mode",
                                    default=False,)# type: ignore
+    Advanced_Switch_Mode: BoolProperty(name="Advanced Switch Mode",
+                                       description="Enable mix factor to blend On and Off",
+                                       default=False,)# type: ignore
     Latest_World_List: CollectionProperty(name="Latest Worlds List",
                                             type=LatestWorld)#type: ignore
     Latest_World_List_index: IntProperty(name="Latest Worlds",

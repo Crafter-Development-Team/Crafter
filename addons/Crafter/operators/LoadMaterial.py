@@ -8,6 +8,9 @@ from bpy.props import *
 from ..__init__ import dir_cafter_data, dir_resourcepacks_plans, dir_materials, dir_classification_basis, dir_blend_append, dir_init_main
 from .Defs import *
 
+lang = bpy.context.preferences.view.language
+is_chinese = lang in ("zh_HANS", "zh_HANT")
+
 # ==================== 加载材质 ====================
 
 class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):
@@ -641,6 +644,369 @@ class VIEW3D_OT_CrafterMaterialPanel(bpy.types.Operator):
     bl_label = "Material Panel"
     bl_idname = "crafter.material_panel"
     bl_description = "Show Material Panel"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context: bpy.types.Context):
+        for obj in bpy.data.objects:
+            if obj.name == "材质设置/Material Settings":
+                return True
+        return False
+
+    def parse_panel_name(self, node_name):
+        prefix = "C-Panel-"
+        if not node_name.startswith(prefix):
+            return None
+        name_part = node_name[len(prefix):]
+        if "/" in name_part:
+            cn_name, en_name = name_part.split("/", 1)
+            return cn_name if is_chinese else en_name
+        return name_part
+
+    def find_on_off_inputs(self, node_tree, socket_type):
+        on_output = None
+        off_output = None
+        on_index = None
+        off_index = None
+        for inner_node in node_tree.nodes:
+            if inner_node.type == 'GROUP_INPUT':
+                for idx, output in enumerate(inner_node.outputs):
+                    if output.type == socket_type:
+                        if output.name == "On":
+                            on_output = output
+                            on_index = idx
+                        elif output.name == "Off":
+                            off_output = output
+                            off_index = idx
+                break
+        return on_output, off_output, on_index, off_index
+
+    def scan_panels(self, obj):
+        panels = []
+        for mat in obj.data.materials:
+            if mat.use_nodes:
+                for node in mat.node_tree.nodes:
+                    has_node_tree = hasattr(node, 'node_tree') and node.node_tree is not None
+                    if node.type == 'GROUP' and has_node_tree:
+                        node_tree = node.node_tree
+                        if node_tree.name.startswith("C-Panel-"):
+                            panel_name = self.parse_panel_name(node_tree.name)
+                            if panel_name:
+                                panel_data = {
+                                    'name': panel_name,
+                                    'node_tree_name': node_tree.name,
+                                    'outputs': []
+                                }
+                                group_output_node = None
+                                for inner_node in node_tree.nodes:
+                                    if inner_node.type == 'GROUP_OUTPUT':
+                                        group_output_node = inner_node
+                                        break
+                                if group_output_node is None:
+                                    continue
+                                for i, input_socket in enumerate(group_output_node.inputs):
+                                    if input_socket.type == 'INT':
+                                        continue
+                                    if input_socket.type == 'SHADER' and not input_socket.links:
+                                        continue
+                                    if i >= len(node.outputs):
+                                        continue
+                                    on_output, off_output, on_index, off_index = self.find_on_off_inputs(node_tree, input_socket.type)
+                                    output_data = {
+                                        'name': input_socket.name,
+                                        'socket_type': input_socket.type,
+                                        'on_index': on_index,
+                                        'off_index': off_index,
+                                        'output_index': i
+                                    }
+                                    if input_socket.links:
+                                        link = input_socket.links[0]
+                                        from_socket = link.from_socket
+                                        if from_socket.node.type == 'MIX' and from_socket.node.bl_idname in ['ShaderNodeMixShader', 'ShaderNodeMix']:
+                                            mix_node = from_socket.node
+                                            output_data['is_switch'] = True
+                                            output_data['switch_state'] = True
+                                            output_data['use_on'] = True
+                                            if hasattr(mix_node, 'inputs') and len(mix_node.inputs) > 0:
+                                                factor_input = mix_node.inputs[0]
+                                                if hasattr(factor_input, 'default_value'):
+                                                    output_data['mix_factor'] = factor_input.default_value
+                                                else:
+                                                    output_data['mix_factor'] = 0.0
+                                            else:
+                                                output_data['mix_factor'] = 0.0
+                                        else:
+                                            output_data['is_switch'] = True
+                                            output_data['switch_state'] = False
+                                            output_data['mix_factor'] = 0.0
+                                            if from_socket == on_output:
+                                                output_data['use_on'] = True
+                                            elif from_socket == off_output:
+                                                output_data['use_on'] = False
+                                            else:
+                                                output_data['use_on'] = True
+                                    else:
+                                        output_data['is_switch'] = False
+                                        output_data['switch_state'] = False
+                                        output_data['mix_factor'] = 0.0
+                                        output_data['use_on'] = True
+                                        if input_socket.type in ('FLOAT', 'VALUE'):
+                                            output_data['float_value'] = input_socket.default_value
+                                        elif input_socket.type in ('COLOR', 'RGBA'):
+                                            output_data['color_value'] = list(input_socket.default_value)
+                                        elif input_socket.type == 'VECTOR':
+                                            output_data['vector_value'] = list(input_socket.default_value)
+                                    panel_data['outputs'].append(output_data)
+                                if panel_data['outputs']:
+                                    panels.append(panel_data)
+        return panels
+
+    def invoke(self, context, event):
+        for obj in bpy.data.objects:
+            if obj.name == "材质设置/Material Settings":
+                break
+        else:
+            self.report({'ERROR'}, "Material Settings object not found")
+            return {'CANCELLED'}
+
+        panels = self.scan_panels(obj)
+        if not panels:
+            self.report({'INFO'}, "No Crafter-Panel nodes found")
+            return {'CANCELLED'}
+
+        scene = context.scene
+        scene.Crafter_panels.clear()
+        scene.Crafter_panels_index = 0
+        for panel_data in panels:
+            panel_item = scene.Crafter_panels.add()
+            panel_item.name = panel_data['name']
+            panel_item.node_tree_name = panel_data['node_tree_name']
+            for output_data in panel_data['outputs']:
+                output_item = panel_item.outputs.add()
+                output_item.name = output_data['name']
+                output_item.socket_type = output_data['socket_type']
+                output_item.is_switch = output_data['is_switch']
+                output_item.switch_state = output_data['switch_state']
+                output_item.mix_factor = output_data['mix_factor']
+                output_item.on_index = output_data.get('on_index', -1)
+                output_item.off_index = output_data.get('off_index', -1)
+                output_item.output_index = output_data.get('output_index', -1)
+                output_item.use_on = output_data.get('use_on', True)
+                if 'float_value' in output_data:
+                    output_item.float_value = output_data['float_value']
+                if 'color_value' in output_data:
+                    output_item.color_value = output_data['color_value']
+                if 'vector_value' in output_data:
+                    output_item.vector_value = output_data['vector_value']
+        
+        return context.window_manager.invoke_props_dialog(self)
+
+    def draw(self, context):
+        from ..config import __addon_name__
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
+        
+        layout = self.layout
+        scene = context.scene
+        panels = scene.Crafter_panels
+        
+        # 页码和名称（最上面，居中）
+        if len(panels) > 0:
+            current_panel = panels[scene.Crafter_panels_index]
+            panel_name = current_panel.name
+            if "/" in panel_name:
+                cn_name, en_name = panel_name.split("/", 1)
+                panel_name = cn_name if is_chinese else en_name
+            
+            row = layout.row()
+            row.alignment = 'CENTER'
+            row.label(text=f"{panel_name} [{scene.Crafter_panels_index + 1}/{len(panels)}]", translate=False)
+        
+        # 翻页按钮和 operator（左右分开，中间有间隔）
+        if len(panels) > 0:
+            row = layout.row()
+            # 左翻页 25%
+            split = row.split(factor=1/3)
+            split.operator("crafter.panel_prev", text="", icon='TRIA_LEFT')
+            split2 = split.split(factor=1/2)
+            split2.operator("crafter.material_shader_panel", text="", icon='MATERIAL')
+            split2.operator("crafter.panel_next", text="", icon='TRIA_RIGHT')
+        
+        # 高级模式开关
+        row = layout.row()
+        row.prop(addon_prefs, "Advanced_Switch_Mode", text="Advanced Switch Mode")
+        
+        # 面板内容
+        if len(panels) > 0:
+            layout.separator()
+            
+            # 当前面板内容
+            panel = current_panel
+            for output in panel.outputs:
+                row = layout.row(align=True)
+                display_name = output.name
+                if "/" in display_name:
+                    cn_name, en_name = display_name.split("/", 1)
+                    display_name = cn_name if is_chinese else en_name
+                
+                # 使用 split 创建布局
+                if addon_prefs.Advanced_Switch_Mode:
+                    # 高级模式：三列布局（名称 + Alpha开关 + 数值）
+                    split = row.split(factor=0.4)
+                    split.label(text=display_name)
+                    
+                    split2 = split.split(factor=0.15)
+                    # Alpha 开关列
+                    if output.is_switch:
+                        split2.prop(output, "switch_state", text="")
+                    else:
+                        split2.label(text="")
+                else:
+                    # 普通模式：两列布局（名称 + 数值）
+                    split2 = row.split(factor=0.4)
+                    split2.label(text=display_name)
+                
+                # 第三列（高级模式）或第二列（普通模式）：混合系数、On/Off 开关或数值
+                if output.is_switch:
+                    if output.switch_state:
+                        split2.prop(output, "mix_factor", text="", slider=True)
+                    else:
+                        split2.prop(output, "use_on", text="")
+                else:
+                    if output.socket_type in ('FLOAT', 'VALUE'):
+                        split2.prop(output, "float_value", text="")
+                    elif output.socket_type in ('COLOR', 'RGBA'):
+                        split2.prop(output, "color_value", text="")
+                    elif output.socket_type == 'VECTOR':
+                        split2.prop(output, "vector_value", text="")
+
+    def execute(self, context: bpy.types.Context):
+        scene = context.scene
+        panels = scene.Crafter_panels
+
+        for panel in panels:
+            # 通过名称直接获取节点树
+            if panel.node_tree_name not in bpy.data.node_groups:
+                continue
+            node_tree = bpy.data.node_groups[panel.node_tree_name]
+            
+            # 找到输入节点和输出节点
+            group_input = None
+            group_output = None
+            for node in node_tree.nodes:
+                if node.type == 'GROUP_INPUT':
+                    group_input = node
+                elif node.type == 'GROUP_OUTPUT':
+                    group_output = node
+            
+            if group_input is None or group_output is None:
+                continue
+            
+            links = node_tree.links
+            
+            # 删除除输入/输出节点外的所有节点
+            nodes_to_remove = [node for node in node_tree.nodes if node not in (group_input, group_output)]
+            for node in nodes_to_remove:
+                node_tree.nodes.remove(node)
+            
+            # 根据用户编辑结果重新连接
+            for output in panel.outputs:
+                if output.output_index < 0 or output.output_index >= len(group_output.inputs):
+                    continue
+                
+                output_socket = group_output.inputs[output.output_index]
+                
+                if output.is_switch:
+                    # 开关类型
+                    if output.on_index < 0 or output.off_index < 0:
+                        continue
+                    if output.on_index >= len(group_input.outputs) or output.off_index >= len(group_input.outputs):
+                        continue
+                    
+                    on_socket = group_input.outputs[output.on_index]
+                    off_socket = group_input.outputs[output.off_index]
+                    socket_type = output.socket_type
+                    
+                    if output.switch_state:
+                        # Alpha 开：添加混合节点
+                        if socket_type == 'SHADER':
+                            # Shader 类型使用专门的混合着色器
+                            mix_node = node_tree.nodes.new('ShaderNodeMixShader')
+                            mix_node.location = (group_output.location.x - 200, group_output.location.y - output.output_index * 100)
+                            links.new(off_socket, mix_node.inputs[1])
+                            links.new(on_socket, mix_node.inputs[2])
+                            mix_node.inputs[0].default_value = output.mix_factor
+                            links.new(mix_node.outputs[0], output_socket)
+                        else:
+                            # 其他类型使用通用混合节点
+                            mix_node = node_tree.nodes.new('ShaderNodeMix')
+                            mix_node.location = (group_output.location.x - 200, group_output.location.y - output.output_index * 100)
+                            
+                            # 先设置数据类型
+                            if socket_type in ('FLOAT', 'VALUE'):
+                                mix_node.data_type = 'FLOAT'
+                            elif socket_type in ('COLOR', 'RGBA'):
+                                mix_node.data_type = 'RGBA'
+                            elif socket_type == 'VECTOR':
+                                mix_node.data_type = 'VECTOR'
+                            
+                            # 使用接口名称连接（Blender 会自动映射到正确的索引）
+                            links.new(off_socket, mix_node.inputs['A'])
+                            links.new(on_socket, mix_node.inputs['B'])
+                            mix_node.inputs['Factor'].default_value = output.mix_factor
+                            links.new(mix_node.outputs['Result'], output_socket)
+                    else:
+                        # Alpha 关：直接连接 On 或 Off
+                        target_socket = on_socket if output.use_on else off_socket
+                        links.new(target_socket, output_socket)
+                else:
+                    # 非开关类型：设置默认值
+                    if output.socket_type in ('FLOAT', 'VALUE'):
+                        output_socket.default_value = output.float_value
+                    elif output.socket_type in ('COLOR', 'RGBA'):
+                        output_socket.default_value = output.color_value
+                    elif output.socket_type == 'VECTOR':
+                        output_socket.default_value = output.vector_value
+
+        self.report({'INFO'}, "Material panel settings applied")
+        return {'FINISHED'}
+
+
+class VIEW3D_OT_CrafterPanelPrev(bpy.types.Operator):
+    bl_idname = "crafter.panel_prev"
+    bl_label = "Previous Panel"
+    bl_description = " "
+    
+    def execute(self, context):
+        scene = context.scene
+        total = len(scene.Crafter_panels)
+        if total > 0:
+            if scene.Crafter_panels_index > 0:
+                scene.Crafter_panels_index -= 1
+            else:
+                scene.Crafter_panels_index = total - 1  # 循环到最后一页
+        return {'FINISHED'}
+
+
+class VIEW3D_OT_CrafterPanelNext(bpy.types.Operator):
+    bl_idname = "crafter.panel_next"
+    bl_label = "Next Panel"
+    bl_description = " "
+    
+    def execute(self, context):
+        scene = context.scene
+        total = len(scene.Crafter_panels)
+        if total > 0:
+            if scene.Crafter_panels_index < total - 1:
+                scene.Crafter_panels_index += 1
+            else:
+                scene.Crafter_panels_index = 0  # 循环到第一页
+        return {'FINISHED'}
+
+
+class VIEW3D_OT_CrafterMaterialShaderPanel(bpy.types.Operator):
+    bl_label = "Material Shader Panel"
+    bl_idname = "crafter.material_shader_panel"
+    bl_description = "Show Material Shader Panel"
 
     @classmethod
     def poll(cls, context: bpy.types.Context):

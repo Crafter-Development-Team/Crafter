@@ -9,7 +9,7 @@ from ...common.class_loader.auto_load import add_properties, remove_properties
 from ...common.i18n.dictionary import common_dictionary
 from ...common.i18n.i18n import load_dictionary
 from bpy.props import StringProperty, IntProperty, BoolProperty, IntVectorProperty, EnumProperty, CollectionProperty, FloatProperty
-from .properties import ResourcePlan, ResourcePlansInfo, Material ,McMt, dirs_temp
+from .properties import ResourcePlan, ResourcePlansInfo, Material ,McMt, dirs_temp, PanelItem, PanelOutputItem
 from .operators.Item import ui_item
 from bpy.utils import previews
 
@@ -35,6 +35,8 @@ _addon_properties = {
                                           description="import time",
                                           min=0,
                                           default=0),
+        "Crafter_panels": CollectionProperty(type=PanelItem, name="Panels"),
+        "Crafter_panels_index": IntProperty(name="Panels Index", default=0),
     },
     bpy.types.Object:{
         "Crafter_import_by": BoolProperty(name="import by Crafter",
