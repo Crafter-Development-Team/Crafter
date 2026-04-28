@@ -415,7 +415,10 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             json.dump(worldconfig, config, indent=4)
         for file in os.listdir(dir_importer):
             if file.endswith(".obj"):
-                os.remove(os.path.join(dir_importer, file))
+                try:
+                    os.remove(os.path.join(dir_importer, file))
+                except:
+                    pass
                 
         prepared_time = time.perf_counter()
         #生成obj
@@ -492,7 +495,7 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         #复制并修改Crafter-biomeTex
         dir_biomeTex = os.path.join(dir_importer, "biomeTex")
         dir_biomeTex_num = os.path.join(dir_biomeTex, imported_time)
-        os.makedirs(dir_biomeTex_num)
+        os.makedirs(dir_biomeTex_num, exist_ok=True)
         for file in os.listdir(dir_biomeTex): #复制群系颜色至新文件夹
             if file.endswith(".png"):
                 shutil.copy(os.path.join(dir_biomeTex, file), os.path.join(dir_biomeTex_num, file))

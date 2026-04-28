@@ -138,7 +138,8 @@ class VIEW3D_OT_CrafterMapSelector(bpy.types.Operator):
                                 
                                 
                                 # 清理临时文件
-                                os.remove(coord_file)
+                                if os.path.exists(coord_file):
+                                    os.remove(coord_file)
                                 
                             except Exception as e:
                                 print(f"读取坐标文件时出错: {e}")
