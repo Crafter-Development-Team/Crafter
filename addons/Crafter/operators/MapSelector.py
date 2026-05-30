@@ -23,6 +23,8 @@ class VIEW3D_OT_CrafterMapSelector(bpy.types.Operator):
         return True
 
     def execute(self, context):
+
+        push_log('[unknown] 地图选择器', 'INFO')
         self.report({'INFO'}, "启动地图选择器...")
         
         addon_prefs = context.preferences.addons[__addon_name__].preferences

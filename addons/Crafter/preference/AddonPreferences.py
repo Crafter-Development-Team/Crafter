@@ -6,6 +6,7 @@ from bpy.props import *
 from bpy.types import AddonPreferences
 from ..config import __addon_name__
 from ..properties import *
+from ..operators.Defs import dir_root_2_dir_versions, get_dir_save
 
 
 class CrafterAddonPreferences(AddonPreferences):
@@ -24,11 +25,11 @@ class CrafterAddonPreferences(AddonPreferences):
     XYZ_1: IntVectorProperty(name="XYZ-1",
                              default=(0,0,0),
                              description="Starting coordinates",
-                             update=lambda self, context: context.area.tag_redraw())# type: ignore
+                             update=lambda self, context: context.area.tag_redraw() if context.area else None)# type: ignore
     XYZ_2: IntVectorProperty(name="XYZ-2",
                              default=(0,0,0),
                              description="Ending coordinates",
-                             update=lambda self, context: context.area.tag_redraw())# type: ignore
+                             update=lambda self, context: context.area.tag_redraw() if context.area else None)# type: ignore
     Dimensions_List: CollectionProperty(name="Dimensions List",
                                                     type=HistoryWorldVersion)#type: ignore
     Dimensions_List_index: IntProperty(name="Dimensions",
@@ -42,7 +43,7 @@ class CrafterAddonPreferences(AddonPreferences):
                                             type=LatestWorld)#type: ignore
     Latest_World_List_index: IntProperty(name="Latest Worlds",
                                            default=0,
-                                           update=lambda self, context: self.reload_latest_worlds_list(context))# type: ignore
+                                           update=lambda self, context: self.update_latest_world(context))# type: ignore
     History_World_Roots_List: CollectionProperty(name="History Worlds Roots List",
                                             type=HistoryWorldRoot)#type: ignore
     History_World_Roots_List_index: IntProperty(name="History World Roots",
@@ -57,11 +58,12 @@ class CrafterAddonPreferences(AddonPreferences):
                                                  type=HistoryWorldSave)#type: ignore
     History_World_Saves_List_index: IntProperty(name="History Saves",
                                                 default=0,
-                                                update=lambda self, context: self.reload_history_worlds_list(context))# type: ignore
+                                                update=lambda self, context: self.update_history_save(context))# type: ignore
     History_World_Settings_List: CollectionProperty(name="History Settings List",
                                                     type=HistoryWorldSetting)#type: ignore
     History_World_Settings_List_index: IntProperty(name="History Settings",
-                                                   default=0)# type: ignore
+                                                   default=0,
+                                                   update=lambda self, context: self.update_history_setting(context))# type: ignore
     Undivided_Vsersions_List: CollectionProperty(name="Undivided Versions List",
                                                 type=UndividedVersion)#type: ignore
     Undivided_Vsersions_List_index: IntProperty(name="Undivided Versions",
@@ -253,7 +255,8 @@ class CrafterAddonPreferences(AddonPreferences):
         col_default_PBR.prop(self, "Default_Emission_Strength")
 # ==========修改变量操作==========
     def update_world_path(self, context):
-        context.area.tag_redraw
+        if context.area:
+            context.area.tag_redraw()
         bpy.ops.crafter.reload_all()
         return None
 
@@ -271,6 +274,42 @@ class CrafterAddonPreferences(AddonPreferences):
     def reload_latest_worlds_list(self, context):
         bpy.ops.crafter.reload_latest_worlds_list()
         return None
+
+    def update_latest_world(self, context):
+        """选中最近世界时自动应用路径"""
+        self.reload_latest_worlds_list(context)
+        if self.Latest_World_List_index >= 0 and self.Latest_World_List_index < len(self.Latest_World_List):
+            world_info = self.Latest_World_List[self.Latest_World_List_index].name.split("|")
+            if len(world_info) == 3:
+                save_name, version, dot_minecraft = world_info
+                # 尝试构建存档路径
+                if self.is_Undivided:
+                    dir_save = os.path.join(dot_minecraft, "saves", save_name)
+                else:
+                    dir_versions = dir_root_2_dir_versions(dot_minecraft)
+                    dir_save = os.path.join(dir_versions, version, "saves", save_name)
+                if os.path.exists(dir_save):
+                    self.World_Path = dir_save
+
+    def update_history_save(self, context):
+        """选中历史存档时自动应用路径"""
+        self.reload_history_worlds_list(context)
+        if (self.History_World_Saves_List_index >= 0 and
+            self.History_World_Saves_List_index < len(self.History_World_Saves_List) and
+            len(self.History_World_Roots_List) > 0):
+            dir_save = get_dir_save(context)
+            if os.path.exists(dir_save):
+                self.World_Path = dir_save
+
+    def update_history_setting(self, context):
+        """选中历史坐标设置时自动应用"""
+        if self.History_World_Settings_List_index >= 0 and self.History_World_Settings_List_index < len(self.History_World_Settings_List):
+            settings_str = self.History_World_Settings_List[self.History_World_Settings_List_index].name
+            parts = settings_str.split(" ")
+            if len(parts) == 6:
+                self.XYZ_1 = (int(parts[0]), int(parts[1]), int(parts[2]))
+                self.XYZ_2 = (int(parts[3]), int(parts[4]), int(parts[5]))
+
     def reload_history_worlds_list(self, context):
         bpy.ops.crafter.reload_history_worlds_list()
         return None
