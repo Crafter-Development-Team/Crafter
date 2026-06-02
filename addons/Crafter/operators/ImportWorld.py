@@ -423,241 +423,295 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         prepared_time = time.perf_counter()
         #生成obj
 
-# ==================================================================================
-        ##旧的exe唤起命令
+        global import_running, import_log, import_progress
+        import_log.clear(); import_running = True; import_progress = 0.0
+        push_log("WorldImporter 已启动")
+        debug_log(f"exe: {dir_exe_importer}")
+        debug_log(f"cwd: {dir_importer}")
 
-        ##后来白给修好exe的问题后忠城发现新唤起方式的shell模式性能比旧版高，所以改用新的唤起方式
-
-        #try:
-        ##在新的进程中运行WorldImporter.exe
-        #CREATE_NEW_PROCESS_GROUP = 0x00000200
-        #DETACHED_PROCESS = 0x00000008
-        #process = subprocess.Popen(
-        #[dir_exe_importer],
-        #cwd=dir_importer,
-        #creationflags=CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS,
-        #shell=addon_prefs.shell
-        #)
-        ##等待进程结束
-        #process.wait()
-        #except Exception as e:
-        #return {"CANCELLED"}
-
-# ==================================================================================
-        run_as_admin_and_wait(dir_exe_importer,dir_importer,shell = addon_prefs.shell)
-# ==================================================================================
-
-        #导入obj
-        have_obj = False
-        real_name_dic = {}
-        material_should_delete = []
-        before_objects = set(bpy.data.objects)#记录当前场景最初对象
-        for file in os.listdir(dir_importer):
-            if file.endswith(".obj"):
-                pre_import_objects = set(bpy.data.objects)#记录当前场景中的所有对象
-                
-                bpy.ops.wm.obj_import(filepath=os.path.join(dir_importer, file))
-                bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
-                have_obj = True
-                
-                imported_objects = list(set(bpy.data.objects) - pre_import_objects)#计算新增对象
-                for obj in imported_objects:
-                    for i in range(len(obj.data.materials)):
-                        material = obj.data.materials[i]
-                        if material.name.startswith("color#"):
-                            if len(material.name) > len_color_jin:
-                                real_material_name = fuq_bl_dot_number(material.name)
-                            else:
-                                real_material_name = material.name
-                        else:
-                            real_material_name = fuq_bl_dot_number(material.name)
-                        if real_material_name in real_name_dic:
-                            obj.data.materials[i] = bpy.data.materials[real_name_dic[real_material_name]]
-                            material_should_delete.append(material.name)
-                        else:
-                            real_name_dic[real_material_name] = material.name
-                    add_to_mcmts_collection(object=obj,context=context)
-                    add_to_crafter_mcmts_collection(object=obj,context=context)
-                    add_Crafter_time(obj=obj)
-                    #定位到视图
-                    view_2_active_object(context)
-
-        for material in material_should_delete:
-            bpy.data.materials.remove(bpy.data.materials[material])
-        if not have_obj:
-            self.report({'ERROR'}, "WorldImporter didn't export obj!")
+        poll_fn = start_importer_async(dir_exe_importer, dir_importer)
+        if not poll_fn:
+            import_running = False
+            self.report({'ERROR'}, '启动 WorldImporter 失败')
             return {"CANCELLED"}
-        
-        #若不存在，则导入Crafter-Moving_texture节点组，群系颜色纹理节点
-        add_node_group_if_not_exists(names_Crafter_Moving_texture)
-        add_node_group_if_not_exists(["Crafter-biomeTex"])
-        
-        #复制并修改Crafter-biomeTex
-        dir_biomeTex = os.path.join(dir_importer, "biomeTex")
-        dir_biomeTex_num = os.path.join(dir_biomeTex, imported_time)
-        os.makedirs(dir_biomeTex_num, exist_ok=True)
-        for file in os.listdir(dir_biomeTex): #复制群系颜色至新文件夹
-            if file.endswith(".png"):
-                shutil.copy(os.path.join(dir_biomeTex, file), os.path.join(dir_biomeTex_num, file))
-        node_group_biomeTex = bpy.data.node_groups["Crafter-biomeTex"]
-        copyname = "Crafter-biomeTex_" + imported_time
-        node_group_biomeTex_copy = node_group_biomeTex.copy()
-        node_group_biomeTex_copy.name = copyname
-        for node in node_group_biomeTex_copy.nodes:
-            if node.type == "TEX_IMAGE":
-                try:
-                    node.image = bpy.data.images.load(os.path.join(dir_biomeTex_num, fuq_bl_dot_number(node.image.name)))
-                except:
-                    pass
-            if node.type == "GROUP":
-                node.inputs["min X"].default_value = worldconfig["minX"]
-                node.inputs["min Y"].default_value = worldconfig["minY"] - 1
-                node.inputs["max X"].default_value = 1 + worldconfig["maxX"]
-                node.inputs["max Y"].default_value = worldconfig["maxY"]
 
-        #查找所需节点
-        for name_material in real_name_dic.values():
-            if name_material.startswith("color#"):
-                continue
-            material = bpy.data.materials[name_material]
-            nodes = material.node_tree.nodes
-            links = material.node_tree.links
-            nodes_wait_remove = []
-            node_tex_base = None
-            for node in nodes:
-                if node.type == "OUTPUT_MATERIAL":
-                    if node.target == "EEVEE":
-                        node_output_EEVEE = node
-                    if node.target == "ALL":
-                        node_output_EEVEE = node
-                elif node.type == "TEX_IMAGE":
-                    if node_tex_base != None:
-                        nodes_wait_remove.append(node)
-                    else:
-                        node_tex_base = node
-                        node.interpolation = "Closest"
-                elif node.type == "BSDF_PRINCIPLED":
-                    node_principled = node
-            for node in nodes_wait_remove:
-                nodes.remove(node)
-            # 连接Alpha
-            if node_tex_base != None:
-                links.new(node_tex_base.outputs["Alpha"], node_principled.inputs["Alpha"])
-            # 添加群系着色纹理,PBR、法线纹理
-            node_liomeTex = nodes.new("ShaderNodeGroup")
-            node_liomeTex.location = (node_output_EEVEE.location.x - 400, node_output_EEVEE.location.y - 550)
-            node_liomeTex.node_tree = node_group_biomeTex_copy
-            if node_tex_base != None:
-                load_normal_and_PBR(node_tex_base=node_tex_base, nodes=nodes, links=links,)
-                nodes.active = node_tex_base
-        try:
-            bpy.ops.file.pack_all()
-        except Exception as e:
-            print(e)
-            
-        if addon_prefs.Auto_Load_Material:
-            material_start_time = time.perf_counter()
-            bpy.ops.crafter.load_material()
-            material_used_time = time.perf_counter() - material_start_time
+        _ctx = context
+        _ctx_window = context.window
+        _ctx_area = context.area
+        _prefs = addon_prefs
+        _imp_time = imported_time
+        _config = dict(worldconfig)
+        _prep_time = prepared_time
+        _save = self.save if hasattr(self, "save") else ""
+        _version = self.version if hasattr(self, "version") else ""
+        _dot_mc = self.dot_minecraftPath if hasattr(self, "dot_minecraftPath") else ""
+        _undivided = "undivided" in dir() and undivided
+        _is_custom = (not addon_prefs.is_Game_Path) or addon_prefs.Custom_Path
+        import time as _time
+        push_log("WorldImporter 已启动")
+        wm = context.window_manager
+        wm.progress_begin(0, 100)
 
-        # 完成导入计时
-        world_imported_time = time.perf_counter()
-        report_text = i18n("Import time: ") + str(world_imported_time - prepared_time)[:6] + "s"
-        if addon_prefs.Auto_Load_Material:
-            material_start_time = time.perf_counter()
-            bpy.ops.crafter.load_material()
-            material_used_time = time.perf_counter() - material_start_time
-            report_text = report_text + i18n(", Material time: ") + str(material_used_time)[:6] + "s"
-
-        # 定位到视图
-        new_objects = list(set(bpy.data.objects) - before_objects)
-        for object in new_objects:
-            if object.type == "MESH":
-                object.select_set(True)
-        view_2_active_object(context)   
-
-        #保存历史世界
-        dir_json_history_worlds = os.path.join(dir_cafter_data, "history_worlds.json")
-        #读取json，若不存在则创建一个空的json文件
-        if os.path.exists(dir_json_history_worlds):
-            with open(dir_json_history_worlds, 'r', encoding='utf-8') as file:
-                json_history_worlds = json.load(file)
-        else:
-            json_history_worlds = {}
-        if (not addon_prefs.is_Game_Path) or addon_prefs.Custom_Path:
-            pass
-        else:
-            #根据是否隔离，按不同方式保存历史记录
-            if undivided:
-                json_history_worlds.setdefault(dot_minecraftPath, [{}])
-                undivided_list = json_history_worlds[dot_minecraftPath][0].setdefault(save,{})
-                json_history_settings = undivided_list.setdefault("settings", [])
-                undivided_list["version"] = version
+        def _continue_import():
+            global import_running, import_progress
+            r = poll_fn()
+            if isinstance(r, str):
+                for line in r.split(chr(10)):
+                    if not line: continue
+                    push_log(line)
+                    p = parse_progress(line)
+                    if p is not None: import_progress = p
+                wm.progress_update(import_progress)
+                for w in bpy.context.window_manager.windows:
+                    for a in w.screen.areas:
+                        a.tag_redraw()
+                return 0.3
+            if r is None: return 0.3
+            import_running = False
+            wm.progress_end()
+            if r:
+                push_log("WorldImporter 完成", "INFO")
+                import_progress = 100.0
+                def _do():
+                    try:
+                        _finish_import(
+                            _ctx,_prefs,_imp_time,_config,_prep_time,
+                            _save,_version,_dot_mc,"",
+                            _undivided,_is_custom,_ctx_window,_ctx_area)
+                    except:
+                        import traceback; traceback.print_exc()
+                    return None
+                bpy.app.timers.register(_do)
             else:
-                json_history_worlds.setdefault(dot_minecraftPath, {})
-                json_history_worlds[dot_minecraftPath].setdefault(version, {})
-                json_history_worlds[dot_minecraftPath][version].setdefault(save, [])
-                json_history_settings = json_history_worlds[dot_minecraftPath][version][save]
-            world_settings_now = [list(addon_prefs.XYZ_1), list(addon_prefs.XYZ_2)]
-            if len(json_history_settings) == 0:
-                json_history_settings.append(None)
-                json_history_settings[0] = world_settings_now
-            else:
-                for i in range (len(json_history_settings)):
-                    if json_history_settings[i] == world_settings_now:
-                        for j in range (i,0,-1):
-                            json_history_settings[j] = json_history_settings[j - 1]
-                        json_history_settings[0] = world_settings_now
-                        break
-                else:
-                    if len(json_history_settings) < 10:
-                        json_history_settings.append(None)
-                    for i in range (len(json_history_settings) - 1,0,-1):
-                        json_history_settings[i] = json_history_settings[i - 1]
-                    json_history_settings[0] = world_settings_now
-                    
-            #保存到json文件
-            with open(dir_json_history_worlds, 'w', encoding='utf-8') as file:
-                json.dump(json_history_worlds, file, indent=4)
+                push_log("WorldImporter 运行失败", "ERROR")
+            for w in bpy.context.window_manager.windows:
+                for a in w.screen.areas: a.tag_redraw()
+            return None
 
-            #保存最近世界
-            world_now = f"{save}|{version}|{dot_minecraftPath}"
-            dir_json_latest_worlds = os.path.join(dir_cafter_data, "latest_worlds.json")
-            if os.path.exists(dir_json_latest_worlds):
-                with open(dir_json_latest_worlds, 'r', encoding='utf-8') as file:
-                    json_latest_worlds = json.load(file)
-            else:
-                json_latest_worlds = []
-            if len(json_latest_worlds) == 0:
-                json_latest_worlds.append(None)
-                json_latest_worlds[0] = world_now
-            else:
-                for i in range (len(json_latest_worlds)):
-                    if json_latest_worlds[i] == world_now:
-                        for j in range (i,0,-1):
-                            json_latest_worlds[j] = json_latest_worlds[j - 1]
-                        json_latest_worlds[0] = world_now
-                        break
-                else:
-                    if len(json_latest_worlds) < 5:
-                        json_latest_worlds.append(None)
-                    for i in range (len(json_latest_worlds) - 1,0,-1):
-                        json_latest_worlds[i] = json_latest_worlds[i - 1]
-                    json_latest_worlds[0] = world_now
-            #保存到json文件
-            with open(dir_json_latest_worlds, 'w', encoding='utf-8') as file:
-                json.dump(json_latest_worlds, file, indent=4)
-        #归零index
-        addon_prefs.Latest_World_List_index = 0
-        addon_prefs.History_World_Settings_List_index = 0
-        #增加Crafter_import_time计数
-        context.scene.Crafter_import_time += 1
-
-        self.report({'INFO'},report_text)
-
+        bpy.app.timers.register(_continue_import)
+        self.report({'INFO'}, 'WorldImporter running...')
         return {'FINISHED'}
 
-# ==================== 重导入世界 ====================
+
+# ==================== 续传函数（定时器主线程调用） ====================
+
+def _finish_import(ctx, prefs, imported_time, worldconfig, prepared_time,
+                  save, version, dot_minecraftPath, worldPath, undivided, is_custom,
+                  _ctx_win=None, _ctx_area=None):
+    """Import OBJ, process materials, save history"""
+    from ..__init__ import dir_cafter_data
+    add_node_group_if_not_exists(names_Crafter_Moving_texture)
+    add_node_group_if_not_exists(["Crafter-biomeTex"])
+    debug_log(f"_finish_import start: t={imported_time}")
+
+    def _run_ops(fn, **kw):
+        """遍历窗口找 VIEW_3D 执行 bpy.ops，回退裸调"""
+        if bpy.context.window:
+            try:
+                with bpy.context.temp_override():
+                    return fn(**kw)
+            except:
+                pass
+        for w in bpy.context.window_manager.windows:
+            for a in w.screen.areas:
+                if a.type == 'VIEW_3D':
+                    for r in a.regions:
+                        if r.type == 'WINDOW':
+                            try:
+                                with bpy.context.temp_override(window=w, area=a, region=r):
+                                    return fn(**kw)
+                            except:
+                                continue
+        return fn(**kw)
+
+    have_obj = False
+    real_name_dic = {}
+    before_objects = set(bpy.data.objects)
+    try:
+        importer_files = os.listdir(dir_importer)
+    except (FileNotFoundError, PermissionError):
+        importer_files = []
+    debug_log(f"OBJ files found: {len(importer_files)}")
+
+    for file in importer_files:
+        if not file.endswith('.obj'): continue
+        debug_log(f"Importing OBJ: {file}")
+        pre_set = set(bpy.data.objects)
+        try:
+            _run_ops(bpy.ops.wm.obj_import, filepath=os.path.join(dir_importer, file))
+            _run_ops(bpy.ops.object.transform_apply, location=False, rotation=True, scale=True)
+            have_obj = True
+        except Exception as ex:
+            push_log(f"OBJ import failed: {file}", "ERROR")
+            debug_log(f"  reason: {ex}")
+            continue
+        new_objs = list(set(bpy.data.objects) - pre_set)
+        debug_log(f"  -> {len(new_objs)} objects")
+        for obj in new_objs:
+            for i in range(len(obj.data.materials)):
+                mat = obj.data.materials[i]
+                n = mat.name
+                if n.startswith("color#") and len(n) <= len_color_jin:
+                    pass
+                else:
+                    n = fuq_bl_dot_number(n)
+                if n in real_name_dic:
+                    obj.data.materials[i] = bpy.data.materials[real_name_dic[n]]
+                else:
+                    real_name_dic[n] = mat.name
+            add_to_mcmts_collection(object=obj, context=ctx)
+            add_to_crafter_mcmts_collection(object=obj, context=ctx)
+            add_Crafter_time(obj=obj)
+            view_2_active_object(ctx)
+
+    debug_log(f"Materials: {len(real_name_dic)} unique")
+
+    if not have_obj:
+        push_log("No obj exported!", "ERROR")
+        return
+
+    # Copy biomeTex
+    dir_bt = os.path.join(dir_importer, "biomeTex")
+    dir_btn = os.path.join(dir_bt, imported_time)
+    os.makedirs(dir_btn, exist_ok=True)
+    try:
+        bt_files = [f for f in os.listdir(dir_bt) if f.endswith('.png')]
+        for f in bt_files:
+            shutil.copy(os.path.join(dir_bt, f), os.path.join(dir_btn, f))
+        debug_log(f"biomeTex: {len(bt_files)} PNGs")
+    except Exception as ex:
+        debug_log(f"biomeTex copy: {ex}")
+
+    # Clone biomeTex node group
+    try:
+        ng_src = bpy.data.node_groups["Crafter-biomeTex"]
+        ng = ng_src.copy()
+        ng.name = "Crafter-biomeTex_" + imported_time
+        for node in ng.nodes:
+            if node.type == "TEX_IMAGE":
+                try:
+                    fn = fuq_bl_dot_number(node.image.name)
+                    node.image = bpy.data.images.load(os.path.join(dir_btn, fn))
+                    debug_log(f"  Loaded: {fn}")
+                except Exception as ex:
+                    debug_log(f"  Image load: {ex}")
+            elif node.type == "GROUP":
+                node.inputs["min X"].default_value = worldconfig["minX"]
+                node.inputs["min Y"].default_value = worldconfig["minY"]
+                node.inputs["max X"].default_value = 1 + worldconfig["maxX"]
+                node.inputs["max Y"].default_value = worldconfig["maxY"]
+        debug_log("biomeTex node group ready")
+    except Exception as ex:
+        debug_log(f"biomeTex node: {ex}")
+        ng = None
+
+    # Apply node group to materials
+    apply_list = [nm for nm in real_name_dic.values() if not nm.startswith('color#') and nm in bpy.data.materials]
+    debug_log(f"Applying biomeTex to {len(apply_list)} materials")
+    for nm in apply_list:
+        mat = bpy.data.materials[nm]
+        nds = mat.node_tree.nodes
+        lks = mat.node_tree.links
+        ntb = None; out_ev = None; pri = None; todel = []
+        for nd in nds:
+            if nd.type == "OUTPUT_MATERIAL" and nd.target in ("EEVEE", "ALL"):
+                out_ev = nd
+            elif nd.type == "TEX_IMAGE":
+                if ntb is None:
+                    ntb = nd; nd.interpolation = 'Closest'
+                else:
+                    todel.append(nd)
+            elif nd.type == "BSDF_PRINCIPLED":
+                pri = nd
+        for nd in todel: nds.remove(nd)
+        if ntb and pri:
+            lks.new(ntb.outputs["Alpha"], pri.inputs["Alpha"])
+        if out_ev and ng:
+            nbn = nds.new("ShaderNodeGroup")
+            nbn.location = (out_ev.location.x - 400, out_ev.location.y - 550)
+            nbn.node_tree = ng
+        if ntb:
+            load_normal_and_PBR(node_tex_base=ntb, nodes=nds, links=lks)
+            nds.active = ntb
+
+    try:
+        _run_ops(bpy.ops.file.pack_all)
+    except Exception as ex:
+        debug_log(f'pack_all: {ex}')
+
+    if prefs.Auto_Load_Material:
+        ms = time.perf_counter()
+        _run_ops(bpy.ops.crafter.load_material)
+        mu = time.perf_counter() - ms
+        debug_log(f"Auto material: {mu:.2f}s")
+
+    rt = "Import: " + str(time.perf_counter() - prepared_time)[:6] + "s"
+    if prefs.Auto_Load_Material:
+        rt += ", Mat: " + str(mu)[:6] + "s"
+
+    for o in (set(bpy.data.objects) - before_objects):
+        if o.type == "MESH": o.select_set(True)
+    view_2_active_object(ctx)
+    push_log(rt, "INFO")
+    debug_log("_finish_import done")
+
+    # Save history
+    jp = os.path.join(dir_cafter_data, "history_worlds.json")
+    if os.path.exists(jp):
+        with open(jp, "r", encoding="utf-8") as f:
+            jh = json.load(f)
+    else:
+        jh = {}
+    if not is_custom:
+        if undivided:
+            jh.setdefault(dot_minecraftPath, [{}])
+            ul = jh[dot_minecraftPath][0].setdefault(save, {})
+            js = ul.setdefault("settings", [])
+            ul["version"] = version
+        else:
+            jh.setdefault(dot_minecraftPath, {})
+            jh[dot_minecraftPath].setdefault(version, {})
+            jh[dot_minecraftPath][version].setdefault(save, [])
+            js = jh[dot_minecraftPath][version][save]
+        wsn = [list(prefs.XYZ_1), list(prefs.XYZ_2)]
+        if not js:
+            js.append(None); js[0] = wsn
+        else:
+            for i in range(len(js)):
+                if js[i] == wsn:
+                    for j in range(i, 0, -1): js[j] = js[j-1]
+                    js[0] = wsn; break
+            else:
+                if len(js) < 10: js.append(None)
+                for i in range(len(js)-1, 0, -1): js[i] = js[i-1]
+                js[0] = wsn
+        with open(jp, "w", encoding="utf-8") as f:
+            json.dump(jh, f, indent=4)
+        wn = f"{save}|{version}|{dot_minecraftPath}"
+        lp = os.path.join(dir_cafter_data, "latest_worlds.json")
+        if os.path.exists(lp):
+            with open(lp, "r", encoding="utf-8") as f:
+                jl = json.load(f)
+        else:
+            jl = []
+        if not jl:
+            jl.append(None); jl[0] = wn
+        else:
+            for i in range(len(jl)):
+                if jl[i] == wn:
+                    for j in range(i, 0, -1): jl[j] = jl[j-1]
+                    jl[0] = wn; break
+            else:
+                if len(jl) < 5: jl.append(None)
+                for i in range(len(jl)-1, 0, -1): jl[i] = jl[i-1]
+                jl[0] = wn
+        with open(lp, "w", encoding="utf-8") as f:
+            json.dump(jl, f, indent=4)
+        debug_log(f"History saved: {save}")
+
+    prefs.Latest_World_List_index = 0
+    prefs.History_World_Settings_List_index = 0
+    ctx.scene.Crafter_import_time += 1
 
 class VIEW3D_OT_CrafterReimportSurfaceWorld(bpy.types.Operator):# 重导入表层世界
     bl_label = "Reimport World"
@@ -692,129 +746,21 @@ class VIEW3D_OT_CrafterReimportSurfaceWorld(bpy.types.Operator):# 重导入表�
             return {'CANCELLED'}
 
         imported_time = str(context.scene.Crafter_import_time)
-        have_obj = False
-        real_name_dic = {}
-        material_should_delete = []
-        before_objects = set(bpy.data.objects)#记录当前场景最初对象
-        for file in os.listdir(dir_importer):
-            if file.endswith(".obj"):
-                pre_import_objects = set(bpy.data.objects)#记录当前场景中的所有对象
-                
-                bpy.ops.wm.obj_import(filepath=os.path.join(dir_importer, file))
-                bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
-                have_obj = True
-                
-                imported_objects = list(set(bpy.data.objects) - pre_import_objects)#计算新增对象
-                for obj in imported_objects:
-                    for i in range(len(obj.data.materials)):
-                        material = obj.data.materials[i]
-                        if material.name.startswith("color#"):
-                            if len(material.name) > len_color_jin:
-                                real_material_name = fuq_bl_dot_number(material.name)
-                            else:
-                                real_material_name = material.name
-                        else:
-                            real_material_name = fuq_bl_dot_number(material.name)
-                        if real_material_name in real_name_dic:
-                            obj.data.materials[i] = bpy.data.materials[real_name_dic[real_material_name]]
-                            material_should_delete.append(material.name)
-                        else:
-                            real_name_dic[real_material_name] = material.name
-                    add_to_mcmts_collection(object=obj,context=context)
-                    add_to_crafter_mcmts_collection(object=obj,context=context)
-                    add_Crafter_time(obj=obj)
-                    #定位到视图
-                    view_2_active_object(context)
-
-        for material in material_should_delete:
-            bpy.data.materials.remove(bpy.data.materials[material])
-        if not have_obj:
-            self.report({'ERROR'}, "WorldImporter didn't export obj!")
-            return {"CANCELLED"}
-        
-        #若不存在，则导入Crafter-Moving_texture节点组，群系颜色纹理节点
-        add_node_group_if_not_exists(names_Crafter_Moving_texture)
-        add_node_group_if_not_exists(["Crafter-biomeTex"])
-        
-        #复制并修改Crafter-biomeTex
-        dir_biomeTex = os.path.join(dir_importer, "biomeTex")
-        dir_biomeTex_num = os.path.join(dir_biomeTex, imported_time)
-        node_group_biomeTex = bpy.data.node_groups["Crafter-biomeTex"]
-        copyname = "Crafter-biomeTex_" + imported_time
-        node_group_biomeTex_copy = node_group_biomeTex.copy()
-        node_group_biomeTex_copy.name = copyname
-        for node in node_group_biomeTex_copy.nodes:
-            if node.type == "TEX_IMAGE":
-                try:
-                    node.image = bpy.data.images.load(os.path.join(dir_biomeTex_num, fuq_bl_dot_number(node.image.name)))
-                except:
-                    pass
-            if node.type == "GROUP":
-                node.inputs["min X"].default_value = worldconfig["minX"]
-                node.inputs["min Y"].default_value = worldconfig["minY"] - 1
-                node.inputs["max X"].default_value = 1 + worldconfig["maxX"]
-                node.inputs["max Y"].default_value = worldconfig["maxY"]
-        #查找所需节点
-        for name_material in real_name_dic.values():
-            if name_material.startswith("color#"):
-                continue
-            material = bpy.data.materials[name_material]
-            nodes = material.node_tree.nodes
-            links = material.node_tree.links
-            nodes_wait_remove = []
-            node_tex_base = None
-            for node in nodes:
-                if node.type == "OUTPUT_MATERIAL":
-                    if node.target == "EEVEE":
-                        node_output_EEVEE = node
-                    if node.target == "ALL":
-                        node_output_EEVEE = node
-                elif node.type == "TEX_IMAGE":
-                    if node_tex_base != None:
-                        nodes_wait_remove.append(node)
-                    else:
-                        node_tex_base = node
-                        node.interpolation = "Closest"
-                elif node.type == "BSDF_PRINCIPLED":
-                    node_principled = node
-            for node in nodes_wait_remove:
-                nodes.remove(node)
-            # 连接Alpha
-            if node_tex_base != None:
-                links.new(node_tex_base.outputs["Alpha"], node_principled.inputs["Alpha"])
-            # 添加群系着色纹理,PBR、法线纹理
-            node_liomeTex = nodes.new("ShaderNodeGroup")
-            node_liomeTex.location = (node_output_EEVEE.location.x - 400, node_output_EEVEE.location.y - 550)
-            node_liomeTex.node_tree = node_group_biomeTex_copy
-            if node_tex_base != None:
-                load_normal_and_PBR(node_tex_base=node_tex_base, nodes=nodes, links=links,)
-                nodes.active = node_tex_base
+        push_log("Reimport: running _finish_import")
         try:
-            bpy.ops.file.pack_all()
+            _finish_import(
+                context, addon_prefs,
+                str(context.scene.Crafter_import_time),
+                worldconfig, prepared_time,
+                "", "", "", "",
+                False,
+                (not addon_prefs.is_Game_Path) or addon_prefs.Custom_Path)
         except Exception as e:
-            print(e)
-            
-        if addon_prefs.Auto_Load_Material:
-            material_start_time = time.perf_counter()
-            bpy.ops.crafter.load_material()
-            material_used_time = time.perf_counter() - material_start_time
-
-        # 完成导入计时
-        world_imported_time = time.perf_counter()
-        report_text = i18n("Import time: ") + str(world_imported_time - prepared_time)[:6] + "s"
-        if addon_prefs.Auto_Load_Material:
-            material_start_time = time.perf_counter()
-            bpy.ops.crafter.load_material()
-            material_used_time = time.perf_counter() - material_start_time
-            report_text = report_text + i18n(", Material time: ") + str(material_used_time)[:6] + "s"
-
-        # 定位到视图
-        new_objects = list(set(bpy.data.objects) - before_objects)
-        for object in new_objects:
-            if object.type == "MESH":
-                object.select_set(True)
+            self.report({'ERROR'}, f'Reimport error: {e}')
+            return {"CANCELLED"}
         view_2_active_object(context)
         return {"FINISHED"}
+
 
 class VIEW3D_OT_CrafterImportSolidArea(bpy.types.Operator):#导入可编辑区域 ==========未完善==========
     bl_label = "Import Solid Area"
@@ -1526,3 +1472,89 @@ class VIEW3D_UL_CrafterHistoryWorldSettingsList(bpy.types.UIList):#历史世界 
      def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
         settings=item.name.split(" ")
         layout.label(text=f"{settings[0]}     {settings[1]}     {settings[2]}   |   {settings[3]}     {settings[4]}     {settings[5]}")
+
+
+# ==================== 日志操作算子 ====================
+
+class VIEW3D_OT_CrafterCopyImportLog(bpy.types.Operator):
+    bl_label = "Copy Import Log"
+    bl_idname = "crafter.copy_import_log"
+    bl_description = "Copy all import log to clipboard"
+
+    def execute(self, context):
+        text = "\n".join(e["text"] for e in import_log)
+        if not text:
+            self.report({'INFO'}, "No log to copy")
+            return {'CANCELLED'}
+        context.window_manager.clipboard = text
+        self.report({'INFO'}, f"Copied {len(import_log)} lines")
+        return {'FINISHED'}
+
+
+class VIEW3D_OT_CrafterExportImportLog(bpy.types.Operator):
+    bl_label = "Export Import Log"
+    bl_idname = "crafter.export_import_log"
+    bl_description = "Save import log to a text file"
+
+    filepath: bpy.props.StringProperty(subtype="FILE_PATH")  # type: ignore
+
+    def invoke(self, context, event):
+        import datetime
+        default = f"crafter_import_{datetime.datetime.now():%Y%m%d_%H%M%S}.log"
+        self.filepath = os.path.join(os.path.expanduser("~"), "Desktop", default)
+        context.window_manager.fileselect_add(self)
+        return {'RUNNING_MODAL'}
+
+    def execute(self, context):
+        text = "\n".join(e["text"] for e in import_log)
+        if not text:
+            self.report({'INFO'}, "No log to export")
+            return {'CANCELLED'}
+        try:
+            with open(self.filepath, 'w', encoding='utf-8') as f:
+                f.write(text + "\n")
+            self.report({'INFO'}, f"Log saved: {self.filepath}")
+        except Exception as e:
+            self.report({'ERROR'}, f"Save failed: {e}")
+        return {'FINISHED'}
+
+
+class VIEW3D_OT_CrafterExportSessionLog(bpy.types.Operator):
+    bl_label = "Export Session Log"
+    bl_idname = "crafter.export_session_log"
+    bl_description = "Export full session log including all import logs to a file"
+
+    filepath: bpy.props.StringProperty(subtype="FILE_PATH")  # type: ignore
+
+    def invoke(self, context, event):
+        import datetime
+        default = f"crafter_session_{datetime.datetime.now():%Y%m%d_%H%M%S}.log"
+        self.filepath = os.path.join(os.path.expanduser("~"), "Desktop", default)
+        context.window_manager.fileselect_add(self)
+        return {'RUNNING_MODAL'}
+
+    def execute(self, context):
+        import datetime
+        lines = []
+        lines.append("=== Crafter Session Log ===")
+        lines.append(f"Generated: {datetime.datetime.now():%Y-%m-%d %H:%M:%S}")
+        lines.append(f"Plugin Version: 0.8.0")
+        lines.append(f"Import Count: {context.scene.Crafter_import_time}")
+        lines.append("")
+        lines.append("--- Import Log ---")
+        for e in import_log:
+            lines.append(f"[{e['level']}] {e['text']}")
+        lines.append("")
+        lines.append(f"Total log entries: {len(import_log)}")
+        text = "\n".join(lines)
+        if not text.strip():
+            self.report({'INFO'}, "No log to export")
+            return {'CANCELLED'}
+        try:
+            with open(self.filepath, 'w', encoding='utf-8') as f:
+                f.write(text + "\n")
+            self.report({'INFO'}, f"Session log saved: {self.filepath}")
+        except Exception as e:
+            self.report({'ERROR'}, f"Save failed: {e}")
+        return {'FINISHED'}
+

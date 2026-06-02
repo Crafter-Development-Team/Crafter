@@ -25,6 +25,8 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):
         return any(obj.type == "MESH" for obj in context.selected_objects)
 
     def execute(self, context: bpy.types.Context):
+
+        push_log('[unknown] 加载材质', 'INFO')
         addon_prefs = context.preferences.addons[__addon_name__].preferences
 
         bpy.ops.crafter.reload_all()
@@ -313,6 +315,8 @@ class VIEW3D_OT_CrafterLoadParallax(bpy.types.Operator):
         if addon_prefs.Parallax_Guess_Height:
             row5.prop(addon_prefs,"Parallax_Guess_Height_Scale")
     def execute(self, context: bpy.types.Context):
+
+        push_log('[unknown] 加载视差', 'INFO')
         addon_prefs = context.preferences.addons[__addon_name__].preferences
 
         bpy.ops.crafter.remove_parallax()
@@ -457,6 +461,8 @@ class VIEW3D_OT_CrafterRemoveParallax(bpy.types.Operator):
         return True
 
     def execute(self, context: bpy.types.Context):
+
+        push_log('[unknown] 移除视差', 'INFO')
         addon_prefs = context.preferences.addons[__addon_name__].preferences
         
         bpy.ops.crafter.reload_all()

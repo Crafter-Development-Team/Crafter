@@ -48,7 +48,10 @@ def get_dir_saves(context):
     divided = False
 
     dir_versions = dir_root_2_dir_versions(dir_root)
-    list_folder_versions = os.listdir(dir_versions)
+    try:
+        list_folder_versions = os.listdir(dir_versions)
+    except (FileNotFoundError, PermissionError):
+        list_folder_versions = []
     if len(list_folder_versions) > 0:
         dir_version = os.path.join(dir_versions, list_folder_versions[0])
         dir_saves = os.path.join(dir_version, "saves")
@@ -198,6 +201,33 @@ def run_as_admin_and_wait(exe_path, work_dir=None, shell=False):
     else:  # Linux或其他Unix系统
         print(f"[DEBUG] Using Unix execution path for {current_platform}")
         return _run_unix(exe_path, work_dir, shell)
+
+
+# ==================== 全局日志系统 ====================
+import_log = []          # [{"text": str, "level": "INFO"|"WARN"|"ERROR"}, ...]
+import_running = False
+import_progress = 0.0
+MAX_LOG_LINES = 500
+
+DEBUG_MODE = True  # 设为 False 可关闭详细调试日志
+
+def debug_log(text):
+    if DEBUG_MODE:
+        push_log(text, "DEBUG")
+
+def push_log(text, level="INFO"):
+    import_log.append({"text": text, "level": level})
+    if len(import_log) > MAX_LOG_LINES:
+        import_log[:50] = []
+
+def parse_progress(text):
+    import re as _re
+    m = _re.search(r'(\d+)\s*/\s*(\d+)', text)
+    if m:
+        cur, total = int(m.group(1)), int(m.group(2))
+        if total > 0:
+            return min(100.0, cur / total * 100)
+    return None
 
 def _run_windows_admin(exe_path, work_dir=None, shell=False):
     """Windows平台使用管理员权限运行"""
@@ -1156,4 +1186,166 @@ def is_moving_same(info_tex, info_height):
 def make_true_object_mode(context):
     if context.active_object:
         bpy.ops.object.mode_set(mode='OBJECT')
+
+
+# ==================== 异步进程启动（不阻塞 Blender UI） ====================
+
+def start_importer_async(exe_path, work_dir=None):
+    """跨平台非阻塞启动 WorldImporter，返回 poll() 函数。
+
+    poll() 返回:
+      - None  → 进程仍在运行
+      - True  → 进程成功结束
+      - False → 进程失败
+    """
+    current_platform = platform.system()
+    if current_platform == "Windows":
+        return _start_windows_async(exe_path, work_dir)
+    else:
+        return _start_unix_async(exe_path, work_dir)
+
+
+def _start_pipe_reader(proc):
+    """启动后台线程持续读取 stdout，防止管道积压阻塞 exe。
+    返回 (buffer, poll_fn)，buffer 是线程安全的列表，poll_fn 供定时器调用。
+    """
+    import threading
+    buffer = []
+    lock = threading.Lock()
+    stop = threading.Event()
+
+    def _reader():
+        try:
+            for line in iter(proc.stdout.readline, ''):
+                if stop.is_set():
+                    break
+                stripped = line.rstrip('\n\r')
+                if stripped:
+                    with lock:
+                        buffer.append(stripped)
+        except:
+            pass
+        finally:
+            try:
+                proc.stdout.close()
+            except:
+                pass
+
+    thread = threading.Thread(target=_reader, daemon=True)
+    thread.start()
+
+    def poll():
+        nonlocal buffer
+        with lock:
+            if buffer:
+                lines = list(buffer)
+                buffer.clear()
+                return '\n'.join(lines)
+        ret = proc.poll()
+        if ret is None:
+            return None
+        # 等 reader 线程读完剩余内容
+        thread.join(timeout=2)
+        with lock:
+            if buffer:
+                lines = list(buffer)
+                buffer.clear()
+                return '\n'.join(lines)
+        return ret == 0
+
+    return poll
+
+
+def _start_windows_async(exe_path, work_dir=None):
+    """Windows 非阻塞启动，优先用 Popen（可获取日志），回退 ShellExecuteExW"""
+    if platform.system() != "Windows":
+        return None
+    # 尝试 subprocess.Popen（可捕获 stdout，但可能无管理员权限）
+    try:
+        proc = subprocess.Popen(
+            [exe_path],
+            cwd=work_dir,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            universal_newlines=True,
+            bufsize=1,
+        )
+        return _start_pipe_reader(proc)
+    except Exception as e:
+        print(f"Popen failed, fallback to ShellExecuteExW: {e}")
+
+    # 回退：ShellExecuteExW（无日志捕获）
+    try:
+        class SHELLEXECUTEINFOW(ctypes.Structure):
+            _fields_ = [
+                ("cbSize", wintypes.DWORD),
+                ("fMask", ctypes.c_ulong),
+                ("hwnd", wintypes.HWND),
+                ("lpVerb", wintypes.LPCWSTR),
+                ("lpFile", wintypes.LPCWSTR),
+                ("lpParameters", wintypes.LPCWSTR),
+                ("lpDirectory", wintypes.LPCWSTR),
+                ("nShow", ctypes.c_int),
+                ("hInstApp", wintypes.HINSTANCE),
+                ("lpIDList", ctypes.c_void_p),
+                ("lpClass", wintypes.LPCWSTR),
+                ("hKeyClass", wintypes.HKEY),
+                ("dwHotKey", wintypes.DWORD),
+                ("hIcon", wintypes.HANDLE),
+                ("hProcess", wintypes.HANDLE)
+            ]
+        sei = SHELLEXECUTEINFOW()
+        sei.cbSize = ctypes.sizeof(SHELLEXECUTEINFOW)
+        sei.fMask = 0x00000040
+        sei.lpVerb = 'runas'
+        sei.lpFile = exe_path
+        sei.lpDirectory = work_dir
+        sei.nShow = 1
+        if not ctypes.windll.shell32.ShellExecuteExW(ctypes.byref(sei)):
+            return None
+        hProcess = sei.hProcess
+        def poll():
+            if hProcess is None:
+                return False
+            wr = ctypes.windll.kernel32.WaitForSingleObject(hProcess, 0)
+            if wr == 0x0:
+                ec = wintypes.DWORD()
+                ctypes.windll.kernel32.GetExitCodeProcess(hProcess, ctypes.byref(ec))
+                ctypes.windll.kernel32.CloseHandle(hProcess)
+                return ec.value == 0
+            elif wr == 0x00000102:
+                return None
+            else:
+                ctypes.windll.kernel32.CloseHandle(hProcess)
+                return False
+        return poll
+    except Exception as e:
+        print(f"Windows async start error: {e}")
+        return None
+
+
+def _start_unix_async(exe_path, work_dir=None):
+    """macOS/Linux 非阻塞启动（subprocess.Popen + 轮询）"""
+    try:
+        # macOS 需要替换 .exe 后缀
+        actual_exe = exe_path
+        if platform.system() == "Darwin" and exe_path.endswith("WorldImporter.exe"):
+            macos_exe = exe_path.replace("WorldImporter.exe", "WorldImporter")
+            if os.path.exists(macos_exe):
+                actual_exe = macos_exe
+
+        process = subprocess.Popen(
+            [actual_exe],
+            cwd=work_dir,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            universal_newlines=True,
+            bufsize=1,
+        )
+
+        return _start_pipe_reader(process)
+
+    except Exception as e:
+        print(f"Unix async start error: {e}")
+        return None
 

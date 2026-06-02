@@ -99,20 +99,40 @@ def register():
     os.makedirs(dir_classification_basis_default, exist_ok=True)
     os.makedirs(dir_no_lod_blocks, exist_ok=True)
     # ========== 初始化默认方案 ==========
-    for filename in os.listdir(dir_defaults_materials):
-        src_file = os.path.join(dir_defaults_materials, filename)
-        dest_file = os.path.join(dir_materials, filename)
-        shutil.copy(src_file, dest_file)
-    for filename in os.listdir(dir_defaults_classification_basis):
-        src_file = os.path.join(dir_defaults_classification_basis, filename)
-        dest_file = os.path.join(dir_classification_basis_default, filename)
-        shutil.copy(src_file, dest_file)
-    list_no_lod_blocks_folder = os.listdir(dir_no_lod_blocks)
-    if len(list_no_lod_blocks_folder) == 0:
-        for filename in os.listdir(dir_defaults_no_lod_blocks):
-            src_file = os.path.join(dir_defaults_no_lod_blocks, filename)
-            dest_file = os.path.join(dir_no_lod_blocks, filename)
+    try:
+        dir_materials_files = os.listdir(dir_materials)
+    except (FileNotFoundError, PermissionError):
+        dir_materials_files = []
+    # 仅在用户材质目录为空时才复制默认材质（避免覆盖用户数据）
+    if len(dir_materials_files) == 0:
+        try:
+            for filename in os.listdir(dir_defaults_materials):
+                src_file = os.path.join(dir_defaults_materials, filename)
+                dest_file = os.path.join(dir_materials, filename)
+                shutil.copy(src_file, dest_file)
+        except (FileNotFoundError, PermissionError) as e:
+            print(f"Crafter: 无法复制默认材质: {e}")
+
+    try:
+        for filename in os.listdir(dir_defaults_classification_basis):
+            src_file = os.path.join(dir_defaults_classification_basis, filename)
+            dest_file = os.path.join(dir_classification_basis_default, filename)
             shutil.copy(src_file, dest_file)
+    except (FileNotFoundError, PermissionError) as e:
+        print(f"Crafter: 无法复制默认分类基准: {e}")
+
+    try:
+        list_no_lod_blocks_folder = os.listdir(dir_no_lod_blocks)
+    except (FileNotFoundError, PermissionError):
+        list_no_lod_blocks_folder = []
+    if len(list_no_lod_blocks_folder) == 0:
+        try:
+            for filename in os.listdir(dir_defaults_no_lod_blocks):
+                src_file = os.path.join(dir_defaults_no_lod_blocks, filename)
+                dest_file = os.path.join(dir_no_lod_blocks, filename)
+                shutil.copy(src_file, dest_file)
+        except (FileNotFoundError, PermissionError) as e:
+            print(f"Crafter: 无法复制默认无LOD方块表: {e}")
     # ========== 添加至原有ui ==========
     bpy.types.VIEW3D_MT_image_add.append(ui_item)
 

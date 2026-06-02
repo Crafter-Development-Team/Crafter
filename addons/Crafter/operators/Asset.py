@@ -49,6 +49,8 @@ class VIEW3D_OT_CrafterBuildAssetLibrary(bpy.types.Operator):
         return True
 
     def execute(self, context: bpy.types.Context):
+
+        push_log('[unknown] 构建资产库', 'INFO')
         addon_prefs = context.preferences.addons[__addon_name__].preferences
         libraries = bpy.context.preferences.filepaths.asset_libraries
 

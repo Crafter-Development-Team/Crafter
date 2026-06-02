@@ -22,6 +22,8 @@ class VIEW3D_OT_CrafterReplaceResources(bpy.types.Operator):
         return any(obj.type == "MESH" for obj in context.selected_objects)
 
     def execute(self, context: bpy.types.Context):
+
+        push_log('[unknown] 替换资源包', 'INFO')
         addon_prefs = context.preferences.addons[__addon_name__].preferences
         
         bpy.ops.crafter.reload_all()
@@ -243,7 +245,10 @@ class VIEW3D_OT_CrafterReloadResources(bpy.types.Operator):#刷新 资源包 列
     def execute(self, context: bpy.types.Context):
         addon_prefs = context.preferences.addons[__addon_name__].preferences
         dir_resourcepacks = os.path.join(dir_resourcepacks_plans, addon_prefs.Resources_Plans_List[addon_prefs.Resources_Plans_List_index].name)
-        list_dir_resourcepacks = os.listdir(dir_resourcepacks)
+        try:
+            list_dir_resourcepacks = os.listdir(dir_resourcepacks)
+        except (FileNotFoundError, PermissionError):
+            list_dir_resourcepacks = []
         dir_crafter_json = os.path.join(dir_resourcepacks, "crafter.json")
 
         addon_prefs.Resources_List.clear()

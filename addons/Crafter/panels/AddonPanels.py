@@ -71,6 +71,24 @@ class VIEW3D_PT_CrafterImportWorld(bpy.types.Panel):
         if addon_prefs.Point_Cloud_Mode:
             row_ImportWorld.operator("crafter.import_solid_area",text="Import Editable Area")
 
+
+        # ========== 导入日志区域 ==========
+        from ..operators.ImportWorld import import_log, import_running, import_progress
+        if import_running or len(import_log) > 0:
+            log_box = box.box()
+            if import_running:
+                pct = min(int(import_progress), 100)
+                barlen = 20
+                filled = int(pct / 100 * barlen)
+                log_box.label(text=f"\u2588" * filled + "\u2591" * (barlen - filled) + f"  {pct}%")
+            for entry in import_log[-8:]:
+                icon = "INFO" if entry["level"] == "INFO" else "ERROR"
+                log_box.label(text=entry["text"][:120], icon=icon)
+            if not import_running and len(import_log) > 0:
+                row_ops = log_box.row(align=True)
+                row_ops.operator("crafter.copy_import_log", text="复制日志", icon="COPYDOWN")
+                row_ops.operator("crafter.export_import_log", text="导出日志", icon="TEXT")
+
     @classmethod
     def poll(cls, context: bpy.types.Context):
             return True
@@ -205,6 +223,13 @@ class VIEW3D_PT_CrafterOthers(bpy.types.Panel):
 
             row_Resources = layout.row()
             row_Resources.operator("crafter.replace_resources",text="Replace")
+
+        # ========== 日志导出 ==========
+        layout.separator()
+        box_log = layout.box()
+        row_log = box_log.row()
+        row_log.label(text="Session Log", icon="TEXT")
+        row_log.operator("crafter.export_session_log", text="导出完整日志", icon="FILE_TEXT")
 
     @classmethod
     def poll(cls, context: bpy.types.Context):
