@@ -24,18 +24,22 @@ from..properties import dirs_temp
 donot = ["材质设置/Material Settings"]
 len_color_jin = 21
 name_library = "Crafter"
-names_Crafter_Moving_texture = ["Crafter-动态纹理_首", "Crafter-动态纹理_首_渐变", "Crafter-动态纹理_尾"]
+names_Crafter_Moving_texture = ["Crafter-动态纹理_首", "Crafter-动态纹理_首_渐变", "Crafter-动态纹理_尾", "Crafter-UV缩放"]
 
 
 def load_icon_from_zip(zip_path, icons, name_icons, index):
     dir_temp = tempfile.mkdtemp()
+    dir_icon = os.path.join(dir_temp, "pack.png")
     with zipfile.ZipFile(zip_path, "r") as zip_file:
         if "pack.png" in zip_file.namelist():
             zip_file.extract("pack.png", dir_temp)
             have = True
+        elif"pack.jpg" in zip_file.namelist():
+            zip_file.extract("pack.jpg", dir_temp)
+            have = True
+            dir_icon = os.path.join(dir_temp, "pack.jpg")
         else:
             have = False
-    dir_icon = os.path.join(dir_temp, "pack.png")
     icons.load(name_icons + "_icon_" + str(index), dir_icon, 'IMAGE')
     dirs_temp.append(dir_temp)
     return have
@@ -422,15 +426,16 @@ def add_node_group_if_not_exists(names):
                 print(f"Error loading node group '{name}': {e}")
                 continue
 
-def add_node_moving_texture(node_tex, nodes, links):
+def add_node_moving_texture(node_tex, nodes, links, list_info_moving):
     '''
     为基础色节点添加动态纹理节点并连接
     node_tex_base: 基础纹理节点
     nodes: 目标材质节点组
     links:目标材质连接组
-    return:动态纹理节点
+    list_info_moving: 动态纹理节点信息列表
+    row_tex: 基础色纹理行数
+    return:动态纹理节点信息
     '''
-    # ["Crafter-动态纹理_首", "Crafter-动态纹理_首_渐变", "Crafter-动态纹理_尾"]
     if node_tex.image.size[0] == 0:
         return None
     else:
@@ -438,9 +443,15 @@ def add_node_moving_texture(node_tex, nodes, links):
 
     dir_image = os.path.dirname(node_tex.image.filepath)
     dir_mcmeta = os.path.join(bpy.path.abspath(dir_image), fuq_bl_dot_number(node_tex.image.name) + ".mcmeta")
-    if not os.path.exists(dir_mcmeta):
-        return None
-    
+
+    if len(list_info_moving) > 0:
+        if list_info_moving[0] == None:
+            row_tex = 1
+        else:
+            row_tex = list_info_moving[0][1][0]
+    else:
+        row_tex = None
+
     if os.path.exists(dir_mcmeta):
         node_frame = nodes.new(type="NodeFrame")
         node_frame.label = "Crafter-动态纹理"
@@ -491,7 +502,15 @@ def add_node_moving_texture(node_tex, nodes, links):
             frames = row
             for i in range(int(frames)):
                 list_frames.append([i,1])
-
+        info = [row, frametime, frames, list_frames, interpolate]
+        for info_old in list_info_moving:
+            if info_old == None or info_old[1] == None:
+                continue
+            else:
+                if info_old[1] == info:
+                    links.new(info_old[0].outputs["Vector"], node_tex.inputs["Vector"])
+                    return info_old
+        # 全新的动态纹理
         if interpolate:
             node_Moving_texture_start.node_tree = bpy.data.node_groups["Crafter-动态纹理_首_渐变"]
             node_Moving_texture_start.inputs["20 / frametime"].default_value = 20 / frametime
@@ -549,10 +568,39 @@ def add_node_moving_texture(node_tex, nodes, links):
 
         links.new(last_out_put_alpha, node_Moving_texture_end.inputs["frame / row"])
         node_Moving_texture_end.inputs["row"].default_value = row
-
-        return node_Moving_texture_end
+        if row_tex != None:
+                node_Moving_texture_end.inputs["row_tex / row"].default_value = row_tex / row
+        else:
+            node_Moving_texture_end.inputs["row_tex / row"].default_value = 1
+            
+        info_moving = [node_Moving_texture_end, info]
+        return info_moving
     else:
-        return None
+        # 不是动态纹理
+        if len(list_info_moving) > 0:
+            # 不是基础色纹理
+            if list_info_moving[0] == None:
+                # 基础色纹理 不是 动态纹理
+                return None
+            else:
+                # 基础色纹理 是 动态纹理
+                for info_old in list_info_moving:
+                    if info_old == None:
+                        continue
+                    elif info_old[1] == None:
+                        links.new(info_old[0].outputs["Vector"], node_tex.inputs["Vector"])
+                        return info_old
+                node_frame = nodes.new(type="NodeFrame")
+                node_frame.label = "Crafter-动态纹理"
+                node_scall_UV = nodes.new(type="ShaderNodeGroup")
+                node_scall_UV.location = (node_tex.location.x - 200, node_tex.location.y)
+                node_scall_UV.node_tree = bpy.data.node_groups["Crafter-UV缩放"]
+                node_scall_UV.parent = node_frame
+                node_scall_UV.inputs["row_tex / row"].default_value = row_tex
+                return [node_scall_UV, None]
+        else:
+            # 是基础色纹理
+            return None
 
 def fuq_bl_dot_number(name: str):
     '''
@@ -703,6 +751,19 @@ def add_node_parser(group_CI, nodes, links):
             links.new(output, group_CI.inputs[output.name])
     return node_C_PBR_Parser
 
+def add_node_pbr(location_base_tex, y_subtract, dir, nodes, links, list_info_moving):
+    if os.path.exists(bpy.path.abspath(dir)):
+        node_pbr = nodes.new(type="ShaderNodeTexImage")
+        node_pbr.location = (location_base_tex.x, location_base_tex.y - y_subtract)
+        node_pbr.image = bpy.data.images.load(dir)
+        node_pbr.interpolation = "Closest"
+        bpy.data.images[node_pbr.image.name].colorspace_settings.name = "Non-Color"
+        info_moving = add_node_moving_texture(node_pbr, nodes, links, list_info_moving)
+        list_info_moving.append(info_moving)
+        return node_pbr
+    else:
+        return None
+
 def load_normal_and_PBR(node_tex_base, nodes, links):
     '''
     以基础色节点添加法向贴图节点和PBR贴图节点、连接并添加动态纹理节点
@@ -719,30 +780,19 @@ def load_normal_and_PBR(node_tex_base, nodes, links):
         dir_n = os.path.join(dir_image,name_block + "_n.png")
         dir_s = os.path.join(dir_image,name_block + "_s.png")
         dir_a = os.path.join(dir_image,name_block + "_a.png")
-        add_node_moving_texture(node_tex_base, nodes, links)
+        
+        list_info_moving = []
+        info_moving_tex = add_node_moving_texture(node_tex_base, nodes, links, list_info_moving)
+        list_info_moving.append(info_moving_tex)
+
         node_tex_normal = None
         node_tex_PBR = None
-        if os.path.exists(bpy.path.abspath(dir_n)):
-            node_tex_normal = nodes.new(type="ShaderNodeTexImage")
-            node_tex_normal.location = (node_tex_base.location.x, node_tex_base.location.y - 300)
-            node_tex_normal.image = bpy.data.images.load(dir_n)
-            node_tex_normal.interpolation = "Closest"
-            bpy.data.images[node_tex_normal.image.name].colorspace_settings.name = "Non-Color"
-            add_node_moving_texture(node_tex_normal, nodes, links)
-        if os.path.exists(bpy.path.abspath(dir_s)):
-            node_tex_PBR = nodes.new(type="ShaderNodeTexImage")
-            node_tex_PBR.location = (node_tex_base.location.x, node_tex_base.location.y - 600)
-            node_tex_PBR.image = bpy.data.images.load(dir_s)
-            node_tex_PBR.interpolation = "Closest"
-            bpy.data.images[node_tex_PBR.image.name].colorspace_settings.name = "Non-Color"
-            add_node_moving_texture(node_tex_PBR, nodes, links)
-        elif os.path.exists(bpy.path.abspath(dir_a)):
-            node_tex_PBR = nodes.new(type="ShaderNodeTexImage")
-            node_tex_PBR.location = (node_tex_base.location.x, node_tex_base.location.y - 600)
-            node_tex_PBR.image = bpy.data.images.load(dir_a)
-            node_tex_PBR.interpolation = "Closest"
-            bpy.data.images[node_tex_PBR.image.name].colorspace_settings.name = "Non-Color"
-            add_node_moving_texture(node_tex_PBR, nodes, links)
+        location_base_tex = node_tex_base.location
+
+        node_tex_normal = add_node_pbr(location_base_tex, 300, dir_n, nodes, links, list_info_moving)
+        node_tex_PBR = add_node_pbr(location_base_tex, 600, dir_s, nodes, links, list_info_moving)
+        node_tex_PBR = add_node_pbr(location_base_tex, 600, dir_a, nodes, links, list_info_moving)
+
     return node_tex_normal, node_tex_PBR
 
 def link_base_normal_PBR(node_tex_base, group_CI, links, node_C_PBR_Parser, node_tex_normal, node_tex_PBR):
