@@ -529,7 +529,7 @@ def add_node_moving_texture(node_tex, nodes, links, list_info_moving):
     nodes: 目标材质节点组
     links:目标材质连接组
     list_info_moving: 动态纹理节点信息列表
-    row_tex: 基础色纹理行数
+    row_base: 基础色纹理行数
     return:动态纹理节点信息
     '''
     if node_tex.image.size[0] == 0:
@@ -542,11 +542,11 @@ def add_node_moving_texture(node_tex, nodes, links, list_info_moving):
 
     if len(list_info_moving) > 0:
         if list_info_moving[0] == None:
-            row_tex = 1
+            row_base = 1
         else:
-            row_tex = list_info_moving[0][1][0]
+            row_base = list_info_moving[0][1][0]
     else:
-        row_tex = None
+        row_base = None
 
     if os.path.exists(dir_mcmeta):
         node_frame = nodes.new(type="NodeFrame")
@@ -671,8 +671,8 @@ def add_node_moving_texture(node_tex, nodes, links, list_info_moving):
 
         links.new(last_out_put_alpha, node_Moving_texture_end.inputs["frame / row"])
         node_Moving_texture_end.inputs["row"].default_value = row
-        if row_tex != None:
-                node_Moving_texture_end.inputs["row_tex / row"].default_value = row_tex / row
+        if row_base != None:
+                node_Moving_texture_end.inputs["row_tex / row"].default_value = row_base / row
         else:
             node_Moving_texture_end.inputs["row_tex / row"].default_value = 1
             
@@ -699,7 +699,8 @@ def add_node_moving_texture(node_tex, nodes, links, list_info_moving):
                 node_scall_UV.location = (node_tex.location.x - 200, node_tex.location.y)
                 node_scall_UV.node_tree = bpy.data.node_groups["Crafter-UV缩放"]
                 node_scall_UV.parent = node_frame
-                node_scall_UV.inputs["row_tex / row"].default_value = row_tex
+                node_scall_UV.inputs["row_tex / row"].default_value = row_base
+                links.new(node_scall_UV.outputs["Vector"], node_tex.inputs["Vector"])
                 return [node_scall_UV, None]
         else:
             # 是基础色纹理
