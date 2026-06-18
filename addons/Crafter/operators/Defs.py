@@ -208,21 +208,117 @@ def run_as_admin_and_wait(exe_path, work_dir=None, shell=False):
 
 
 # ==================== 全局日志系统 ====================
-import_log = []          # [{"text": str, "level": "INFO"|"WARN"|"ERROR"}, ...]
+# 日志级别常量
+LOG_LEVEL_DEBUG = "DEBUG"
+LOG_LEVEL_INFO = "INFO"
+LOG_LEVEL_WARN = "WARN"
+LOG_LEVEL_ERROR = "ERROR"
+
+import_log = []          # [{"text": str, "level": str, "time": str, "stage": str}, ...]
 import_running = False
 import_progress = 0.0
-MAX_LOG_LINES = 500
+import_stage = ""        # 当前所处的环节名称
+MAX_LOG_LINES = 2000     # 日志上限，超过后从头部裁剪
 
 DEBUG_MODE = True  # 设为 False 可关闭详细调试日志
 
-def debug_log(text):
-    if DEBUG_MODE:
-        push_log(text, "DEBUG")
+# 阶段计时表：{stage_name: start_perf_counter}
+_stage_timers = {}
+import time as _time  # 日志系统专用计时
+import datetime as _datetime  # 日志系统专用时间戳
 
-def push_log(text, level="INFO"):
-    import_log.append({"text": text, "level": level})
+def _now_str():
+    """返回当前时间字符串 HH:MM:SS"""
+    return _datetime.datetime.now().strftime("%H:%M:%S")
+
+def _format_dur(seconds):
+    """格式化耗时：小于1秒显示 ms，否则显示 s"""
+    if seconds is None:
+        return "?"
+    if seconds < 1.0:
+        return f"{seconds * 1000:.0f}ms"
+    return f"{seconds:.2f}s"
+
+def debug_log(text, stage=None):
+    """调试日志，受 DEBUG_MODE 开关控制"""
+    if DEBUG_MODE:
+        push_log(text, LOG_LEVEL_DEBUG, stage)
+
+def info_log(text, stage=None):
+    push_log(text, LOG_LEVEL_INFO, stage)
+
+def warn_log(text, stage=None):
+    push_log(text, LOG_LEVEL_WARN, stage)
+
+def error_log(text, stage=None):
+    push_log(text, LOG_LEVEL_ERROR, stage)
+
+def push_log(text, level=LOG_LEVEL_INFO, stage=None):
+    """追加一条日志。level 为日志级别，stage 为所处环节（缺省取全局 import_stage）。
+    向后兼容：text/level 字段保持不变，新增 time/stage 字段。
+    """
+    import_log.append({
+        "text": str(text),
+        "level": level,
+        "time": _now_str(),
+        "stage": stage if stage is not None else import_stage,
+    })
     if len(import_log) > MAX_LOG_LINES:
-        import_log[:50] = []
+        del import_log[:100]
+
+def log_stage(stage_name):
+    """仅设置当前环节名称（不输出日志），后续 push_log 会自动带上该环节"""
+    global import_stage
+    import_stage = stage_name
+
+def log_stage_begin(stage_name, detail=""):
+    """开始一个计时环节：设置当前环节、记录起始时间、输出开始日志"""
+    global import_stage, _stage_timers
+    import_stage = stage_name
+    _stage_timers[stage_name] = _time.perf_counter()
+    msg = f"▶ {stage_name}"
+    if detail:
+        msg += f" - {detail}"
+    push_log(msg, LOG_LEVEL_INFO, stage_name)
+
+def log_stage_end(stage_name, extra=""):
+    """结束一个计时环节：输出完成日志并附带耗时"""
+    global _stage_timers
+    t0 = _stage_timers.pop(stage_name, None)
+    dur = _format_dur(_time.perf_counter() - t0 if t0 is not None else None)
+    msg = f"■ {stage_name} 完成 ({dur})"
+    if extra:
+        msg += f" - {extra}"
+    push_log(msg, LOG_LEVEL_INFO, stage_name)
+
+def log_step(text, stage=None):
+    """在当前环节内输出一条步骤日志（不计时）"""
+    push_log(f"  · {text}", LOG_LEVEL_INFO, stage)
+
+def clear_import_log():
+    """清空日志并重置进度/阶段状态"""
+    global import_running, import_progress, import_stage
+    import_log.clear()
+    import_running = False
+    import_progress = 0.0
+    import_stage = ""
+    _stage_timers.clear()
+
+def format_log_text(include_meta=True):
+    """将 import_log 格式化为可读文本。
+    include_meta=True 时带 [时间][级别] 前缀，便于复制/导出排查问题。
+    """
+    if not import_log:
+        return ""
+    lines = []
+    for e in import_log:
+        if include_meta:
+            stage = e.get("stage", "")
+            stage_str = f"[{stage}]" if stage else ""
+            lines.append(f"[{e.get('time','')}] [{e.get('level','INFO')}] {stage_str} {e['text']}")
+        else:
+            lines.append(e["text"])
+    return "\n".join(lines)
 
 def parse_progress(text):
     import re as _re
@@ -522,6 +618,13 @@ def add_node_moving_texture(node_tex, nodes, links, list_info_moving):
         links.new(node_Moving_texture_end.outputs["Vector"], node_tex.inputs["Vector"])
         links.new(node_Moving_texture_start.outputs["Fac"], node_Fac.inputs["Fac"])
 
+        # 某些资源包的 .mcmeta 可能存在 animation.frames 为空、frames 为 0 等异常情况。
+        # 原逻辑在 list_frames 为空时不会创建 node_Mix，但结尾仍可能访问 node_Mix，
+        # 从而触发 “cannot access local variable 'node_Mix'” 异常。
+        if not list_frames or frames <= 0:
+            frames = 1
+            list_frames = [[0, 1]]
+        node_Mix = None
         n = -1
         adding_frames = 0
         for i in list_frames:
@@ -561,7 +664,7 @@ def add_node_moving_texture(node_tex, nodes, links, list_info_moving):
             node_Fac.color_ramp.elements[n % 32].position = adding_frames / frames
             node_Fac.color_ramp.elements[n % 32].color = [frame_chu_row, frame_chu_row, frame_chu_row, frame_chu_row]
             adding_frames  += i[1]
-        if n // 32 == 0:
+        if node_Mix is None:
             last_out_put_alpha = node_Fac.outputs["Alpha"]
         else:
             last_out_put_alpha = node_Mix.outputs["Result"]
