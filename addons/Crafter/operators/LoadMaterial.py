@@ -51,7 +51,7 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):
         except:
             pass
         # 导入C-节点组
-        node_groups_use_fake_user = ["C-PBR_Parser","C-lab_PBR_1.3","C-old_continuum","C-old_BSL","C-SEUS_PBR"]
+        node_groups_use_fake_user = ["C-PBR_Parser", "C-lab_PBR_1.3", "C-old_PBR"]
         with bpy.data.libraries.load(dir_blend_append, link=False) as (data_from, data_to):
             data_to.node_groups = [name for name in data_from.node_groups if name in node_groups_use_fake_user]
         for node_group in node_groups_use_fake_user:
