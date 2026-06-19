@@ -407,6 +407,7 @@ class VIEW3D_OT_CrafterLoadParallax(bpy.types.Operator):
             if is_moving_same(info_tex=info_tex, info_height=info_height):
                 links.new(node_final_depth.outputs["UV"], node_tex.inputs["Vector"])
             else:
+                print("para", node_tex.image.name)
                 node_final = create_parallax_final(node=node_tex, node_final_depth=node_final_depth, info_height=info_height, info_moving=info_tex, nodes=nodes, links=links, node_frame=node_frame)
             if node_tex_PBR != None:
                 if is_moving_same(info_tex=info_tex, info_height=info_height):
@@ -416,6 +417,7 @@ class VIEW3D_OT_CrafterLoadParallax(bpy.types.Operator):
                     if node_final != None:
                         create_pbr_fianl = not is_moving_same(info_tex=info_PBR, info_height=info_tex)
                     if create_pbr_fianl:
+                        print("para", node_tex_PBR.image.name)
                         create_parallax_final(node=node_tex_PBR, node_final_depth=node_final_depth, info_height=info_height, info_moving=info_PBR, nodes=nodes, links=links, node_frame=node_frame)
                     else:
                         links.new(node_final.outputs["UV"], node_tex_PBR.inputs["Vector"])

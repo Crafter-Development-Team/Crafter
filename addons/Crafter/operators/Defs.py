@@ -549,23 +549,7 @@ def add_node_moving_texture(node_tex, nodes, links, list_info_moving):
         row_base = None
 
     if os.path.exists(dir_mcmeta):
-        node_frame = nodes.new(type="NodeFrame")
-        node_frame.label = "Crafter-动态纹理"
 
-        node_Moving_texture_end = nodes.new(type="ShaderNodeGroup")
-        node_Moving_texture_end.location = (node_tex.location.x - 200, node_tex.location.y)
-        node_Moving_texture_end.node_tree = bpy.data.node_groups["Crafter-动态纹理_尾"]
-        node_Moving_texture_end.parent = node_frame
-
-        node_Fac = nodes.new(type="ShaderNodeValToRGB")
-        node_Fac.location = (node_tex.location.x - 750, node_tex.location.y)
-        node_Fac.color_ramp.interpolation = "CONSTANT"
-        node_Fac.parent = node_frame
-
-        node_Moving_texture_start = nodes.new(type="ShaderNodeGroup")
-        node_Moving_texture_start.location = (node_tex.location.x - 900, node_tex.location.y)
-        node_Moving_texture_start.parent = node_frame
-        
         with open(dir_mcmeta, 'r', encoding='utf-8') as file:
             mcmeta = json.load(file)
         frametime = 1
@@ -607,6 +591,24 @@ def add_node_moving_texture(node_tex, nodes, links, list_info_moving):
                     links.new(info_old[0].outputs["Vector"], node_tex.inputs["Vector"])
                     return info_old
         # 全新的动态纹理
+        
+        node_frame = nodes.new(type="NodeFrame")
+        node_frame.label = "Crafter-动态纹理"
+
+        node_Moving_texture_end = nodes.new(type="ShaderNodeGroup")
+        node_Moving_texture_end.location = (node_tex.location.x - 200, node_tex.location.y)
+        node_Moving_texture_end.node_tree = bpy.data.node_groups["Crafter-动态纹理_尾"]
+        node_Moving_texture_end.parent = node_frame
+
+        node_Fac = nodes.new(type="ShaderNodeValToRGB")
+        node_Fac.location = (node_tex.location.x - 750, node_tex.location.y)
+        node_Fac.color_ramp.interpolation = "CONSTANT"
+        node_Fac.parent = node_frame
+
+        node_Moving_texture_start = nodes.new(type="ShaderNodeGroup")
+        node_Moving_texture_start.location = (node_tex.location.x - 900, node_tex.location.y)
+        node_Moving_texture_start.parent = node_frame
+        
         if interpolate:
             node_Moving_texture_start.node_tree = bpy.data.node_groups["Crafter-动态纹理_首_渐变"]
             node_Moving_texture_start.inputs["20 / frametime"].default_value = 20 / frametime
@@ -1209,7 +1211,7 @@ def nodes_distance(node1, node2):
     distance = ((loc1.x - loc2.x) ** 2 + (loc1.y - loc2.y) ** 2) ** 0.5
     return distance
 
-def similar_nodes(node1, node2, visited_pairs=None):
+def same_nodes(node1, node2, visited_pairs=None):
     
     """
     递归向上游对比两个节点及其所有上游节点，检查每个接口的数值是否相同
@@ -1323,7 +1325,7 @@ def similar_nodes(node1, node2, visited_pairs=None):
         upstream_node2 = upstream_nodes2[key]
         
         # 递归对比上游节点
-        if not similar_nodes(upstream_node1, upstream_node2, visited_pairs):
+        if not same_nodes(upstream_node1, upstream_node2, visited_pairs):
             return False
     
     return True
@@ -1332,7 +1334,7 @@ def is_moving_same(info_tex, info_height):
     moving_same = False
     if info_height[0] == info_tex[0]:
         if info_height[0]:
-            moving_same = similar_nodes(info_tex[1], info_height[1])
+            moving_same = same_nodes(info_tex[1], info_height[1])
         else:
             moving_same = True
     return moving_same 
