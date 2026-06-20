@@ -967,7 +967,7 @@ def node_moving_tex_info(node):
 
     return info
 
-def creat_parallax_node(node_tex_height, iterations, smooth, info_moving_normal, nodes, links, height_output="Alpha", scale=1):
+def creat_parallax_node(node_tex_height, iterations, smooth, info_moving_normal, nodes, links, height_output="Alpha", gusess_scale=1):
     # 创建框，方便清除
     node_frame = nodes.new(type="NodeFrame")
     location = [node_tex_height.location.x - 1500, node_tex_height.location.y]
@@ -1009,15 +1009,15 @@ def creat_parallax_node(node_tex_height, iterations, smooth, info_moving_normal,
             node_height.interpolation = "Linear"
         else:
             node_height.interpolation = "Closest"
-        if scale == 1:
+        if gusess_scale == 1:
             links.new(node_height.outputs[height_output], node_last.inputs["Depth"])
         else:
             node_math = nodes.new("ShaderNodeMath")
             node_math.operation = "MULTIPLY_ADD"
             node_math.location = location
             location[0] -= move# location
-            node_math.inputs["Value_001"].default_value = scale
-            node_math.inputs["Value_002"].default_value = 1 - scale
+            node_math.inputs["Value_001"].default_value = gusess_scale
+            node_math.inputs["Value_002"].default_value = 1 - gusess_scale
             links.new(node_height.outputs[height_output], node_math.inputs["Value"])
             links.new(node_math.outputs["Value"], node_last.inputs["Depth"])
             node_math.parent = node_frame

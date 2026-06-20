@@ -395,19 +395,18 @@ class VIEW3D_OT_CrafterLoadParallax(bpy.types.Operator):
                 node_tex = node_tex_normal
                 info_height = info_base
                 info_tex = info_normal
-                node_final_depth, node_frame = creat_parallax_node(node_tex_height=node_tex_height, iterations=iterations, smooth=smooth, info_moving_normal=info_normal, nodes=nodes, links=links, height_output="Color", scale=addon_prefs.Parallax_Guess_Height_Scale)
+                node_final_depth, node_frame = creat_parallax_node(node_tex_height=node_tex_height, iterations=iterations, smooth=smooth, info_moving_normal=info_normal, nodes=nodes, links=links, height_output="Color", gusess_scale=addon_prefs.Parallax_Guess_Height_Scale)
             else:
                 node_tex_height = node_tex_normal
                 node_tex = node_tex_base
                 info_height = info_normal
                 info_tex = info_base
-                node_final_depth, node_frame = creat_parallax_node(node_tex_height=node_tex_height, iterations=iterations, smooth=smooth, info_moving_normal=info_normal, nodes=nodes, links=links, height_output="Alpha", scale=1)
+                node_final_depth, node_frame = creat_parallax_node(node_tex_height=node_tex_height, iterations=iterations, smooth=smooth, info_moving_normal=info_normal, nodes=nodes, links=links, height_output="Alpha", gusess_scale=1)
 
             node_final = None
             if is_moving_same(info_tex=info_tex, info_height=info_height):
                 links.new(node_final_depth.outputs["UV"], node_tex.inputs["Vector"])
             else:
-                print("para", node_tex.image.name)
                 node_final = create_parallax_final(node=node_tex, node_final_depth=node_final_depth, info_height=info_height, info_moving=info_tex, nodes=nodes, links=links, node_frame=node_frame)
             if node_tex_PBR != None:
                 if is_moving_same(info_tex=info_tex, info_height=info_height):
@@ -417,7 +416,6 @@ class VIEW3D_OT_CrafterLoadParallax(bpy.types.Operator):
                     if node_final != None:
                         create_pbr_fianl = not is_moving_same(info_tex=info_PBR, info_height=info_tex)
                     if create_pbr_fianl:
-                        print("para", node_tex_PBR.image.name)
                         create_parallax_final(node=node_tex_PBR, node_final_depth=node_final_depth, info_height=info_height, info_moving=info_PBR, nodes=nodes, links=links, node_frame=node_frame)
                     else:
                         links.new(node_final.outputs["UV"], node_tex_PBR.inputs["Vector"])
