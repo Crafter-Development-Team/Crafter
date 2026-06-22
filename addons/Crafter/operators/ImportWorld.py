@@ -687,11 +687,11 @@ def finish_import(ctx, prefs, imported_time, worldconfig, prepared_time,
     # Clone biomeTex node group
     log_stage_begin("克隆 biomeTex 节点组")
     try:
-        ng_src = bpy.data.node_groups["Crafter-biomeTex"]
-        ng = ng_src.copy()
-        ng.name = "Crafter-biomeTex_" + imported_time
+        node_group_src = bpy.data.node_groups["Crafter-biomeTex"]
+        node_group = node_group_src.copy()
+        node_group.name = "Crafter-biomeTex_" + imported_time
         loaded_imgs = 0
-        for node in ng.nodes:
+        for node in node_group.nodes:
             if node.type == "TEX_IMAGE":
                 try:
                     fn = fuq_bl_dot_number(node.image.name)
@@ -705,11 +705,11 @@ def finish_import(ctx, prefs, imported_time, worldconfig, prepared_time,
                 node.inputs["min Y"].default_value = -worldconfig["maxZ"] -1
                 node.inputs["max X"].default_value = 1 + worldconfig["maxX"]
                 node.inputs["max Y"].default_value = -worldconfig["minZ"]
-        log_step(f"节点组 {ng.name} 就绪，加载 {loaded_imgs} 张群系图")
+        log_step(f"节点组 {node_group.name} 就绪，加载 {loaded_imgs} 张群系图")
         debug_log("biomeTex node group ready")
     except Exception as ex:
         warn_log(f"biomeTex 节点组克隆失败: {ex}")
-        ng = None
+        node_group = None
     log_stage_end("克隆 biomeTex 节点组")
 
     # Apply node group to materials
@@ -718,10 +718,10 @@ def finish_import(ctx, prefs, imported_time, worldconfig, prepared_time,
     log_step(f"待处理材质: {len(apply_list)} 个")
     for nm in apply_list:
         mat = bpy.data.materials[nm]
-        nds = mat.node_tree.nodes
-        lks = mat.node_tree.links
+        nodes = mat.node_tree.nodes
+        links = mat.node_tree.links
         ntb = None; out_ev = None; pri = None; todel = []
-        for nd in nds:
+        for nd in nodes:
             if nd.type == "OUTPUT_MATERIAL" and nd.target in ("EEVEE", "ALL"):
                 out_ev = nd
             elif nd.type == "TEX_IMAGE":
@@ -731,16 +731,16 @@ def finish_import(ctx, prefs, imported_time, worldconfig, prepared_time,
                     todel.append(nd)
             elif nd.type == "BSDF_PRINCIPLED":
                 pri = nd
-        for nd in todel: nds.remove(nd)
+        for nd in todel: nodes.remove(nd)
         if ntb and pri:
-            lks.new(ntb.outputs["Alpha"], pri.inputs["Alpha"])
-        if out_ev and ng:
-            nbn = nds.new("ShaderNodeGroup")
+            links.new(ntb.outputs["Alpha"], pri.inputs["Alpha"])
+        if out_ev and node_group:
+            nbn = nodes.new("ShaderNodeGroup")
             nbn.location = (out_ev.location.x - 400, out_ev.location.y - 550)
-            nbn.node_tree = ng
+            nbn.node_tree = node_group
         if ntb:
-            load_normal_and_PBR(node_tex_base=ntb, nodes=nds, links=lks)
-            nds.active = ntb
+            load_normal_and_PBR(node_tex_base=ntb, nodes=nodes, links=links)
+            nodes.active = ntb
     log_stage_end("应用 biomeTex 到材质", f"{len(apply_list)} 个材质")
 
     log_stage_begin("打包纹理")
@@ -886,7 +886,6 @@ class VIEW3D_OT_CrafterReimportSurfaceWorld(bpy.types.Operator):# 重导入表�
             error_log(f"Reimport 异常: {e}")
             self.report({'ERROR'}, f'Reimport error: {e}')
             return {"CANCELLED"}
-        view_2_active_object(context)
         return {"FINISHED"}
 
 

@@ -66,6 +66,7 @@ BLENDER_EXE_PATH = "C:/Program Files/Blender Foundation/Blender 4.2/blender.exe"
 
 - 世界维度列表读取
 - 坐标选择器
+- 修复大量bug
 
 ---
 
@@ -113,7 +114,7 @@ BLENDER_EXE_PATH = "C:/Program Files/Blender Foundation/Blender 4.2/blender.exe"
 
 [![-blueish-](https://i2.hdslb.com/bfs/face/e7ebd5fd6c2267d6bab44a2e89b9d1671a818f13.jpg@100w_100h_1c_1s.png)](https://space.bilibili.com/3546391456516604)
 
-- 提供了视差节点(为适配修改后更复杂的动态纹理实现方式而弃用)
+- 提供了视差节点
 
 ---
 
