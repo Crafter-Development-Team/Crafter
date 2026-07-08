@@ -70,50 +70,6 @@ class VIEW3D_PT_CrafterImportWorld(bpy.types.Panel):
         row_ImportWorld.operator("crafter.open_worldimporter_folder",text="",icon="FILE_FOLDER")
         if addon_prefs.Point_Cloud_Mode:
             row_ImportWorld.operator("crafter.import_solid_area",text="Import Editable Area")
-
-
-        # ========== 导入日志区域 ==========
-        from ..operators.ImportWorld import import_log, import_running, import_progress, import_stage
-        if import_running or len(import_log) > 0:
-            log_box = box.box()
-            # 顶部：当前阶段 + 日志条数
-            head_row = log_box.row(align=True)
-            if import_running:
-                head_row.label(text=f"运行中: {import_stage}" if import_stage else "运行中...", icon="TIME")
-            else:
-                head_row.label(text=f"日志（共 {len(import_log)} 条）", icon="INFO")
-            head_row.label(text=f"{len(import_log)}", icon="LINENUMBERS_ON")
-
-            if import_running:
-                pct = min(int(import_progress), 100)
-                barlen = 24
-                filled = int(pct / 100 * barlen)
-                log_box.label(text=f"\u2588" * filled + "\u2591" * (barlen - filled) + f"  {pct}%")
-
-            # 级别 -> 图标映射
-            _level_icon = {
-                "ERROR": "CANCEL",
-                "WARN": "ERROR",
-                "INFO": "INFO",
-                "DEBUG": "SETTINGS",
-            }
-            # 显示最近 14 条日志，带时间戳与级别图标
-            for entry in import_log[-14:]:
-                lv = entry.get("level", "INFO")
-                icon = _level_icon.get(lv, "INFO")
-                t = entry.get("time", "")
-                txt = entry["text"]
-                if t:
-                    txt = f"{t} {txt}"
-                log_box.label(text=txt[:140], icon=icon)
-
-            # 底部操作按钮
-            row_ops = log_box.row(align=True)
-            row_ops.operator("crafter.copy_import_log", text="复制日志", icon="COPYDOWN")
-            row_ops.operator("crafter.export_import_log", text="导出日志", icon="TEXT")
-            if not import_running and len(import_log) > 0:
-                row_ops.operator("crafter.clear_import_log", text="清空", icon="TRASH")
-
     @classmethod
     def poll(cls, context: bpy.types.Context):
             return True
@@ -204,6 +160,9 @@ class VIEW3D_PT_CrafterOthers(bpy.types.Panel):
         row_function1.operator("crafter.ui_asset",text="Asset",icon="ASSET_MANAGER",depress=addon_prefs.Other_index == 0)
         row_function1.operator("crafter.ui_replace_resources",text="Replace Resources",icon="NODE_COMPOSITING",depress=addon_prefs.Other_index == 1)
         
+        row_function2 = layout.row()
+        row_function2.operator("crafter.ui_log",text="Log",icon="TEXT",depress=addon_prefs.Other_index == 2)
+        
         if addon_prefs.Other_index == 0:
             
             libraries = bpy.context.preferences.filepaths.asset_libraries
@@ -249,12 +208,46 @@ class VIEW3D_PT_CrafterOthers(bpy.types.Panel):
             row_Resources = layout.row()
             row_Resources.operator("crafter.replace_resources",text="Replace")
 
-        # ========== 日志导出 ==========
-        layout.separator()
-        box_log = layout.box()
-        row_log = box_log.row()
-        row_log.label(text="Session Log", icon="TEXT")
-        row_log.operator("crafter.export_session_log", text="导出完整日志", icon="FILE_TEXT")
+        # ========== 日志面板 ==========
+        if addon_prefs.Other_index == 2:
+            if import_running or len(import_log) > 0:
+                log_box = layout.box()
+                head_row = log_box.row(align=True)
+                if import_running:
+                    head_row.label(text=f"Running: {import_stage}" if import_stage else "Running...", icon="TIME")
+                else:
+                    head_row.label(text=f"Log ({len(import_log)} entries)", icon="INFO")
+                head_row.label(text=f"{len(import_log)}", icon="LINENUMBERS_ON")
+
+                if import_running:
+                    pct = min(int(import_progress), 100)
+                    barlen = 24
+                    filled = int(pct / 100 * barlen)
+                    log_box.label(text=f"\u2588" * filled + "\u2591" * (barlen - filled) + f"  {pct}%")
+
+                _level_icon = {
+                    "ERROR": "CANCEL",
+                    "WARN": "ERROR",
+                    "INFO": "INFO",
+                    "DEBUG": "SETTINGS",
+                }
+                for entry in import_log[-14:]:
+                    lv = entry.get("level", "INFO")
+                    icon = _level_icon.get(lv, "INFO")
+                    t = entry.get("time", "")
+                    txt = entry["text"]
+                    if t:
+                        txt = f"{t} {txt}"
+                    log_box.label(text=txt[:140], icon=icon)
+
+                row_ops = log_box.row(align=True)
+                row_ops.operator("crafter.copy_import_log", text="Copy Log", icon="COPYDOWN")
+                row_ops.operator("crafter.export_import_log", text="Export Log", icon="TEXT")
+                if not import_running and len(import_log) > 0:
+                    row_ops.operator("crafter.clear_import_log", text="Clear", icon="TRASH")
+            else:
+                layout.label(text="No Log", icon="INFO")
+
 
     @classmethod
     def poll(cls, context: bpy.types.Context):

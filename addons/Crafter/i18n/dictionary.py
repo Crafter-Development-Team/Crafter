@@ -134,6 +134,15 @@ dictionary = {
         "Replace resources,but can only replace textures with the same name":"替换资源包,但只能替换同名纹理",
         "Set texture interpolation":"设置纹理插值",
         "Custome Size":"自定义尺寸",
+                # ==========日志==========
+        "Log":"日志",
+        "Running":"运行中",
+        "Running...":"运行中...",
+        "entries":"条",
+        "Copy Log":"复制日志",
+        "Export Log":"导出日志",
+        "Clear":"清空",
+        "No Log":"暂无日志",
         # ==========节点接口==========
         "Normal Alpha":"法向Alpha",
         "Parsed Normal":"已解析法向",
