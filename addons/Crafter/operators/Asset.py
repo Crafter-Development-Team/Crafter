@@ -74,8 +74,6 @@ class VIEW3D_OT_CrafterBuildAssetLibrary(bpy.types.Operator):
                 if os.path.isfile(os.path.join(dir_default_Asset, file)):
                     if file.endswith(".txt"):
                         shutil.copy(os.path.join(dir_default_Asset, file), os.path.join(dir_asset, file))
-        
-            
 
-            
+
         return {'FINISHED'}
