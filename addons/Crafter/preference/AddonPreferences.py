@@ -224,7 +224,7 @@ class CrafterAddonPreferences(AddonPreferences):
                                   max=2.0,
                                   update=lambda self, context: self.set_parallax_depth(context))# type: ignore
     Parallax_Calculate_Normal: BoolProperty(name="Calculate Normal",
-                                            default=True)# type: ignore
+                                            default=False)# type: ignore
     Parallax_Based_on_Parsed_Normal: BoolProperty(name="Based on Parsed Normal",
                                                   default=True)# type: ignore
     Parallax_Guess_Height: BoolProperty(name="Guess Height",
