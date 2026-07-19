@@ -482,7 +482,10 @@ class VIEW3D_OT_CrafterRemoveParallax(bpy.types.Operator):
             for_collection.append(mcmt.name)
         # 遍历材质合集
         for name_material in for_collection:
-            material = bpy.data.materials[name_material]
+            try:
+                material = bpy.data.materials[name_material]
+            except:
+                continue
             node_tree_material = material.node_tree
             if node_tree_material == None:
                 continue
