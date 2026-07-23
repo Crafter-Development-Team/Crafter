@@ -13,6 +13,194 @@ is_chinese = lang in ("zh_HANS", "zh_HANT")
 
 # ==================== 加载材质 ====================
 
+# ========== 提取的分类数据加载函数 ==========
+def load_classification_data(addon_prefs):
+    '''
+    从分类基础目录加载所有 JSON 分类文件，合并成统一的分类列表、封禁列表和封禁关键词列表。
+    addon_prefs: 插件偏好设置，从中获取当前选中的分类基础文件夹名称
+    return: (classification_list, banlist, ban_keyw) 三元组
+    '''
+    classification_folder_name = addon_prefs.Classification_Basis_List[addon_prefs.Classification_Basis_List_index].name
+    classification_folder_dir = os.path.join(dir_classification_basis, classification_folder_name)
+    classification_list = {}
+    banlist = []
+    ban_keyw = []
+    for filename in os.listdir(classification_folder_dir):
+        file_path = os.path.join(classification_folder_dir, filename)
+        if filename.endswith(".json"):
+            try:
+                with open(file_path, 'r', encoding='utf-8') as file:
+                    data = json.load(file)
+                    classification_list = make_dict_together(classification_list, data)
+                    if "ban" in data:
+                        banlist.extend(data["ban"])
+                    if "ban_keyw" in data:
+                        ban_keyw.extend(data["ban_keyw"])
+            except:
+                pass
+    return classification_list, banlist, ban_keyw
+
+# ========== 提取的单材质处理函数 ==========
+def process_single_material(material, context, classification_list, banlist, ban_keyw, imported_by_crafter=False):
+    '''
+    处理单个材质：扫描 TEX_IMAGE 节点识别基础色/PBR贴图，构建 CI- 节点组，
+    装配 PBR 解析器，连接法向和 PBR 贴图。
+    material:             要处理的材质
+    context:             Blender 上下文
+    classification_list: 分类列表（来自 load_classification_data）
+    banlist:             封禁方块名列表
+    ban_keyw:            封禁关键词列表
+    imported_by_crafter: 是否由 Crafter 导入触发（True=保留已有贴图节点不重新从文件查找PBR）
+    '''
+    node_tree_material = material.node_tree
+    if node_tree_material is None:
+        return
+    nodes = node_tree_material.nodes
+    links = node_tree_material.links
+
+    if bpy.app.version >= (4, 2, 0):
+        material.volume_intersection_method = 'ACCURATE'
+        material.displacement_method = "BOTH"
+
+    node_tex_base = None
+    if material.name.startswith("color#"):
+        node_biomeTex = None
+        nodes_wait_remove = []
+        material.displacement_method = "BOTH"
+        for node in nodes:
+            if node.type == "OUTPUT_MATERIAL":
+                if node.target == "EEVEE":
+                    node_output_EEVEE = node
+                if node.target == "ALL":
+                    node.target = "EEVEE"
+                    node_output_EEVEE = node
+                if node.target == "CYCLES":
+                    nodes_wait_remove.append(node)
+            if node.type == "BSDF_PRINCIPLED":
+                nodes_wait_remove.append(node)
+            if node.type == "GROUP":
+                if node.node_tree is None:
+                    nodes_wait_remove.append(node)
+                else:
+                    if node.node_tree.name.startswith("Crafter-biomeTex"):
+                        node_biomeTex = node
+        for node in nodes_wait_remove:
+            nodes.remove(node)
+
+        node_output_Cycles = nodes.new(type="ShaderNodeOutputMaterial")
+        node_output_Cycles.target = "CYCLES"
+        node_output_Cycles.location = (node_output_EEVEE.location.x, node_output_EEVEE.location.y - 160)
+
+        group_CI = nodes.new(type="ShaderNodeGroup")
+        group_CI.location = (node_output_EEVEE.location.x - 200, node_output_EEVEE.location.y)
+        real_name = fuq_bl_dot_number(material.name)
+        if len(real_name) > len_color_jin:
+            last_mao_index = real_name.rfind(':')
+            real_block_name = real_name[last_mao_index + 1:]
+            find_CI_group(group_CI=group_CI, real_block_name=real_block_name, classification_list=classification_list)
+        else:
+            group_CI.node_tree = bpy.data.node_groups["CI-"]
+        if "Base Color" in group_CI.inputs:
+            group_CI.inputs["Base Color"].default_value = [float(material.name[6:10]), float(material.name[11:15]), float(material.name[16:20]), 1]
+        link_CI_output(group_CI=group_CI, node_output_EEVEE=node_output_EEVEE, node_output_Cycles=node_output_Cycles, links=links)
+        link_biome_tex(node_biomeTex=node_biomeTex, group_CI=group_CI, links=links)
+        add_node_parser(group_CI=group_CI, nodes=nodes, links=links)
+        return
+
+    nodes_wait_remove = []
+    real_block_name = None
+    node_tex_normal = None
+    node_tex_PBR = None
+    node_biomeTex = None
+    node_output_EEVEE = None
+    for node in nodes:
+        if node.type == "TEX_IMAGE" and node.image is not None:
+            name_image = fuq_bl_dot_number(node.image.name)
+            if name_image.endswith("_n.png") or name_image.endswith("_s.png") or name_image.endswith("_a.png"):
+                if imported_by_crafter:
+                    if name_image.endswith("_n.png"):
+                        node_tex_normal = node
+                    if name_image.endswith("_s.png") or name_image.endswith("_a.png"):
+                        node_tex_PBR = node
+                else:
+                    bpy.data.images.remove(node.image)
+                    nodes_wait_remove.append(node)
+            elif node_tex_base is not None:
+                nodes_wait_remove.append(node)
+            else:
+                node.interpolation = "Closest"
+                node_tex_base = node
+                block_name = fuq_bl_dot_number(node_tex_base.image.name)
+                real_block_name = block_name[:-4]
+        if node.type == "OUTPUT_MATERIAL":
+            if node.target == "EEVEE":
+                node_output_EEVEE = node
+            if node.target == "ALL":
+                node.target = "EEVEE"
+                node_output_EEVEE = node
+            if node.target == "CYCLES":
+                nodes_wait_remove.append(node)
+        if node.type == "GROUP":
+            if node.node_tree is None:
+                nodes_wait_remove.append(node)
+            else:
+                if node.node_tree.name.startswith("Crafter-biomeTex"):
+                    node_biomeTex = node
+    if node_tex_base is None:
+        name_material_real = fuq_bl_dot_number(material.name)
+        last_gang_index = name_material_real.rfind('/')
+        real_block_name = name_material_real[last_gang_index + 1:]
+    if real_block_name is None:
+        return
+    ban = False
+    for ban_key in ban_keyw:
+        if real_block_name in ban_key:
+            ban = True
+            break
+    if ban or real_block_name in banlist:
+        return
+    for node in nodes_wait_remove:
+        nodes.remove(node)
+    node_output_Cycles = nodes.new(type="ShaderNodeOutputMaterial")
+    node_output_Cycles.target = "CYCLES"
+    node_output_Cycles.location = (node_output_EEVEE.location.x, node_output_EEVEE.location.y - 160)
+    try:
+        from_node = node_output_EEVEE.inputs[0].links[0].from_node
+        if from_node.type == "BSDF_PRINCIPLED" and material.name not in donot:
+            nodes.remove(from_node)
+    except:
+        pass
+    group_CI = nodes.new(type="ShaderNodeGroup")
+    group_CI.location = (node_output_EEVEE.location.x - 200, node_output_EEVEE.location.y)
+    find_CI_group(group_CI=group_CI, real_block_name=real_block_name, classification_list=classification_list)
+    link_CI_output(group_CI=group_CI, node_output_EEVEE=node_output_EEVEE, node_output_Cycles=node_output_Cycles, links=links)
+    link_biome_tex(node_biomeTex=node_biomeTex, group_CI=group_CI, links=links)
+    node_C_PBR_Parser = add_node_parser(group_CI=group_CI, nodes=nodes, links=links)
+    if not imported_by_crafter:
+        node_tex_normal, node_tex_PBR = load_normal_and_PBR(node_tex_base=node_tex_base, nodes=nodes, links=links)
+    link_base_normal_PBR(node_tex_base=node_tex_base, group_CI=group_CI, links=links, node_C_PBR_Parser=node_C_PBR_Parser, node_tex_normal=node_tex_normal, node_tex_PBR=node_tex_PBR)
+    if node_tex_base is not None:
+        nodes.active = node_tex_base
+
+# ========== 提取的为物体加载材质的函数（供外部调用，假设 C-PBR_Parser 已存在）==========
+def load_material_for_object(context, obj):
+    '''
+    为指定物体加载材质：遍历物体的所有材质调用 process_single_material，
+    然后将物体加入 MCMTS/Crafter MCMTS 集合、记录 Crafter 时间戳、设置 PBR 解析器。
+    与 bpy.ops.crafter.load_material() 操作符不同，此函数跳过 reload_all 和用户交互检查，
+    专为程序化调用设计（如 Item 导入完成后自动加载材质）。
+    context: Blender 上下文
+    obj:     目标物体
+    '''
+    addon_prefs = context.preferences.addons[__addon_name__].preferences
+    classification_list, banlist, ban_keyw = load_classification_data(addon_prefs)
+    for mat in obj.data.materials:
+        process_single_material(mat, context, classification_list, banlist, ban_keyw, imported_by_crafter=False)
+    add_to_mcmts_collection(object=obj, context=context)
+    add_to_crafter_mcmts_collection(object=obj, context=context)
+    add_Crafter_time(obj=obj)
+    bpy.ops.crafter.set_pbr_parser()
+
 class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):
     bl_label = "Load Material"
     bl_idname = "crafter.load_material"
@@ -109,161 +297,7 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):
             if name_material in context.scene.Crafter_crafter_mcmts:
                 imported_by_crafter = True
             material = bpy.data.materials[name_material]
-            node_tree_material = material.node_tree
-            if node_tree_material == None:
-                continue
-            nodes = node_tree_material.nodes
-            links = node_tree_material.links
-
-            # 设置材质设置
-            if bpy.app.version >= (4, 2, 0):
-                material.volume_intersection_method = 'ACCURATE'
-                material.displacement_method = "BOTH"
-            
-            node_tex_base = None
-            #处理lod材质
-            if material.name.startswith("color#"):
-                node_biomeTex = None
-                nodes_wait_remove = []
-                material.displacement_method = "BOTH"
-                for node in nodes:
-                    if node.type == "OUTPUT_MATERIAL":
-                        if node.target == "EEVEE":
-                            node_output_EEVEE = node
-                        if node.target == "ALL":
-                            node.target = "EEVEE"
-                            node_output_EEVEE = node
-                        if node.target == "CYCLES":
-                            nodes_wait_remove.append(node)
-                    if node.type == "BSDF_PRINCIPLED":
-                            nodes_wait_remove.append(node)
-                    if node.type == "GROUP":
-                        if node.node_tree == None:
-                            nodes_wait_remove.append(node)
-                        else:
-                            if node.node_tree.name.startswith("Crafter-biomeTex"):
-                                node_biomeTex = node
-                for node in nodes_wait_remove:
-                    nodes.remove(node)
-
-                # 添加Cycles输出节点
-                node_output_Cycles = nodes.new(type="ShaderNodeOutputMaterial")
-                node_output_Cycles.target = "CYCLES"
-                node_output_Cycles.location = (node_output_EEVEE.location.x, node_output_EEVEE.location.y - 160)
-                
-                # 添加startswith(CI-)节点组
-                group_CI = nodes.new(type="ShaderNodeGroup")
-                group_CI.location = (node_output_EEVEE.location.x - 200, node_output_EEVEE.location.y)
-                real_name = fuq_bl_dot_number(name_material)
-                if len(real_name) > len_color_jin:
-                    last_mao_index = real_name.rfind(':')
-                    real_block_name = real_name[last_mao_index+1:]
-                    find_CI_group(group_CI=group_CI, real_block_name=real_block_name,classification_list=classification_list)
-                else:
-                    group_CI.node_tree = bpy.data.node_groups["CI-"]
-                if "Base Color" in group_CI.inputs:
-                    group_CI.inputs["Base Color"].default_value = [float(material.name[6:10]),float(material.name[11:15]),float(material.name[16:20]),1]
-                # 连接CI节点
-                link_CI_output(group_CI=group_CI, node_output_EEVEE=node_output_EEVEE, node_output_Cycles=node_output_Cycles,links=links)
-                link_biome_tex(node_biomeTex=node_biomeTex, group_CI=group_CI, links=links)
-                add_node_parser(group_CI=group_CI,nodes=nodes,links=links)
-                continue
-            #获取基础贴图节点
-
-            # 注释部分为旧的通过材质名获得mod_name和type_name的方式，暂作保留
-
-            # real_block_name = material.name
-            # real_block_name = fuq_bl_dot_number(real_block_name)
-            # mod_name = "minecraft"
-            # type_name = "block"
-            # 获得real_material_name(如果有mod_name,type_name,获得之,但目前好像没用...)
-            # last_hen_index = real_material_name.rfind('-')
-            # if not last_hen_index == -1:
-            #     mod_and_type = real_material_name[:last_hen_index]
-            #     real_material_name = real_material_name[last_hen_index+1:]
-            #     last____index = mod_and_type.rfind('_')
-            #     mod_name = real_material_name[:last____index]
-            #     type_name = real_material_name[last____index+1:last_hen_index]
-            #获得node_output 并 删去无内容节点组
-            nodes_wait_remove = []
-            real_block_name = None
-            node_tex_normal = None
-            node_tex_PBR = None
-            node_biomeTex = None
-            for node in nodes:
-                if node.type == "TEX_IMAGE" and node.image != None:
-                    name_image = fuq_bl_dot_number(node.image.name)
-                    if name_image.endswith("_n.png") or name_image.endswith("_s.png") or name_image.endswith("_a.png"):
-                        if imported_by_crafter:
-                            if name_image.endswith("_n.png"):
-                                node_tex_normal = node
-                            if name_image.endswith("_s.png") or name_image.endswith("_a.png"):
-                                node_tex_PBR = node
-                        else:
-                            bpy.data.images.remove(node.image)
-                            nodes_wait_remove.append(node)
-                    elif node_tex_base != None:
-                        nodes_wait_remove.append(node)
-                    else:
-                        node.interpolation = "Closest"
-                        node_tex_base = node
-                        block_name = fuq_bl_dot_number(node_tex_base.image.name)
-                        real_block_name = block_name[:-4]
-                if node.type == "OUTPUT_MATERIAL":
-                    if node.target == "EEVEE":
-                        node_output_EEVEE = node
-                    if node.target == "ALL":
-                        node.target = "EEVEE"
-                        node_output_EEVEE = node
-                    if node.target == "CYCLES":
-                        nodes_wait_remove.append(node)
-                if node.type == "GROUP":
-                    if node.node_tree == None:
-                        nodes_wait_remove.append(node)
-                    else:
-                        if node.node_tree.name.startswith("Crafter-biomeTex"):
-                            node_biomeTex = node
-            # 在未找到基础贴图时，尝试从材质名中获取
-            if node_tex_base == None:
-                name_material_real = fuq_bl_dot_number(material.name)
-                last_gang_index = name_material_real.rfind('/')
-                real_block_name = name_material_real[last_gang_index + 1:]
-            if real_block_name == None:
-                continue
-            # 如果在banlist里直接跳过
-            ban = False
-            for ban_key in ban_keyw:
-                if real_block_name in ban_key:
-                    ban = True
-                    break
-            if ban or real_block_name in banlist:
-                continue
-            for node in nodes_wait_remove:
-                nodes.remove(node)
-            # 添加Cycles输出节点
-            node_output_Cycles = nodes.new(type="ShaderNodeOutputMaterial")
-            node_output_Cycles.target = "CYCLES"
-            node_output_Cycles.location = (node_output_EEVEE.location.x, node_output_EEVEE.location.y - 160)
-            # 删去原有着色器
-            try:
-                from_node = node_output_EEVEE.inputs[0].links[0].from_node
-                if from_node.type == "BSDF_PRINCIPLED" and material.name not in donot:
-                    nodes.remove(from_node)
-            except:
-                pass
-            # 添加startswith(CI-)节点组
-            group_CI = nodes.new(type="ShaderNodeGroup")
-            group_CI.location = (node_output_EEVEE.location.x - 200, node_output_EEVEE.location.y)
-            find_CI_group(group_CI=group_CI, real_block_name=real_block_name,classification_list=classification_list)
-            # 连接CI节点
-            link_CI_output(group_CI=group_CI, node_output_EEVEE=node_output_EEVEE, node_output_Cycles=node_output_Cycles,links=links)
-            link_biome_tex(node_biomeTex=node_biomeTex, group_CI=group_CI, links=links)
-            node_C_PBR_Parser = add_node_parser(group_CI=group_CI,nodes=nodes,links=links)
-            if not imported_by_crafter:
-                node_tex_normal, node_tex_PBR = load_normal_and_PBR(node_tex_base=node_tex_base, nodes=nodes, links=links,)
-            link_base_normal_PBR(node_tex_base=node_tex_base, group_CI=group_CI, links=links, node_C_PBR_Parser=node_C_PBR_Parser,node_tex_normal=node_tex_normal, node_tex_PBR=node_tex_PBR)
-            if node_tex_base != None:
-                nodes.active = node_tex_base
+            process_single_material(material, context, classification_list, banlist, ban_keyw, imported_by_crafter)
         # 添加选中物体的材质到合集
         for obj in context.selected_objects:
             if obj.type == "MESH":

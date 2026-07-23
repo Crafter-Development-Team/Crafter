@@ -29,8 +29,10 @@ class VIEW3D_OT_CrafterImportItem(bpy.types.Operator):#导入物体
                        default=16,
                        min=1)#type: ignore
     height: IntProperty(name="Y",
-                        default=16,
-                        min=1)#type: ignore
+                         default=16,
+                         min=1)#type: ignore
+    load_material: BoolProperty(name="加载材质",
+                                default=True)#type: ignore
 
 
     @classmethod
@@ -43,6 +45,7 @@ class VIEW3D_OT_CrafterImportItem(bpy.types.Operator):#导入物体
         return {'RUNNING_MODAL'}
     def draw(self, context):
         layout = self.layout
+        layout.prop(self, "load_material")
         layout.prop(self, "custome_size")
         if self.custome_size:
             layout.prop(self, "width")
@@ -66,8 +69,9 @@ class VIEW3D_OT_CrafterImportItem(bpy.types.Operator):#导入物体
         bpy.ops.object.select_all(action='DESELECT')
         context.view_layer.objects.active = object_item
         context.view_layer.update()
-        # 添加图片
-        image_item = bpy.data.images.load(dir_item)
+        # ========== 加载贴图 ==========
+        image_item = bpy.data.images.load(dir_item)# 从用户选择的文件加载贴图
+        # 赋值给修改器中的 IMAGE_TEXTURE 节点（C-item 节点组内的占位贴图）
         for mod in object_item.modifiers:
             if mod.type == 'NODES':
                 node_group = mod.node_group
@@ -76,11 +80,11 @@ class VIEW3D_OT_CrafterImportItem(bpy.types.Operator):#导入物体
                         node.inputs['Image'].default_value = image_item
                         break
                 break
+        # 赋值给材质本身的 TEX_IMAGE 节点
         for node in object_item.data.materials[0].node_tree.nodes:
             if node.type == 'TEX_IMAGE':
                 node.image = image_item
                 break
-
         # 细分网络
         mesh = object_item.data
         bm = bmesh.new()
@@ -113,6 +117,21 @@ class VIEW3D_OT_CrafterImportItem(bpy.types.Operator):#导入物体
         bpy.ops.object.modifier_apply(modifier=name_modifier)
         # 删去该节点组
         bpy.data.node_groups.remove(bpy.data.node_groups["C-item"])
+
+        if self.load_material:
+            # 选中导入的物体，确保后续操作作用在正确对象上
+            bpy.ops.object.select_all(action='DESELECT')
+            object_item.select_set(True)
+            context.view_layer.objects.active = object_item
+            if "C-PBR_Parser" in bpy.data.node_groups:
+                # C-PBR_Parser 节点组存在 → 使用提取的加载函数（直接调用，不经过操作符）
+                # 该函数会在同目录查找 _n.png / _s.png / _a.png 作为 PBR 贴图
+                from .LoadMaterial import load_material_for_object
+                load_material_for_object(context, object_item)
+            else:
+                # 没有 C-PBR_Parser → 走原有的操作符加载流程
+                bpy.ops.crafter.load_material()
+
         return  {'FINISHED'}
         
 
@@ -185,16 +204,22 @@ class VIEW3D_OT_CrafterScaleUV(bpy.types.Operator):
         uv = ob.data.uv_layers.active  # 获取当前活动的UV层
         is_new_uv_api = bpy.app.version >= (5, 0, 0)
 
-        # 批量读取UV选择状态
+        # 仅在 selected_only 为 True 时才需要读取 UV 选择状态
         uv_select_list = []
-        if is_new_uv_api:
-            uv_select_attr = ob.data.attributes.get(".uv_select_vert")
-            if uv_select_attr is not None:
-                uv_select_list = [0.0] * len(uv.data)
-                uv_select_attr.data.foreach_get("value", uv_select_list)
-        else:
-            uv_select_list = [False] * len(uv.data)
-            uv.data.foreach_get("select", uv_select_list)
+        if self.selected_only:
+            if is_new_uv_api:
+                # Blender 5.0+：UV 选择存储在 .uv_select_vert 属性中
+                uv_select_attr = ob.data.attributes.get(".uv_select_vert")
+                if uv_select_attr is not None:
+                    uv_select_list = [0.0] * len(uv.data)
+                    uv_select_attr.data.foreach_get("value", uv_select_list)
+            else:
+                # Blender 4.x：UV 选择存储在 uv.data.select 中
+                try:
+                    uv_select_list = [0.0] * len(uv.data)
+                    uv.data.foreach_get("select", uv_select_list)
+                except:
+                    uv_select_list = []
 
         # 批量读取所有UV坐标到扁平列表 [u0, v0, u1, v1, ...]
         n_loops = len(uv.data)
@@ -212,8 +237,9 @@ class VIEW3D_OT_CrafterScaleUV(bpy.types.Operator):
 
             # 第一次循环：计算当前面内所有选中UV点的平均中心点
             for loop_ind in f.loop_indices:
-                if not uv_select_list[loop_ind] and self.selected_only is True:
-                    continue  # 跳过未选中的UV点
+                if self.selected_only:
+                    if loop_ind >= len(uv_select_list) or not uv_select_list[loop_ind]:
+                        continue  # 跳过未选中的UV点
                 i = loop_ind * 2
                 x += flat_uvs[i]  # 累加x坐标
                 y += flat_uvs[i + 1]  # 累加y坐标
@@ -224,8 +250,9 @@ class VIEW3D_OT_CrafterScaleUV(bpy.types.Operator):
 
             # 第二次循环：根据平均中心点缩放每个UV点的坐标
             for loop_ind in f.loop_indices:
-                if not uv_select_list[loop_ind] and self.selected_only is True:
-                    continue  # 跳过未选中的UV点
+                if self.selected_only:
+                    if loop_ind >= len(uv_select_list) or not uv_select_list[loop_ind]:
+                        continue  # 跳过未选中的UV点
                 i = loop_ind * 2
                 # 使用线性插值进行缩放：
                 # 原坐标乘以(1-factor) + 中心点坐标乘以factor
@@ -235,6 +262,8 @@ class VIEW3D_OT_CrafterScaleUV(bpy.types.Operator):
 
         # 批量写回所有UV坐标
         uv.data.foreach_set("uv", flat_uvs)
+        # 强制更新依赖图，确保 foreach_set 的修改在4.x中也能生效
+        ob.data.update_tag()
 
         # 如果没有修改过任何UV坐标，返回警告信息
         if not modified:
