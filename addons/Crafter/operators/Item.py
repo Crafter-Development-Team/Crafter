@@ -183,8 +183,25 @@ class VIEW3D_OT_CrafterScaleUV(bpy.types.Operator):
         modified = False  # 标记是否修改过UV坐标
 
         uv = ob.data.uv_layers.active  # 获取当前活动的UV层
-        
-        # 遍历对象的所有面（polygon）
+        is_new_uv_api = bpy.app.version >= (5, 0, 0)
+
+        # 批量读取UV选择状态
+        uv_select_list = []
+        if is_new_uv_api:
+            uv_select_attr = ob.data.attributes.get(".uv_select_vert")
+            if uv_select_attr is not None:
+                uv_select_list = [0.0] * len(uv.data)
+                uv_select_attr.data.foreach_get("value", uv_select_list)
+        else:
+            uv_select_list = [False] * len(uv.data)
+            uv.data.foreach_get("select", uv_select_list)
+
+        # 批量读取所有UV坐标到扁平列表 [u0, v0, u1, v1, ...]
+        n_loops = len(uv.data)
+        flat_uvs = [0.0] * (n_loops * 2)
+        uv.data.foreach_get("uv", flat_uvs)
+
+        # 在纯Python中处理所有面
         for f in ob.data.polygons:
             # 如果面未被选中且selected_only为True，则跳过
             if not f.select and self.selected_only is True:
@@ -192,30 +209,37 @@ class VIEW3D_OT_CrafterScaleUV(bpy.types.Operator):
 
             # 初始化面内UV坐标的平均中心点计算参数
             x = y = n = 0  # x,y为UV坐标总和，n为顶点数量
-            
+
             # 第一次循环：计算当前面内所有选中UV点的平均中心点
             for loop_ind in f.loop_indices:
-                if not uv.data[loop_ind].select and self.selected_only is True:
+                if not uv_select_list[loop_ind] and self.selected_only is True:
                     continue  # 跳过未选中的UV点
-                x += uv.data[loop_ind].uv[0]  # 累加x坐标
-                y += uv.data[loop_ind].uv[1]  # 累加y坐标
+                i = loop_ind * 2
+                x += flat_uvs[i]  # 累加x坐标
+                y += flat_uvs[i + 1]  # 累加y坐标
                 n += 1  # 计数器+1
-            
+
+            if n == 0:
+                continue  # 如果没有选中点，跳过此面
+
             # 第二次循环：根据平均中心点缩放每个UV点的坐标
             for loop_ind in f.loop_indices:
-                if not uv.data[loop_ind].select and self.selected_only is True:
+                if not uv_select_list[loop_ind] and self.selected_only is True:
                     continue  # 跳过未选中的UV点
-                
+                i = loop_ind * 2
                 # 使用线性插值进行缩放：
                 # 原坐标乘以(1-factor) + 中心点坐标乘以factor
-                uv.data[loop_ind].uv[0] = uv.data[loop_ind].uv[0]*(1-factor) + x/n*(factor)
-                uv.data[loop_ind].uv[1] = uv.data[loop_ind].uv[1]*(1-factor) + y/n*(factor)
+                flat_uvs[i] = flat_uvs[i] * (1 - factor) + x / n * factor
+                flat_uvs[i + 1] = flat_uvs[i + 1] * (1 - factor) + y / n * factor
                 modified = True  # 标记为已修改
-        
+
+        # 批量写回所有UV坐标
+        uv.data.foreach_set("uv", flat_uvs)
+
         # 如果没有修改过任何UV坐标，返回警告信息
         if not modified:
             return "No UV faces selected"
-        
+
         return None  # 成功执行返回None
 
 # 确保网格为单个四边形面
