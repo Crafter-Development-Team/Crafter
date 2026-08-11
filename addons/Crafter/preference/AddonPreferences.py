@@ -155,6 +155,9 @@ class CrafterAddonPreferences(AddonPreferences):
     Custom_Jar_Path: StringProperty(name="Jar Path",
                                         subtype="FILE_PATH",
                                         default="Jar Path")# type: ignore
+    Java_Path: StringProperty(name="Java Path",
+                              subtype="FILE_PATH",
+                              default="")# type: ignore
     use_Custom_mods_Path: BoolProperty(name="Custom Mods",
                                         default=False,)# type: ignore
     Custom_mods_Path: StringProperty(name="Mods Path",
