@@ -82,7 +82,7 @@ def find_java_path(prefs):
     if java_path:
         return java_path
     if os.name != "nt":
-        # 5. 非Windows平台的常见目录
+    # 5. 非Windows平台的常见目录
         java_path = search_java_in_dir(os.path.expanduser("~/.sdkman/candidates/java"), java_exe_name)
         if java_path:
             return java_path

@@ -23,11 +23,11 @@ class CrafterAddonPreferences(AddonPreferences):
                                subtype="DIR_PATH",
                                update=lambda self, context: self.update_world_path(context)) # type: ignore
     XYZ_1: IntVectorProperty(name="XYZ-1",
-                             default=(0,0,0),
+                             default=(0,319,0),
                              description="Starting coordinates",
                              update=lambda self, context: context.area.tag_redraw() if context.area else None)# type: ignore
     XYZ_2: IntVectorProperty(name="XYZ-2",
-                             default=(0,0,0),
+                             default=(0,-64,0),
                              description="Ending coordinates",
                              update=lambda self, context: context.area.tag_redraw() if context.area else None)# type: ignore
     Dimensions_List: CollectionProperty(name="Dimensions List",
