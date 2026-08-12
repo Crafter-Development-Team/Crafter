@@ -23,11 +23,11 @@ class CrafterAddonPreferences(AddonPreferences):
                                subtype="DIR_PATH",
                                update=lambda self, context: self.update_world_path(context)) # type: ignore
     XYZ_1: IntVectorProperty(name="XYZ-1",
-                             default=(0,0,0),
+                             default=(0,319,0),
                              description="Starting coordinates",
                              update=lambda self, context: context.area.tag_redraw() if context.area else None)# type: ignore
     XYZ_2: IntVectorProperty(name="XYZ-2",
-                             default=(0,0,0),
+                             default=(0,-64,0),
                              description="Ending coordinates",
                              update=lambda self, context: context.area.tag_redraw() if context.area else None)# type: ignore
     Dimensions_List: CollectionProperty(name="Dimensions List",
@@ -100,7 +100,11 @@ class CrafterAddonPreferences(AddonPreferences):
                                   default=False,)# type: ignore
     exportFullModel: BoolProperty(name="As Chunk",
                                   default=False,)# type: ignore
-    partitionSize: IntProperty(name="Chunk Size",
+    autoPartitionSettings: BoolProperty(name="Auto Chunk Settings",
+                                        description="Automatically calculate chunk size and batch memory from the selected area and available RAM",
+                                        default=True,)# type: ignore
+    partitionSize: IntProperty(name="Chunk Side Length",
+                               description="Side length in chunks; for example, 3 means each OBJ contains up to 3x3 = 9 chunks",
                                default=4,
                                min=1)#type: ignore
     maxTasksPerBatch: IntProperty(name="Chunk Number to Release",
@@ -123,6 +127,9 @@ class CrafterAddonPreferences(AddonPreferences):
                                 default=True,)# type: ignore
     useRandomBlockModels: BoolProperty(name="Random Models",
                                       default=True,)#type: ignore
+    importEntities: BoolProperty(name="Import Entities",
+                                 description="Import living and modded entities in the selected area",
+                                 default=True,)# type: ignore
     isLODAutoCenter: BoolProperty(name="LOD Auto Center",
                                   default=True,)# type: ignore
     LODCenterX: IntProperty(name="LOD Center X",
@@ -155,6 +162,9 @@ class CrafterAddonPreferences(AddonPreferences):
     Custom_Jar_Path: StringProperty(name="Jar Path",
                                         subtype="FILE_PATH",
                                         default="Jar Path")# type: ignore
+    Java_Path: StringProperty(name="Java Path",
+                              subtype="FILE_PATH",
+                              default="")# type: ignore
     use_Custom_mods_Path: BoolProperty(name="Custom Mods",
                                         default=False,)# type: ignore
     Custom_mods_Path: StringProperty(name="Mods Path",

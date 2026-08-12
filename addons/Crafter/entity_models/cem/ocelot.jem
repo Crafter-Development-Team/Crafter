@@ -1,0 +1,99 @@
+{
+  "texture": "ocelot.png",
+  "textureSize": [64, 32],
+  "models": [
+    {
+      "part": "head",
+      "id": "head",
+      "invertAxis": "xy",
+      "translate": [0, -9, 9],
+      "boxes": [
+        {"coordinates": [-2.5, 7, -12, 5, 4, 5], "textureOffset": [0, 0]},
+        {"coordinates": [-1.5, 7.02, -13, 3, 2, 2], "textureOffset": [0, 24]},
+        {"coordinates": [1, 11, -9, 1, 1, 2], "textureOffset": [0, 10]},
+        {"coordinates": [-2, 11, -9, 1, 1, 2], "textureOffset": [6, 10]}
+      ]
+    },
+    {
+      "part": "body",
+      "id": "body",
+      "invertAxis": "xy",
+      "translate": [0, -12, 10],
+      "rotate": [-90, 0, 0],
+      "boxes": [
+        {"coordinates": [-2, -7, -18, 4, 16, 6], "textureOffset": [20, 0]}
+      ],
+      "animations": [
+        {
+          "this.rx": 0
+        }
+      ]
+    },
+    {
+      "part": "front_left_leg",
+      "id": "front_left_leg",
+      "invertAxis": "xy",
+      "translate": [1.1, -9.9, 5],
+      "boxes": [
+        {"coordinates": [-2.1, -0.1, -5, 2, 10, 2], "textureOffset": [40, 0]}
+      ]
+    },
+    {
+      "part": "front_right_leg",
+      "id": "front_right_leg",
+      "invertAxis": "xy",
+      "translate": [-1.1, -9.9, 5],
+      "boxes": [
+        {"coordinates": [0.1, -0.1, -5, 2, 10, 2], "textureOffset": [40, 0]}
+      ]
+    },
+    {
+      "part": "back_left_leg",
+      "id": "back_left_leg",
+      "invertAxis": "xy",
+      "translate": [1.1, -6, -5],
+      "boxes": [
+        {"coordinates": [-2.1, 0, 6, 2, 6, 2], "textureOffset": [8, 13]}
+      ]
+    },
+    {
+      "part": "back_right_leg",
+      "id": "back_right_leg",
+      "invertAxis": "xy",
+      "translate": [-1.1, -6, -5],
+      "boxes": [
+        {"coordinates": [0.1, 0, 6, 2, 6, 2], "textureOffset": [8, 13]}
+      ]
+    },
+    {
+      "part": "tail",
+      "id": "tail",
+      "invertAxis": "xy",
+      "translate": [0, -8.5, -8],
+      "rotate": [-90, 0, 0],
+      "boxes": [
+        {"coordinates": [-0.5, 0.5, 8, 1, 8, 1], "textureOffset": [0, 15]}
+      ],
+      "animations": [
+        {
+          "this.rx": 0
+        }
+      ]
+    },
+    {
+      "part": "tail2",
+      "id": "tail2",
+      "invertAxis": "xy",
+      "translate": [0, -8.5, -16],
+      "rotate": [-90, 0, 0],
+      "boxes": [
+        {"coordinates": [-0.5, 0.5, 16, 1, 8, 1], "textureOffset": [4, 15]}
+      ],
+      "animations": [
+        {
+          "this.rx": 0
+        }
+      ]
+    }
+  ]
+}

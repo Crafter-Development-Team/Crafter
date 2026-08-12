@@ -19,6 +19,7 @@ from bpy.props import *
 from ..__init__ import dir_cafter_data, dir_resourcepacks_plans, dir_blend_append, dir_init_main, dir_no_lod_blocks
 from ..__init__ import icons_world, icons_game_resource, icons_game_unuse_resource
 from .Defs import *
+from .AutoChunkSettings import calculate_auto_chunk_settings
 
 dir_importer = os.path.join(dir_init_main, "importer")
 
@@ -75,10 +76,13 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         col_1.prop(addon_prefs, "allowDoubleFace")
         col_1.prop(addon_prefs, "Auto_Load_Material")
         col_1.prop(addon_prefs, "useRandomBlockModels")
+        col_1.prop(addon_prefs, "importEntities")
         col_1.prop(addon_prefs, "exportLightBlock")
 
         col_2 = row_cols.column()
-        col_2.prop(addon_prefs, "maxTasksPerBatch")
+        col_2.prop(addon_prefs, "autoPartitionSettings")
+        if not addon_prefs.autoPartitionSettings:
+            col_2.prop(addon_prefs, "maxTasksPerBatch")
         col_2.prop(addon_prefs, "keepBoundary")
         col_2.prop(addon_prefs, "cullCave")
         col_2.prop(addon_prefs, "shell")
@@ -92,10 +96,31 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
 
         row_exportFullModel = box_main_settings.row()
         row_exportFullModel.prop(addon_prefs, "exportFullModel")
-        if addon_prefs.exportFullModel:
+        if addon_prefs.exportFullModel and not addon_prefs.autoPartitionSettings:
             row_exportFullModel.prop(addon_prefs, "partitionSize")
-        
-        
+
+        if addon_prefs.autoPartitionSettings:
+            try:
+                auto_info = calculate_auto_chunk_settings(
+                    min(addon_prefs.XYZ_1[0], addon_prefs.XYZ_2[0]),
+                    max(addon_prefs.XYZ_1[0], addon_prefs.XYZ_2[0]),
+                    min(addon_prefs.XYZ_1[1], addon_prefs.XYZ_2[1]),
+                    max(addon_prefs.XYZ_1[1], addon_prefs.XYZ_2[1]),
+                    min(addon_prefs.XYZ_1[2], addon_prefs.XYZ_2[2]),
+                    max(addon_prefs.XYZ_1[2], addon_prefs.XYZ_2[2]))
+                mem_gb = auto_info["availableMemoryBytes"] / (1024 ** 3)
+                box_main_settings.label(
+                    text=f'Auto: {auto_info["partitionSize"]}x{auto_info["partitionSize"]} chunks, '
+                         f'batch {auto_info["maxTasksPerBatch"]}, threads {auto_info["modelThreads"]}, '
+                         f'RAM {mem_gb:.1f} GB',
+                    icon="INFO")
+                if not addon_prefs.exportFullModel:
+                    box_main_settings.label(
+                        text="Enable As Chunk to export separate OBJ files",
+                        icon="INFO")
+            except Exception:
+                box_main_settings.label(text="Auto chunk calculation unavailable", icon="ERROR")
+
         box_lod = layout.box()
         box_lod.prop(addon_prefs, "Max_LOD_Level")
         if int(addon_prefs.Max_LOD_Level) > 0:
@@ -404,7 +429,45 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             status = 2
         else:
             status = 1
-            
+
+        if addon_prefs.autoPartitionSettings:
+            auto_chunk_info = calculate_auto_chunk_settings(
+                min(addon_prefs.XYZ_1[0], addon_prefs.XYZ_2[0]),
+                max(addon_prefs.XYZ_1[0], addon_prefs.XYZ_2[0]),
+                min(addon_prefs.XYZ_1[1], addon_prefs.XYZ_2[1]),
+                max(addon_prefs.XYZ_1[1], addon_prefs.XYZ_2[1]),
+                min(addon_prefs.XYZ_1[2], addon_prefs.XYZ_2[2]),
+                max(addon_prefs.XYZ_1[2], addon_prefs.XYZ_2[2]))
+            effective_partition_size = auto_chunk_info["partitionSize"]
+            effective_max_tasks = auto_chunk_info["maxTasksPerBatch"]
+            effective_model_threads = auto_chunk_info["modelThreads"]
+            log_step(
+                f'自动分块: {effective_partition_size}x{effective_partition_size} chunks, '
+                f'批次 {effective_max_tasks} tasks, 模型线程 {effective_model_threads}, 可用内存 '
+                f'{auto_chunk_info["availableMemoryBytes"] / (1024 ** 3):.1f} GB')
+        else:
+            auto_chunk_info = None
+            effective_partition_size = addon_prefs.partitionSize
+            effective_max_tasks = addon_prefs.maxTasksPerBatch
+            effective_model_threads = 1
+
+        # 巨型区域合并为单个 OBJ 会在最终去重/GreedyMesh 阶段保留全部几何，
+        # 即使分批加载也可能 bad_alloc。自动模式下超过安全阈值便强制分块落盘。
+        force_chunked_export = bool(
+            auto_chunk_info and auto_chunk_info["totalTasks"] > 65536 and
+            not addon_prefs.exportFullModel)
+        if force_chunked_export:
+            log_step(
+                f'区域包含 {auto_chunk_info["totalTasks"]} 个 section 任务，'
+                '已自动启用分块输出以避免内存不足')
+        effective_as_chunk = addon_prefs.exportFullModel or force_chunked_export
+
+        # GreedyMesh 的旧并行邻接/索引实现对部分 CTM/模组模型不安全；自动
+        # 分块已经限制单文件大小，因此自动模式优先关闭它以提升稳定性和速度。
+        effective_greedy_mesh = addon_prefs.useGreedyMesh and not addon_prefs.autoPartitionSettings
+        if addon_prefs.autoPartitionSettings and addon_prefs.useGreedyMesh:
+            log_step('自动分块模式已关闭 GreedyMesh，避免模组模型索引导致堆损坏')
+
         worldconfig = {
             "worldPath": worldPath,
             "selectedDimension": addon_prefs.Dimensions_List[addon_prefs.Dimensions_List_index].name,
@@ -427,17 +490,22 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             "exportLightBlockOnly":addon_prefs.exportLightBlockOnly,
             "lightBlockSize":addon_prefs.lightBlockSize,
             "allowDoubleFace":addon_prefs.allowDoubleFace,
-            "exportFullModel":not addon_prefs.exportFullModel,
-            "partitionSize":addon_prefs.partitionSize,
-            "maxTasksPerBatch":addon_prefs.maxTasksPerBatch,
+            "exportFullModel":not effective_as_chunk,
+            "autoPartitionSettings":addon_prefs.autoPartitionSettings,
+            "partitionSize":effective_partition_size,
+            "maxTasksPerBatch":effective_max_tasks,
+            "modelThreads":effective_model_threads,
+            "detectedAvailableMemoryMB":int(auto_chunk_info["availableMemoryBytes"] / (1024 ** 2)) if auto_chunk_info else 0,
+            "memoryBudgetMB":int(auto_chunk_info["workingBudgetBytes"] / (1024 ** 2)) if auto_chunk_info else 0,
             "activeLOD":int(addon_prefs.Max_LOD_Level) > 0,
             "activeLOD2":int(addon_prefs.Max_LOD_Level) > 1,
             "activeLOD3":int(addon_prefs.Max_LOD_Level) > 2,
             "activeLOD4":int(addon_prefs.Max_LOD_Level) > 3,
             "useBiomeColors":addon_prefs.useBiomeColors,
             "useRandomBlockModels":addon_prefs.useRandomBlockModels,
+            "importEntities":addon_prefs.importEntities,
             "useUnderwaterLOD":addon_prefs.useUnderwaterLOD,
-            "useGreedyMesh":addon_prefs.useGreedyMesh,
+            "useGreedyMesh":effective_greedy_mesh,
             "isLODAutoCenter":addon_prefs.isLODAutoCenter,
             "LODCenterX":addon_prefs.LODCenterX,
             "LODCenterZ":addon_prefs.LODCenterZ,
@@ -662,6 +730,17 @@ def finish_import(ctx, prefs, imported_time, worldconfig, prepared_time,
             add_Crafter_time(obj=obj)
             view_2_active_object(ctx)
     log_stage_end("导入 OBJ", f"{len(real_name_dic)} 个唯一材质")
+
+    if worldconfig.get("importEntities", False):
+        log_stage_begin("导入实体")
+        try:
+            from .EntityImporter import import_entities
+            entity_count = import_entities(dir_importer, worldconfig, log_step)
+            log_stage_end("导入实体", f"{entity_count} 个")
+        except Exception as ex:
+            error_log(f"实体导入失败: {ex}")
+            import traceback; traceback.print_exc()
+            log_stage_end("导入实体", "失败")
 
     debug_log(f"Materials: {len(real_name_dic)} unique")
 

@@ -56,7 +56,9 @@ class VIEW3D_PT_CrafterImportWorld(bpy.types.Panel):
 
         row_map_selector = box.row()
         row_map_selector.label(icon="WORLD")
-        row_map_selector.operator("crafter.map_selector", text="Area Selector")
+        row_map_selector_main = row_map_selector.row(align=True)
+        row_map_selector_main.operator("crafter.map_selector", text="Area Selector")
+        row_map_selector_main.operator("crafter.java_settings", text="", icon="PREFERENCES")
 
         
         # row_setting.prop(addon_prefs, "Point_Cloud_Mode")
