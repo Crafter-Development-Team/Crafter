@@ -67,37 +67,40 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
                     col_custom.label(icon="ERROR",text="It's not a folder!")
 
         box_main_settings = layout.box()
-        col_cols = box_main_settings.column(align=True)
         row_cols = box_main_settings.row()
 
-        col_1 = row_cols.column()
-        col_1.prop(addon_prefs, "useChunkPrecision")
-        col_1.prop(addon_prefs, "strictDeduplication")
-        col_1.prop(addon_prefs, "allowDoubleFace")
-        col_1.prop(addon_prefs, "Auto_Load_Material")
-        col_1.prop(addon_prefs, "useRandomBlockModels")
-        col_1.prop(addon_prefs, "exportLightBlock")
+        col_1_setting = row_cols.column()
+        col_1_setting.prop(addon_prefs, "strictDeduplication")
+        col_1_setting.prop(addon_prefs, "allowDoubleFace")
+        col_1_setting.prop(addon_prefs, "Auto_Load_Material")
+        col_1_setting.prop(addon_prefs, "useRandomBlockModels")
+        col_1_setting.prop(addon_prefs, "exportLightBlock")
 
-        col_2 = row_cols.column()
-        col_2.prop(addon_prefs, "autoPartitionSettings")
-        if not addon_prefs.autoPartitionSettings:
-            col_2.prop(addon_prefs, "maxTasksPerBatch")
-        col_2.prop(addon_prefs, "keepBoundary")
-        col_2.prop(addon_prefs, "cullCave")
-        col_2.prop(addon_prefs, "shell")
-        col_2.prop(addon_prefs, "useGreedyMesh")
+        col_2_setting = row_cols.column()
+        col_2_setting.prop(addon_prefs, "useChunkPrecision")
+        col_2_setting.prop(addon_prefs, "keepBoundary")
+        col_2_setting.prop(addon_prefs, "cullCave")
+        col_2_setting.prop(addon_prefs, "shell")
+        col_2_setting.prop(addon_prefs, "useGreedyMesh")
 
         if addon_prefs.exportLightBlock:
             row_Light_Block = box_main_settings.row()
             row_Light_Block.prop(addon_prefs, "exportLightBlockOnly")
             row_Light_Block.prop(addon_prefs, "lightBlockSize")
 
+        box_aschunk = layout.box()
+        row_aschunk = box_aschunk.row()
+        
+        col_1_aschunk = row_aschunk.column()
+        col_2_aschunk = row_aschunk.column()
 
-        row_exportFullModel = box_main_settings.row()
-        row_exportFullModel.prop(addon_prefs, "exportFullModel")
-        if addon_prefs.exportFullModel and not addon_prefs.autoPartitionSettings:
-            row_exportFullModel.prop(addon_prefs, "partitionSize")
+        col_1_aschunk.prop(addon_prefs, "autoPartitionSettings")
 
+        test_aschunk = "As Chunk"
+        if addon_prefs.autoPartitionSettings:
+            test_aschunk = "As Chunk forcibly"
+
+        col_1_aschunk.prop(addon_prefs, "notexportFullModel", text=test_aschunk)
         if addon_prefs.autoPartitionSettings:
             try:
                 auto_info = calculate_auto_chunk_settings(
@@ -107,18 +110,16 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
                     max(addon_prefs.XYZ_1[1], addon_prefs.XYZ_2[1]),
                     min(addon_prefs.XYZ_1[2], addon_prefs.XYZ_2[2]),
                     max(addon_prefs.XYZ_1[2], addon_prefs.XYZ_2[2]))
-                mem_gb = auto_info["availableMemoryBytes"] / (1024 ** 3)
-                box_main_settings.label(
-                    text=f'Auto: {auto_info["partitionSize"]}x{auto_info["partitionSize"]} chunks, '
-                         f'batch {auto_info["maxTasksPerBatch"]}, threads {auto_info["modelThreads"]}, '
-                         f'RAM {mem_gb:.1f} GB',
-                    icon="INFO")
-                if not addon_prefs.exportFullModel:
-                    box_main_settings.label(
-                        text="Enable As Chunk to export separate OBJ files",
-                        icon="INFO")
+                mem_gb = str(auto_info["availableMemoryBytes"] / (1024 ** 3))[:5]
+                col_2_aschunk.label(text=str(auto_info["partitionSize"]) + "x" + str(auto_info["partitionSize"]) + " " + i18n("chunks"))
+                col_2_aschunk.label(text=i18n("batch") + " " + str(auto_info["maxTasksPerBatch"]))
+                col_2_aschunk.label(text=i18n("threads") + " " + str(auto_info["modelThreads"]))
+                col_2_aschunk.label(text=i18n("RAM") + " " + mem_gb + " GB")
             except Exception:
-                box_main_settings.label(text="Auto chunk calculation unavailable", icon="ERROR")
+                col_2_aschunk.label(text="Auto chunk calculation unavailable", icon="ERROR")
+        else:
+            col_2_aschunk.prop(addon_prefs, "maxTasksPerBatch")
+            col_2_aschunk.prop(addon_prefs, "partitionSize")
 
         box_lod = layout.box()
         box_lod.prop(addon_prefs, "Max_LOD_Level")
@@ -454,18 +455,12 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         # 即使分批加载也可能 bad_alloc。自动模式下超过安全阈值便强制分块落盘。
         force_chunked_export = bool(
             auto_chunk_info and auto_chunk_info["totalTasks"] > 65536 and
-            not addon_prefs.exportFullModel)
+            not addon_prefs.notexportFullModel)
         if force_chunked_export:
             log_step(
                 f'区域包含 {auto_chunk_info["totalTasks"]} 个 section 任务，'
                 '已自动启用分块输出以避免内存不足')
-        effective_as_chunk = addon_prefs.exportFullModel or force_chunked_export
-
-        # GreedyMesh 的旧并行邻接/索引实现对部分 CTM/模组模型不安全；自动
-        # 分块已经限制单文件大小，因此自动模式优先关闭它以提升稳定性和速度。
-        effective_greedy_mesh = addon_prefs.useGreedyMesh and not addon_prefs.autoPartitionSettings
-        if addon_prefs.autoPartitionSettings and addon_prefs.useGreedyMesh:
-            log_step('自动分块模式已关闭 GreedyMesh，避免模组模型索引导致堆损坏')
+        effective_as_chunk = addon_prefs.notexportFullModel or force_chunked_export
 
         worldconfig = {
             "worldPath": worldPath,
@@ -503,7 +498,7 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             "useBiomeColors":addon_prefs.useBiomeColors,
             "useRandomBlockModels":addon_prefs.useRandomBlockModels,
             "useUnderwaterLOD":addon_prefs.useUnderwaterLOD,
-            "useGreedyMesh":effective_greedy_mesh,
+            "useGreedyMesh":addon_prefs.useGreedyMesh,
             "isLODAutoCenter":addon_prefs.isLODAutoCenter,
             "LODCenterX":addon_prefs.LODCenterX,
             "LODCenterZ":addon_prefs.LODCenterZ,

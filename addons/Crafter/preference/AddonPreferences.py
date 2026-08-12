@@ -98,7 +98,7 @@ class CrafterAddonPreferences(AddonPreferences):
                                    max=1.0)# type: ignore
     allowDoubleFace: BoolProperty(name="Allow Double Face",
                                   default=False,)# type: ignore
-    exportFullModel: BoolProperty(name="As Chunk",
+    notexportFullModel: BoolProperty(name="As Chunk",
                                   default=False,)# type: ignore
     autoPartitionSettings: BoolProperty(name="Auto Chunk Settings",
                                         description="Automatically calculate chunk size and batch memory from the selected area and available RAM",
@@ -108,7 +108,7 @@ class CrafterAddonPreferences(AddonPreferences):
                                default=4,
                                min=1)#type: ignore
     maxTasksPerBatch: IntProperty(name="Chunk Number to Release",
-                                  default=32768,
+                                  default=2048,
                                   min=1)# type: ignore
     Max_LOD_Level: EnumProperty(name="Max LOD Level",
                                default="0",
