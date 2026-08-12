@@ -119,7 +119,7 @@ dictionary = {
         "1-R,G as Metallic,Emission in B":"1-R,G为金属度,B为自发光",
         "Load material":"加载材质",
         "Classification basis":"材质分类依据",
-        "The Crafter-time node can provide the current second count to material nodes (dynamic textures and water flowing), but it will reduce the preview frame rate. It is recommended to remove [...]",
+        "The Crafter-time node can provide the current second count to material nodes (dynamic textures and water flowing), but it will reduce the preview frame rate. It is recommended to remove it during previews and add it back before rendering":"Crafter-time节点能够为材质节点提供当前秒数(动态纹理、流动水),但会使预览帧数降低.建议在预览时移除,渲染前添加",
         "Load Parallax": "加载视差",
         "Remove Parallax": "移除视差",
         "Set Parallax Depth": "设置视差深度",

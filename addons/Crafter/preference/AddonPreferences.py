@@ -100,7 +100,11 @@ class CrafterAddonPreferences(AddonPreferences):
                                   default=False,)# type: ignore
     exportFullModel: BoolProperty(name="As Chunk",
                                   default=False,)# type: ignore
-    partitionSize: IntProperty(name="Chunk Size",
+    autoPartitionSettings: BoolProperty(name="Auto Chunk Settings",
+                                        description="Automatically calculate chunk size and batch memory from the selected area and available RAM",
+                                        default=True,)# type: ignore
+    partitionSize: IntProperty(name="Chunk Side Length",
+                               description="Side length in chunks; for example, 3 means each OBJ contains up to 3x3 = 9 chunks",
                                default=4,
                                min=1)#type: ignore
     maxTasksPerBatch: IntProperty(name="Chunk Number to Release",
