@@ -127,9 +127,6 @@ class CrafterAddonPreferences(AddonPreferences):
                                 default=True,)# type: ignore
     useRandomBlockModels: BoolProperty(name="Random Models",
                                       default=True,)#type: ignore
-    importEntities: BoolProperty(name="Import Entities",
-                                 description="Import living and modded entities in the selected area",
-                                 default=True,)# type: ignore
     isLODAutoCenter: BoolProperty(name="LOD Auto Center",
                                   default=True,)# type: ignore
     LODCenterX: IntProperty(name="LOD Center X",

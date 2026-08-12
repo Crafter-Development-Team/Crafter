@@ -76,7 +76,6 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         col_1.prop(addon_prefs, "allowDoubleFace")
         col_1.prop(addon_prefs, "Auto_Load_Material")
         col_1.prop(addon_prefs, "useRandomBlockModels")
-        col_1.prop(addon_prefs, "importEntities")
         col_1.prop(addon_prefs, "exportLightBlock")
 
         col_2 = row_cols.column()
@@ -503,7 +502,6 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             "activeLOD4":int(addon_prefs.Max_LOD_Level) > 3,
             "useBiomeColors":addon_prefs.useBiomeColors,
             "useRandomBlockModels":addon_prefs.useRandomBlockModels,
-            "importEntities":addon_prefs.importEntities,
             "useUnderwaterLOD":addon_prefs.useUnderwaterLOD,
             "useGreedyMesh":effective_greedy_mesh,
             "isLODAutoCenter":addon_prefs.isLODAutoCenter,
@@ -730,17 +728,6 @@ def finish_import(ctx, prefs, imported_time, worldconfig, prepared_time,
             add_Crafter_time(obj=obj)
             view_2_active_object(ctx)
     log_stage_end("导入 OBJ", f"{len(real_name_dic)} 个唯一材质")
-
-    if worldconfig.get("importEntities", False):
-        log_stage_begin("导入实体")
-        try:
-            from .EntityImporter import import_entities
-            entity_count = import_entities(dir_importer, worldconfig, log_step)
-            log_stage_end("导入实体", f"{entity_count} 个")
-        except Exception as ex:
-            error_log(f"实体导入失败: {ex}")
-            import traceback; traceback.print_exc()
-            log_stage_end("导入实体", "失败")
 
     debug_log(f"Materials: {len(real_name_dic)} unique")
 
