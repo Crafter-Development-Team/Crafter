@@ -7,6 +7,13 @@ import subprocess
 _MIB = 1024 * 1024
 _GIB = 1024 * _MIB
 
+# 一个区块（16×16×384 全高度，含网格与临时数据）的全链路峰值内存估算。
+_PER_CHUNK_BYTES = 15 * _MIB
+
+# 1.18+ 主世界全高度的 section 数（y=-64~319，384 格 ÷ 16）。
+# 批次以区块计，写入 C++ 时固定按最高高度换算成 section 任务数。
+_MAX_SECTIONS_Y = 24
+
 
 def get_memory_info():
     """返回 (总物理内存, 当前可用物理内存)，失败时使用保守回退值。"""
@@ -49,11 +56,14 @@ def get_memory_info():
         return 8 * _GIB, 4 * _GIB
 
 
-def calculate_auto_chunk_settings(min_x, max_x, min_y, max_y, min_z, max_z,
-                                  total_memory=None, available_memory=None):
-    """根据区域和内存计算 partitionSize/maxTasksPerBatch。
+def calculate_auto_chunk_settings(total_memory=None, available_memory=None):
+    """根据可用内存计算 partitionSize/maxTasksPerBatch。
 
     partitionSize 的单位是 chunk 边长；maxTasksPerBatch 的单位是 chunk section。
+    分区预算为可用内存的 95%，每区块按 _PER_CHUNK_BYTES（25MiB）估算峰值。
+    批次以区块计、封顶 64（chunksPerBatch），分区边长是其副产物
+    （边长² = 批次区块数，一个批次恰好容纳一个完整分组），
+    换算为 section 任务数（固定按最高高度 _MAX_SECTIONS_Y）后写入 maxTasksPerBatch。
     返回值只使用旧版 C++ 已支持的配置字段，因此保持向后兼容。
     """
     if total_memory is None or available_memory is None:
@@ -61,46 +71,17 @@ def calculate_auto_chunk_settings(min_x, max_x, min_y, max_y, min_z, max_z,
 
     total_memory = max(int(total_memory), 1 * _GIB)
     available_memory = max(256 * _MIB, min(int(available_memory), total_memory))
-    min_x, max_x = sorted((int(min_x), int(max_x)))
-    min_y, max_y = sorted((int(min_y), int(max_y)))
-    min_z, max_z = sorted((int(min_z), int(max_z)))
 
-    chunk_x_start, chunk_x_end = min_x // 16, max_x // 16
-    chunk_z_start, chunk_z_end = int(min_z) // 16, int(max_z) // 16
-    section_y_start, section_y_end = int(min_y) // 16, int(max_y) // 16
-    chunks_x = max(1, chunk_x_end - chunk_x_start + 1)
-    chunks_z = max(1, chunk_z_end - chunk_z_start + 1)
-    sections_y = max(1, section_y_end - section_y_start + 1)
-    total_tasks = chunks_x * chunks_z * sections_y
-
-    # 给 Blender、系统和纹理缓存留余量，导入器最多使用总内存约 30%、
-    # 当前可用内存约 45% 中更小的一项。
-    reserve = min(1 * _GIB, int(total_memory * 0.08))
-    safe_available = max(256 * _MIB, available_memory - reserve)
-    working_budget = min(int(total_memory * 0.30), int(safe_available * 0.45))
-    working_budget = max(256 * _MIB, working_budget)
-
-    # 一个复杂 section 生成模型时按约 3MiB 估算。组预算控制单个 OBJ
-    # 去重/GreedyMesh 的峰值，限制在 128MiB~1GiB。
-    group_budget = max(128 * _MIB, min(1 * _GIB, int(working_budget * 0.18)))
-    estimated_model_bytes_per_task = 3 * _MIB
-    target_group_tasks = max(1, group_budget // estimated_model_bytes_per_task)
-    partition_size = int(math.sqrt(max(1, target_group_tasks // sections_y)))
-    partition_size = max(1, min(8, chunks_x, chunks_z, partition_size))
-    group_tasks = partition_size * partition_size * sections_y
-
-    # 批次主要保存 NBT、方块调色板和邻居缓存，按 256KiB/section 估算。
-    batch_budget = max(128 * _MIB, int(working_budget * 0.45))
-    estimated_loaded_bytes_per_task = 256 * 1024
-    target_batch_tasks = max(64, batch_budget // estimated_loaded_bytes_per_task)
-    target_batch_tasks = min(8192, total_tasks, target_batch_tasks)
-
-    # 批次不能小于一个完整分组，并尽量取分组任务数的整数倍。
-    if target_batch_tasks >= group_tasks:
-        max_tasks_per_batch = max(group_tasks, (target_batch_tasks // group_tasks) * group_tasks)
-    else:
-        max_tasks_per_batch = group_tasks
-    max_tasks_per_batch = max(1, min(max_tasks_per_batch, max(total_tasks, group_tasks)))
+    # 分区预算 = 当前可用内存的 95%（给 Blender、系统和纹理缓存留余量）。
+    # 一个分区即一个 OBJ：边长² 个区块的去重/GreedyMesh 峰值不超预算。
+    working_budget = max(256 * _MIB, int(available_memory * 0.95))
+    # 批次以区块为单位：每批最多驻留 64 个区块（全链路峰值 25MiB/区块），
+    # 由预算÷单区块成本得到；预算不足时自动缩小，内存充足时恒为 64。
+    chunks_per_batch = max(1, min(64, working_budget // _PER_CHUNK_BYTES))
+    # 分区边长是批次的副产物：一个批次恰好容纳一个边长×边长的完整分组。
+    partition_size = max(1, int(math.sqrt(chunks_per_batch)))
+    # 换算成 C++ 的 section 任务数（固定按最高高度，一个区块最多 24 个 section）。
+    max_tasks_per_batch = chunks_per_batch * _MAX_SECTIONS_Y
 
     # 当前模型后处理内部已自行并行；同时并行多个 ModelData 仍有第三方/历史
     # 缓存竞争风险。暂固定外层为 1 线程，保留配置字段供后续安全流水线使用。
@@ -112,10 +93,6 @@ def calculate_auto_chunk_settings(min_x, max_x, min_y, max_y, min_z, max_z,
         "totalMemoryBytes": int(total_memory),
         "availableMemoryBytes": int(available_memory),
         "workingBudgetBytes": int(working_budget),
-        "chunksX": int(chunks_x),
-        "chunksZ": int(chunks_z),
-        "sectionsY": int(sections_y),
-        "totalTasks": int(total_tasks),
-        "groupTasks": int(group_tasks),
+        "chunksPerBatch": int(chunks_per_batch),
         "modelThreads": int(model_threads),
     }

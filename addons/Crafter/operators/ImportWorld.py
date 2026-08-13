@@ -96,20 +96,14 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
 
         col_1_aschunk.prop(addon_prefs, "autoPartitionSettings")
 
-        test_aschunk = "As Chunk"
+        # 自动模式下默认分块输出；勾选"不分块"时合并导出单个完整模型。
         if addon_prefs.autoPartitionSettings:
-            test_aschunk = "As Chunk forcibly"
-
-        col_1_aschunk.prop(addon_prefs, "notexportFullModel", text=test_aschunk)
+            col_1_aschunk.prop(addon_prefs, "forceFullModel")
+        else:
+            col_1_aschunk.prop(addon_prefs, "notexportFullModel", text="As Chunk")
         if addon_prefs.autoPartitionSettings:
             try:
-                auto_info = calculate_auto_chunk_settings(
-                    min(addon_prefs.XYZ_1[0], addon_prefs.XYZ_2[0]),
-                    max(addon_prefs.XYZ_1[0], addon_prefs.XYZ_2[0]),
-                    min(addon_prefs.XYZ_1[1], addon_prefs.XYZ_2[1]),
-                    max(addon_prefs.XYZ_1[1], addon_prefs.XYZ_2[1]),
-                    min(addon_prefs.XYZ_1[2], addon_prefs.XYZ_2[2]),
-                    max(addon_prefs.XYZ_1[2], addon_prefs.XYZ_2[2]))
+                auto_info = calculate_auto_chunk_settings()
                 mem_gb = str(auto_info["availableMemoryBytes"] / (1024 ** 3))[:5]
                 col_2_aschunk.label(text=str(auto_info["partitionSize"]) + "x" + str(auto_info["partitionSize"]) + " " + i18n("chunks"))
                 col_2_aschunk.label(text=i18n("batch") + " " + str(auto_info["maxTasksPerBatch"]))
@@ -432,13 +426,7 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             status = 1
 
         if addon_prefs.autoPartitionSettings:
-            auto_chunk_info = calculate_auto_chunk_settings(
-                min(addon_prefs.XYZ_1[0], addon_prefs.XYZ_2[0]),
-                max(addon_prefs.XYZ_1[0], addon_prefs.XYZ_2[0]),
-                min(addon_prefs.XYZ_1[1], addon_prefs.XYZ_2[1]),
-                max(addon_prefs.XYZ_1[1], addon_prefs.XYZ_2[1]),
-                min(addon_prefs.XYZ_1[2], addon_prefs.XYZ_2[2]),
-                max(addon_prefs.XYZ_1[2], addon_prefs.XYZ_2[2]))
+            auto_chunk_info = calculate_auto_chunk_settings()
             effective_partition_size = auto_chunk_info["partitionSize"]
             effective_max_tasks = auto_chunk_info["maxTasksPerBatch"]
             effective_model_threads = auto_chunk_info["modelThreads"]
@@ -452,16 +440,10 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             effective_max_tasks = addon_prefs.maxTasksPerBatch
             effective_model_threads = 1
 
-        # 巨型区域合并为单个 OBJ 会在最终去重/GreedyMesh 阶段保留全部几何，
-        # 即使分批加载也可能 bad_alloc。自动模式下超过安全阈值便强制分块落盘。
-        force_chunked_export = bool(
-            auto_chunk_info and auto_chunk_info["totalTasks"] > 65536 and
-            not addon_prefs.notexportFullModel)
-        if force_chunked_export:
-            log_step(
-                f'区域包含 {auto_chunk_info["totalTasks"]} 个 section 任务，'
-                '已自动启用分块输出以避免内存不足')
-        effective_as_chunk = addon_prefs.notexportFullModel or force_chunked_export
+        # 自动模式下默认分块输出（每个分组独立去重导出）；勾选"不分块"
+        # 时合并为单个完整模型导出。手动模式行为由 notexportFullModel 决定。
+        effective_as_chunk = addon_prefs.notexportFullModel or \
+            (addon_prefs.autoPartitionSettings and not addon_prefs.forceFullModel)
 
         worldconfig = {
             "worldPath": worldPath,
@@ -680,6 +662,7 @@ def finish_import(ctx, prefs, imported_time, worldconfig, prepared_time,
 
     have_obj = False
     real_name_dic = {}
+    material_should_delete = []
     before_objects = set(bpy.data.objects)
     log_stage_begin("列举导出文件")
     try:
@@ -717,6 +700,7 @@ def finish_import(ctx, prefs, imported_time, worldconfig, prepared_time,
                     n = fuq_bl_dot_number(n)
                 if n in real_name_dic:
                     obj.data.materials[i] = bpy.data.materials[real_name_dic[n]]
+                    material_should_delete.append(mat.name)
                 else:
                     real_name_dic[n] = mat.name
             add_to_mcmts_collection(object=obj, context=ctx)
@@ -724,6 +708,13 @@ def finish_import(ctx, prefs, imported_time, worldconfig, prepared_time,
             add_Crafter_time(obj=obj)
             view_2_active_object(ctx)
     log_stage_end("导入 OBJ", f"{len(real_name_dic)} 个唯一材质")
+
+    for name in set(material_should_delete):
+        mat_del = bpy.data.materials.get(name)
+        if mat_del is not None and mat_del.users == 0:
+            bpy.data.materials.remove(mat_del)
+    if material_should_delete:
+        log_step(f"清理重复材质 {len(set(material_should_delete))} 个")
 
     debug_log(f"Materials: {len(real_name_dic)} unique")
 
