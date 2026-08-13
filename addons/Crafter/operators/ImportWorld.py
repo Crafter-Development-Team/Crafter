@@ -119,7 +119,8 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
                 col_2_aschunk.label(text="Auto chunk calculation unavailable", icon="ERROR")
         else:
             col_2_aschunk.prop(addon_prefs, "maxTasksPerBatch")
-            col_2_aschunk.prop(addon_prefs, "partitionSize")
+            if addon_prefs.notexportFullModel:
+                col_2_aschunk.prop(addon_prefs, "partitionSize")
 
         box_lod = layout.box()
         box_lod.prop(addon_prefs, "Max_LOD_Level")
