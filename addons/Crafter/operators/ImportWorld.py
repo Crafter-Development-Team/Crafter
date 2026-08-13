@@ -555,77 +555,91 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             self.report({'ERROR'}, '启动 WorldImporter 失败')
             return {"CANCELLED"}
 
-        _ctx = context
-        _ctx_window = context.window
-        _ctx_area = context.area
-        _prefs = addon_prefs
-        _imp_time = imported_time
-        _config = dict(worldconfig)
-        _prep_time = prepared_time
-        _save = self.save if hasattr(self, "save") else ""
-        _version = self.version if hasattr(self, "version") else ""
-        _dot_mc = self.dot_minecraftPath if hasattr(self, "dot_minecraftPath") else ""
-        _undivided = "undivided" in dir() and undivided
-        _is_custom = (not addon_prefs.is_Game_Path) or addon_prefs.Custom_Path
-        import time as _time
-        wm = context.window_manager
-        wm.progress_begin(0, 100)
-
-        def _classify_importer_line(line):
-            """根据 WorldImporter 输出内容粗略判断日志级别"""
-            low = line.lower()
-            if line.startswith("■") or line.startswith("▶"):
-                return LOG_LEVEL_INFO
-            if "error" in low or "错误" in line or "failed" in low:
-                return LOG_LEVEL_ERROR
-            if "warn" in low or "警告" in line:
-                return LOG_LEVEL_WARN
-            return LOG_LEVEL_INFO
-
-        def _continue_import():
-            global import_running, import_progress
-            r = poll_fn()
-            if isinstance(r, str):
-                for line in r.split(chr(10)):
-                    if not line: continue
-                    push_log(line, _classify_importer_line(line), "运行 WorldImporter")
-                    p = parse_progress(line)
-                    if p is not None: import_progress = p
-                wm.progress_update(import_progress)
-                for w in bpy.context.window_manager.windows:
-                    for a in w.screen.areas:
-                        a.tag_redraw()
-                return 0.3
-            if r is None: return 0.3
-            import_running = False
-            wm.progress_end()
-            if r:
-                import_progress = 100.0
-                log_stage_end("运行 WorldImporter", "进程成功退出")
-                def _do():
-                    try:
-                        finish_import(
-                            _ctx,_prefs,_imp_time,_config,_prep_time,
-                            _save,_version,_dot_mc,"",
-                            _undivided,_is_custom,_ctx_window,_ctx_area)
-                    except Exception as _ex:
-                        error_log(f"finish_import 异常: {_ex}")
-                        import traceback; traceback.print_exc()
-                    return None
-                bpy.app.timers.register(_do)
-            else:
-                error_log("WorldImporter 进程返回失败（退出码非 0）")
-                log_stage_end("运行 WorldImporter", "进程失败")
-            for w in bpy.context.window_manager.windows:
-                for a in w.screen.areas: a.tag_redraw()
-            return None
-
-        bpy.app.timers.register(_continue_import)
+        self.poll_fn = poll_fn
+        self._ctx = context
+        self._ctx_window = context.window
+        self._ctx_area = context.area
+        self._prefs = addon_prefs
+        self._imp_time = imported_time
+        self._config = dict(worldconfig)
+        self._prep_time = prepared_time
+        self._save = self.save if hasattr(self, "save") else ""
+        self._version = self.version if hasattr(self, "version") else ""
+        self._dot_mc = self.dot_minecraftPath if hasattr(self, "dot_minecraftPath") else ""
+        self._undivided = "undivided" in dir() and undivided
+        self._is_custom = (not addon_prefs.is_Game_Path) or addon_prefs.Custom_Path
+        self._wm = context.window_manager
+        self._wm.progress_begin(0, 100)
+        # modal 化：在 operator 生命周期内轮询进程并完成后处理，
+        # 避免在 bpy.app.timers 回调中调用 bpy.ops（drawing 状态会拒绝修改数据）。
+        self._timer = self._wm.event_timer_add(0.3, window=context.window)
+        self._wm.modal_handler_add(self)
         self.report({'INFO'}, 'WorldImporter running...')
-        return {'FINISHED'}
+        return {'RUNNING_MODAL'}
+
+    def modal(self, context, event):
+        global import_running, import_progress
+        if event.type != 'TIMER':
+            return {'RUNNING_MODAL'}
+        r = self.poll_fn()
+        if isinstance(r, str):
+            for line in r.split(chr(10)):
+                if not line: continue
+                push_log(line, _classify_importer_line(line), "运行 WorldImporter")
+                p = parse_progress(line)
+                if p is not None: import_progress = p
+            self._wm.progress_update(import_progress)
+            for w in bpy.context.window_manager.windows:
+                for a in w.screen.areas:
+                    a.tag_redraw()
+            return {'RUNNING_MODAL'}
+        if r is None:
+            return {'RUNNING_MODAL'}
+        import_running = False
+        self._wm.progress_end()
+        if self._timer is not None:
+            context.window_manager.event_timer_remove(self._timer)
+            self._timer = None
+        if r:
+            import_progress = 100.0
+            log_stage_end("运行 WorldImporter", "进程成功退出")
+            try:
+                finish_import(
+                    self._ctx, self._prefs, self._imp_time, self._config,
+                    self._prep_time, self._save, self._version, self._dot_mc, "",
+                    self._undivided, self._is_custom, self._ctx_window, self._ctx_area)
+            except Exception as _ex:
+                error_log(f"finish_import 异常: {_ex}")
+                import traceback; traceback.print_exc()
+            return {'FINISHED'}
+        else:
+            error_log("WorldImporter 进程返回失败（退出码非 0）")
+            log_stage_end("运行 WorldImporter", "进程失败")
+            return {'CANCELLED'}
+
+    def cancel(self, context):
+        global import_running
+        import_running = False
+        if getattr(self, "_timer", None):
+            context.window_manager.event_timer_remove(self._timer)
+            self._timer = None
+        if getattr(self, "_wm", None):
+            self._wm.progress_end()
 
 
 # ==================== 续传函数（定时器主线程调用） ====================
+
+def _classify_importer_line(line):
+    """根据 WorldImporter 输出内容粗略判断日志级别"""
+    low = line.lower()
+    if line.startswith("■") or line.startswith("▶"):
+        return LOG_LEVEL_INFO
+    if "error" in low or "错误" in line or "failed" in low:
+        return LOG_LEVEL_ERROR
+    if "warn" in low or "警告" in line:
+        return LOG_LEVEL_WARN
+    return LOG_LEVEL_INFO
+
 
 def finish_import(ctx, prefs, imported_time, worldconfig, prepared_time,
                   save, version, dot_minecraftPath, worldPath, undivided, is_custom,
@@ -719,7 +733,10 @@ def finish_import(ctx, prefs, imported_time, worldconfig, prepared_time,
     debug_log(f"Materials: {len(real_name_dic)} unique")
 
     if not have_obj:
-        error_log("WorldImporter 未导出任何 obj 文件")
+        if obj_files:
+            error_log(f"OBJ 导入失败（{len(obj_files)} 个文件均未导入成功）")
+        else:
+            error_log("WorldImporter 未导出任何 obj 文件")
         log_stage_end("后处理导入", "无 obj")
         return
 

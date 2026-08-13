@@ -70,17 +70,10 @@ def calculate_auto_chunk_settings(total_memory=None, available_memory=None):
         total_memory, available_memory = get_memory_info()
 
     total_memory = max(int(total_memory), 1 * _GIB)
-    available_memory = max(256 * _MIB, min(int(available_memory), total_memory))
 
-    # 分区预算 = 当前可用内存的 95%（给 Blender、系统和纹理缓存留余量）。
-    # 一个分区即一个 OBJ：边长² 个区块的去重/GreedyMesh 峰值不超预算。
-    working_budget = max(256 * _MIB, int(available_memory * 0.95))
-    # 批次以区块为单位：每批最多驻留 64 个区块（全链路峰值 25MiB/区块），
-    # 由预算÷单区块成本得到；预算不足时自动缩小，内存充足时恒为 64。
-    chunks_per_batch = max(1, min(64, working_budget // _PER_CHUNK_BYTES))
-    # 分区边长是批次的副产物：一个批次恰好容纳一个边长×边长的完整分组。
+    working_budget = int(available_memory * 0.95)
+    chunks_per_batch = max(1, working_budget // _PER_CHUNK_BYTES)
     partition_size = max(1, int(math.sqrt(chunks_per_batch)))
-    # 换算成 C++ 的 section 任务数（固定按最高高度，一个区块最多 24 个 section）。
     max_tasks_per_batch = chunks_per_batch * _MAX_SECTIONS_Y
 
     # 当前模型后处理内部已自行并行；同时并行多个 ModelData 仍有第三方/历史

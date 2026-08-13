@@ -104,7 +104,7 @@ class CrafterAddonPreferences(AddonPreferences):
                                         description="Automatically calculate chunk size and batch memory from the selected area and available RAM",
                                         default=True,)# type: ignore
     forceFullModel: BoolProperty(name="Force full model",
-                                 default=False,)# type: ignore
+                                 default=True,)# type: ignore
     partitionSize: IntProperty(name="Chunk Side Length",
                                description="Side length in chunks; for example, 3 means each OBJ contains up to 3x3 = 9 chunks",
                                default=4,
