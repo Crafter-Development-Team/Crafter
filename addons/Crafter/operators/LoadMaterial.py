@@ -665,13 +665,9 @@ class VIEW3D_OT_CrafterSetPBRParser(bpy.types.Operator):
         f0 = ((IOR - 1) / (IOR + 1)) ** 2
         emission_strength = addon_prefs.Default_Emission_Strength
 
-        PBR_value = [1 - roughness ** 0.5, min(229/255, f0), 0, emission_strength * 254 / 255]
-        if addon_prefs.PBR_Parser == "old_continuum":
-            PBR_value = [1 - roughness ** 0.5, metallic, 0, emission_strength * 254 / 255]
-        elif addon_prefs.PBR_Parser == "old_BSL":
+        PBR_value = [1 - roughness, min(229/255, f0), 0, emission_strength * 254 / 255]
+        if addon_prefs.PBR_Parser == "old_PBR":
             PBR_value = [1 - roughness, metallic, emission_strength,1]
-        elif addon_prefs.PBR_Parser == "SEUS_PBR":
-            PBR_value = [1 - roughness, metallic, 0,1]
 
         for name_material in context.scene.Crafter_mcmts:
             material = bpy.data.materials[name_material.name]
