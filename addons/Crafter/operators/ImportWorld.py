@@ -483,8 +483,9 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             "useUnderwaterLOD":addon_prefs.useUnderwaterLOD,
             "useGreedyMesh":addon_prefs.useGreedyMesh,
             "isLODAutoCenter":addon_prefs.isLODAutoCenter,
-            "LODCenterX":addon_prefs.LODCenterX,
-            "LODCenterZ":addon_prefs.LODCenterZ,
+            # 用户按方块坐标填写，写入前换算为区块坐标（C++ 按区块语义消费）。
+            "LODCenterX":addon_prefs.LODCenterX // 16,
+            "LODCenterZ":addon_prefs.LODCenterZ // 16,
             "lod1Blocks":list_no_lod_blocks,
             "LOD0renderDistance":addon_prefs.LOD0renderDistance,
             "LOD1renderDistance":addon_prefs.LOD1renderDistance,
