@@ -1075,17 +1075,19 @@ class VIEW3D_OT_CrafterMaterialPanel(bpy.types.Operator):
         return {'FINISHED'}
 
     def apply_float_ui_range(self, output):
-        '''把接口自定义范围写入 float_value（动态 IDProperty）的 UI 数据，
-        让滑块（FACTOR 类）与数字框的范围与节点组接口保持一致；
-        接口无范围时不写入，保持无限制数字框。'''
+        '''把接口自定义范围写入 float_value（动态 IDProperty）的 UI 数据。
+
+        只写 soft_min/soft_max 而不写 min/max（硬范围）：
+        - 滑块拖动按 soft 范围限制（与原节点组拖动条行为一致）；
+        - 点击输入框不受钳制，可输入任意值（与原节点组输入行为一致）。
+        接口无范围时不写入，保持无限制数字框。
+        '''
         if not output.has_float_range:
             return
         try:
             if "float_value" not in output:
                 output["float_value"] = 0.0
             output.id_properties_ui("float_value").update(
-                min=output.float_min,
-                max=output.float_max,
                 soft_min=output.float_min,
                 soft_max=output.float_max,
                 step=3,
