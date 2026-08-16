@@ -1,6 +1,7 @@
 import bpy
 import os
 import json
+import math
 
 from ..config import __addon_name__
 from ....common.i18n.i18n import i18n
@@ -720,6 +721,44 @@ class VIEW3D_OT_CrafterMaterialPanel(bpy.types.Operator):
                 break
         return on_output, off_output, on_index, off_index
 
+    def get_float_interface_range(self, node_tree, output_index):
+        '''从节点组接口读取第 output_index 个输出项（FLOAT 类型）的自定义范围与子类型。
+
+        Blender 4.2+ 的接口定义在 node_tree.interface.items_tree 中；
+        未设置范围时 Blender 返回 ±FLT_MAX（约 3.4e38），视为无范围。
+        返回 (min_value, max_value, subtype)，无有效范围时前两个为 None。
+        '''
+        try:
+            if node_tree is None or node_tree.interface is None:
+                return None, None, None
+            out_index = 0
+            for item in node_tree.interface.items_tree:
+                if getattr(item, 'item_type', None) != 'SOCKET':
+                    continue
+                if getattr(item, 'in_out', None) != 'OUTPUT':
+                    continue
+                if out_index != output_index:
+                    out_index += 1
+                    continue
+                if getattr(item, 'socket_type', '') in ('FLOAT', 'VALUE', 'NodeSocketFloat'):
+                    subtype = getattr(item, 'subtype', 'NONE') or 'NONE'
+                    min_value = getattr(item, 'min_value', None)
+                    max_value = getattr(item, 'max_value', None)
+                    if min_value is None or max_value is None:
+                        return None, None, subtype
+                    if not (math.isfinite(min_value) and math.isfinite(max_value)):
+                        return None, None, subtype
+                    # 接口未设置范围时的默认 ±FLT_MAX，视为无范围
+                    if abs(min_value) > 1e30 or abs(max_value) > 1e30:
+                        return None, None, subtype
+                    if min_value >= max_value:
+                        return None, None, subtype
+                    return float(min_value), float(max_value), subtype
+                break
+        except Exception:
+            pass
+        return None, None, None
+
     def scan_panels(self, obj):
         panels = []
         for mat in obj.data.materials:
@@ -791,6 +830,12 @@ class VIEW3D_OT_CrafterMaterialPanel(bpy.types.Operator):
                                         output_data['use_on'] = True
                                         if input_socket.type in ('FLOAT', 'VALUE'):
                                             output_data['float_value'] = input_socket.default_value
+                                            min_v, max_v, subtype = self.get_float_interface_range(node_tree, i)
+                                            output_data['float_subtype'] = subtype or 'NONE'
+                                            if min_v is not None and max_v is not None:
+                                                output_data['float_min'] = min_v
+                                                output_data['float_max'] = max_v
+                                                output_data['has_float_range'] = True
                                         elif input_socket.type in ('COLOR', 'RGBA'):
                                             output_data['color_value'] = list(input_socket.default_value)
                                         elif input_socket.type == 'VECTOR':
@@ -827,12 +872,25 @@ class VIEW3D_OT_CrafterMaterialPanel(bpy.types.Operator):
                 output_item.is_switch = output_data['is_switch']
                 output_item.switch_state = output_data['switch_state']
                 output_item.mix_factor = output_data['mix_factor']
-                output_item.on_index = output_data.get('on_index', -1)
-                output_item.off_index = output_data.get('off_index', -1)
+                on_index = output_data.get('on_index', -1)
+                output_item.on_index = on_index if on_index is not None else -1
+                off_index = output_data.get('off_index', -1)
+                output_item.off_index = off_index if off_index is not None else -1
                 output_item.output_index = output_data.get('output_index', -1)
                 output_item.use_on = output_data.get('use_on', True)
                 if 'float_value' in output_data:
-                    output_item.float_value = output_data['float_value']
+                    # float_value 是动态 IDProperty，范围由 apply_float_ui_range 经 id_properties_ui 设置
+                    output_item["float_value"] = output_data['float_value']
+                output_item.float_subtype = output_data.get('float_subtype', 'NONE')
+                if 'float_min' in output_data:
+                    output_item.float_min = output_data['float_min']
+                if 'float_max' in output_data:
+                    output_item.float_max = output_data['float_max']
+                if 'has_float_range' in output_data:
+                    output_item.has_float_range = output_data['has_float_range']
+                # 开关项缺少 On/Off 接口：不渲染开关控件，面板顶部显示错误提示
+                if output_item.is_switch and (output_item.on_index < 0 or output_item.off_index < 0):
+                    panel_item.on_off_missing = True
                 if 'color_value' in output_data:
                     output_item.color_value = output_data['color_value']
                 if 'vector_value' in output_data:
@@ -880,6 +938,8 @@ class VIEW3D_OT_CrafterMaterialPanel(bpy.types.Operator):
             
             # 当前面板内容
             panel = current_panel
+            if panel.on_off_missing:
+                layout.label(text="No On/Off interface found", icon="ERROR")
             for output in panel.outputs:
                 row = layout.row(align=True)
                 display_name = output.name
@@ -894,8 +954,8 @@ class VIEW3D_OT_CrafterMaterialPanel(bpy.types.Operator):
                     split.label(text=display_name)
                     
                     split2 = split.split(factor=0.15)
-                    # Alpha 开关列
-                    if output.is_switch:
+                    # Alpha 开关列（缺少 On/Off 接口时不渲染开关）
+                    if output.is_switch and not (output.on_index < 0 or output.off_index < 0):
                         split2.prop(output, "switch_state", text="")
                     else:
                         split2.label(text="")
@@ -906,13 +966,18 @@ class VIEW3D_OT_CrafterMaterialPanel(bpy.types.Operator):
                 
                 # 第三列（高级模式）或第二列（普通模式）：混合系数、On/Off 开关或数值
                 if output.is_switch:
-                    if output.switch_state:
+                    if output.on_index < 0 or output.off_index < 0:
+                        pass  # 不显示开关控件，面板顶部已有错误提示
+                    elif output.switch_state:
                         split2.prop(output, "mix_factor", text="", slider=True)
                     else:
                         split2.prop(output, "use_on", text="")
                 else:
                     if output.socket_type in ('FLOAT', 'VALUE'):
-                        split2.prop(output, "float_value", text="")
+                        self.apply_float_ui_range(output)
+                        # float_value 是动态 IDProperty，prop 须用 '["..."]' 自定义属性语法；
+                        # 与原节点组显示一致：FACTOR 类接口显示滑块，其余保持数字框
+                        split2.prop(output, '["float_value"]', text="", slider=(output.float_subtype == 'FACTOR'))
                     elif output.socket_type in ('COLOR', 'RGBA'):
                         split2.prop(output, "color_value", text="")
                     elif output.socket_type == 'VECTOR':
@@ -1000,7 +1065,7 @@ class VIEW3D_OT_CrafterMaterialPanel(bpy.types.Operator):
                 else:
                     # 非开关类型：设置默认值
                     if output.socket_type in ('FLOAT', 'VALUE'):
-                        output_socket.default_value = output.float_value
+                        output_socket.default_value = output["float_value"] if "float_value" in output else 0.0
                     elif output.socket_type in ('COLOR', 'RGBA'):
                         output_socket.default_value = output.color_value
                     elif output.socket_type == 'VECTOR':
@@ -1008,6 +1073,26 @@ class VIEW3D_OT_CrafterMaterialPanel(bpy.types.Operator):
 
         self.report({'INFO'}, "Material panel settings applied")
         return {'FINISHED'}
+
+    def apply_float_ui_range(self, output):
+        '''把接口自定义范围写入 float_value（动态 IDProperty）的 UI 数据，
+        让滑块（FACTOR 类）与数字框的范围与节点组接口保持一致；
+        接口无范围时不写入，保持无限制数字框。'''
+        if not output.has_float_range:
+            return
+        try:
+            if "float_value" not in output:
+                output["float_value"] = 0.0
+            output.id_properties_ui("float_value").update(
+                min=output.float_min,
+                max=output.float_max,
+                soft_min=output.float_min,
+                soft_max=output.float_max,
+                step=3,
+                precision=3,
+            )
+        except Exception:
+            pass
 
 
 class VIEW3D_OT_CrafterPanelPrev(bpy.types.Operator):

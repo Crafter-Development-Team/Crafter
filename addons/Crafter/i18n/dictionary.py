@@ -3,6 +3,7 @@ from common.i18n.dictionary import preprocess_dictionary
 dictionary = {
     "zh_CN": {
         "Plans":"方案",
+        "No On/Off interface found":"材质没有 On/Off 接口",
         # ==========面板==========
             # ==========加载==========
                 # ==========加载环境==========
