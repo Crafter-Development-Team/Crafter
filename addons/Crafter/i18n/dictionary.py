@@ -3,6 +3,7 @@ from common.i18n.dictionary import preprocess_dictionary
 dictionary = {
     "zh_CN": {
         "Plans":"方案",
+        "No On/Off interface found":"材质没有 On/Off 接口",
         # ==========面板==========
             # ==========加载==========
                 # ==========加载环境==========
@@ -35,8 +36,16 @@ dictionary = {
         "Light Block Size":"光源方块大小",
         "Allow Double Face":"允许重叠面",
         "As Chunk":"分块",
-        "Chunk Size":"分块大小",
-        "Chunk Number to Release":"释放内存区块数",
+        "Auto Chunk Settings":"自动分块设置",
+        "Force full model":"不分块",
+        "Chunk Side Length":"分块边长",
+        "Side length in chunks; for example, 3 means each OBJ contains up to 3x3 = 9 chunks":"单位为区块的边长；例如填 3，表示每个 OBJ 最多包含 3×3=9 个区块",
+        "Auto chunk calculation unavailable":"无法自动计算分块参数",
+        "chunks":"区块",
+        "batch":"批处理量",
+        "threads":"线程数",
+        "RAM":"内存",
+        "Max Tasks per Batch":"批处理量",
         "Biome Colors":"群系着色",
         "Underwater LOD":"水下LOD",
         "List of Blocks not LOD":"不LOD方块列表",
@@ -92,13 +101,6 @@ dictionary = {
         "Import World":"导入世界",
         "History":"历史",
         "Area Selector":"坐标选择器",
-        "Auto Chunk Settings":"自动分块设置",
-        "Chunk Size":"分块大小",
-        "Chunk Side Length":"分块边长",
-        "Side length in chunks; for example, 3 means each OBJ contains up to 3x3 = 9 chunks":"单位为区块的边长；例如填 3，表示每个 OBJ 最多包含 3×3=9 个区块",
-        "Chunk Number to Release":"每批任务上限",
-        "Auto chunk calculation unavailable":"无法自动计算分块参数",
-        "Enable As Chunk to export separate OBJ files":"启用“分块导入”可导出独立 OBJ 文件",
         "Java Path":"Java路径",
         "Java Settings":"Java设置",
         "Java not found, please specify the path":"未找到可用的Java，请手动指定路径",
@@ -112,6 +114,7 @@ dictionary = {
         "Starting coordinates":"起始坐标",
         "Ending coordinates":"结束坐标",
         "Enable this option when reporting a bug and include the shell output content":"反馈bug时,请启用此项并附带shell输出的内容",
+        "Automatically calculate chunk size and batch memory from the selected area and available RAM":"根据选中的区域和可用内存自动计算分块边长和批处理量",
             # ==========加载材质==========
         "Parsed Normal Strength":"解析法向强度",
         "How to parse PBR texture(and normal texture)":"如何解析PBR贴图(以及法线贴图)",

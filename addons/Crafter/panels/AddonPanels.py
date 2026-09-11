@@ -60,7 +60,6 @@ class VIEW3D_PT_CrafterImportWorld(bpy.types.Panel):
         row_map_selector_main.operator("crafter.map_selector", text="Area Selector")
         row_map_selector_main.operator("crafter.java_settings", text="", icon="PREFERENCES")
 
-        
         # row_setting.prop(addon_prefs, "Point_Cloud_Mode")
         # row_setting.operator("crafter.use_history_worlds",icon="TIME",text="")
 

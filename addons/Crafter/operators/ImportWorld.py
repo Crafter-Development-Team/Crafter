@@ -67,58 +67,54 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
                     col_custom.label(icon="ERROR",text="It's not a folder!")
 
         box_main_settings = layout.box()
-        col_cols = box_main_settings.column(align=True)
         row_cols = box_main_settings.row()
 
-        col_1 = row_cols.column()
-        col_1.prop(addon_prefs, "useChunkPrecision")
-        col_1.prop(addon_prefs, "strictDeduplication")
-        col_1.prop(addon_prefs, "allowDoubleFace")
-        col_1.prop(addon_prefs, "Auto_Load_Material")
-        col_1.prop(addon_prefs, "useRandomBlockModels")
-        col_1.prop(addon_prefs, "exportLightBlock")
+        col_1_setting = row_cols.column()
+        col_1_setting.prop(addon_prefs, "strictDeduplication")
+        col_1_setting.prop(addon_prefs, "allowDoubleFace")
+        col_1_setting.prop(addon_prefs, "Auto_Load_Material")
+        col_1_setting.prop(addon_prefs, "useRandomBlockModels")
+        col_1_setting.prop(addon_prefs, "exportLightBlock")
 
-        col_2 = row_cols.column()
-        col_2.prop(addon_prefs, "autoPartitionSettings")
-        if not addon_prefs.autoPartitionSettings:
-            col_2.prop(addon_prefs, "maxTasksPerBatch")
-        col_2.prop(addon_prefs, "keepBoundary")
-        col_2.prop(addon_prefs, "cullCave")
-        col_2.prop(addon_prefs, "shell")
-        col_2.prop(addon_prefs, "useGreedyMesh")
+        col_2_setting = row_cols.column()
+        col_2_setting.prop(addon_prefs, "useChunkPrecision")
+        col_2_setting.prop(addon_prefs, "keepBoundary")
+        col_2_setting.prop(addon_prefs, "cullCave")
+        col_2_setting.prop(addon_prefs, "shell")
+        col_2_setting.prop(addon_prefs, "useGreedyMesh")
 
         if addon_prefs.exportLightBlock:
             row_Light_Block = box_main_settings.row()
             row_Light_Block.prop(addon_prefs, "exportLightBlockOnly")
             row_Light_Block.prop(addon_prefs, "lightBlockSize")
 
+        box_aschunk = layout.box()
+        row_aschunk = box_aschunk.row()
+        
+        col_1_aschunk = row_aschunk.column()
+        col_2_aschunk = row_aschunk.column()
 
-        row_exportFullModel = box_main_settings.row()
-        row_exportFullModel.prop(addon_prefs, "exportFullModel")
-        if addon_prefs.exportFullModel and not addon_prefs.autoPartitionSettings:
-            row_exportFullModel.prop(addon_prefs, "partitionSize")
+        col_1_aschunk.prop(addon_prefs, "autoPartitionSettings")
 
+        # 自动模式下默认分块输出；勾选"不分块"时合并导出单个完整模型。
+        if addon_prefs.autoPartitionSettings:
+            col_1_aschunk.prop(addon_prefs, "forceFullModel")
+        else:
+            col_1_aschunk.prop(addon_prefs, "notexportFullModel", text="As Chunk")
         if addon_prefs.autoPartitionSettings:
             try:
-                auto_info = calculate_auto_chunk_settings(
-                    min(addon_prefs.XYZ_1[0], addon_prefs.XYZ_2[0]),
-                    max(addon_prefs.XYZ_1[0], addon_prefs.XYZ_2[0]),
-                    min(addon_prefs.XYZ_1[1], addon_prefs.XYZ_2[1]),
-                    max(addon_prefs.XYZ_1[1], addon_prefs.XYZ_2[1]),
-                    min(addon_prefs.XYZ_1[2], addon_prefs.XYZ_2[2]),
-                    max(addon_prefs.XYZ_1[2], addon_prefs.XYZ_2[2]))
-                mem_gb = auto_info["availableMemoryBytes"] / (1024 ** 3)
-                box_main_settings.label(
-                    text=f'Auto: {auto_info["partitionSize"]}x{auto_info["partitionSize"]} chunks, '
-                         f'batch {auto_info["maxTasksPerBatch"]}, threads {auto_info["modelThreads"]}, '
-                         f'RAM {mem_gb:.1f} GB',
-                    icon="INFO")
-                if not addon_prefs.exportFullModel:
-                    box_main_settings.label(
-                        text="Enable As Chunk to export separate OBJ files",
-                        icon="INFO")
+                auto_info = calculate_auto_chunk_settings()
+                mem_gb = str(auto_info["availableMemoryBytes"] / (1024 ** 3))[:5]
+                col_2_aschunk.label(text=str(auto_info["partitionSize"]) + "x" + str(auto_info["partitionSize"]) + " " + i18n("chunks"))
+                col_2_aschunk.label(text=i18n("batch") + " " + str(auto_info["maxTasksPerBatch"]))
+                col_2_aschunk.label(text=i18n("threads") + " " + str(auto_info["modelThreads"]))
+                col_2_aschunk.label(text=i18n("RAM") + " " + mem_gb + " GB")
             except Exception:
-                box_main_settings.label(text="Auto chunk calculation unavailable", icon="ERROR")
+                col_2_aschunk.label(text="Auto chunk calculation unavailable", icon="ERROR")
+        else:
+            col_2_aschunk.prop(addon_prefs, "maxTasksPerBatch")
+            if addon_prefs.notexportFullModel:
+                col_2_aschunk.prop(addon_prefs, "partitionSize")
 
         box_lod = layout.box()
         box_lod.prop(addon_prefs, "Max_LOD_Level")
@@ -430,13 +426,7 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             status = 1
 
         if addon_prefs.autoPartitionSettings:
-            auto_chunk_info = calculate_auto_chunk_settings(
-                min(addon_prefs.XYZ_1[0], addon_prefs.XYZ_2[0]),
-                max(addon_prefs.XYZ_1[0], addon_prefs.XYZ_2[0]),
-                min(addon_prefs.XYZ_1[1], addon_prefs.XYZ_2[1]),
-                max(addon_prefs.XYZ_1[1], addon_prefs.XYZ_2[1]),
-                min(addon_prefs.XYZ_1[2], addon_prefs.XYZ_2[2]),
-                max(addon_prefs.XYZ_1[2], addon_prefs.XYZ_2[2]))
+            auto_chunk_info = calculate_auto_chunk_settings()
             effective_partition_size = auto_chunk_info["partitionSize"]
             effective_max_tasks = auto_chunk_info["maxTasksPerBatch"]
             effective_model_threads = auto_chunk_info["modelThreads"]
@@ -450,22 +440,10 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             effective_max_tasks = addon_prefs.maxTasksPerBatch
             effective_model_threads = 1
 
-        # 巨型区域合并为单个 OBJ 会在最终去重/GreedyMesh 阶段保留全部几何，
-        # 即使分批加载也可能 bad_alloc。自动模式下超过安全阈值便强制分块落盘。
-        force_chunked_export = bool(
-            auto_chunk_info and auto_chunk_info["totalTasks"] > 65536 and
-            not addon_prefs.exportFullModel)
-        if force_chunked_export:
-            log_step(
-                f'区域包含 {auto_chunk_info["totalTasks"]} 个 section 任务，'
-                '已自动启用分块输出以避免内存不足')
-        effective_as_chunk = addon_prefs.exportFullModel or force_chunked_export
-
-        # GreedyMesh 的旧并行邻接/索引实现对部分 CTM/模组模型不安全；自动
-        # 分块已经限制单文件大小，因此自动模式优先关闭它以提升稳定性和速度。
-        effective_greedy_mesh = addon_prefs.useGreedyMesh and not addon_prefs.autoPartitionSettings
-        if addon_prefs.autoPartitionSettings and addon_prefs.useGreedyMesh:
-            log_step('自动分块模式已关闭 GreedyMesh，避免模组模型索引导致堆损坏')
+        # 自动模式下默认分块输出（每个分组独立去重导出）；勾选"不分块"
+        # 时合并为单个完整模型导出。手动模式行为由 notexportFullModel 决定。
+        effective_as_chunk = addon_prefs.notexportFullModel or \
+            (addon_prefs.autoPartitionSettings and not addon_prefs.forceFullModel)
 
         worldconfig = {
             "worldPath": worldPath,
@@ -503,10 +481,11 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             "useBiomeColors":addon_prefs.useBiomeColors,
             "useRandomBlockModels":addon_prefs.useRandomBlockModels,
             "useUnderwaterLOD":addon_prefs.useUnderwaterLOD,
-            "useGreedyMesh":effective_greedy_mesh,
+            "useGreedyMesh":addon_prefs.useGreedyMesh,
             "isLODAutoCenter":addon_prefs.isLODAutoCenter,
-            "LODCenterX":addon_prefs.LODCenterX,
-            "LODCenterZ":addon_prefs.LODCenterZ,
+            # 用户按方块坐标填写，写入前换算为区块坐标（C++ 按区块语义消费）。
+            "LODCenterX":addon_prefs.LODCenterX // 16,
+            "LODCenterZ":addon_prefs.LODCenterZ // 16,
             "lod1Blocks":list_no_lod_blocks,
             "LOD0renderDistance":addon_prefs.LOD0renderDistance,
             "LOD1renderDistance":addon_prefs.LOD1renderDistance,
@@ -577,77 +556,91 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             self.report({'ERROR'}, '启动 WorldImporter 失败')
             return {"CANCELLED"}
 
-        _ctx = context
-        _ctx_window = context.window
-        _ctx_area = context.area
-        _prefs = addon_prefs
-        _imp_time = imported_time
-        _config = dict(worldconfig)
-        _prep_time = prepared_time
-        _save = self.save if hasattr(self, "save") else ""
-        _version = self.version if hasattr(self, "version") else ""
-        _dot_mc = self.dot_minecraftPath if hasattr(self, "dot_minecraftPath") else ""
-        _undivided = "undivided" in dir() and undivided
-        _is_custom = (not addon_prefs.is_Game_Path) or addon_prefs.Custom_Path
-        import time as _time
-        wm = context.window_manager
-        wm.progress_begin(0, 100)
-
-        def _classify_importer_line(line):
-            """根据 WorldImporter 输出内容粗略判断日志级别"""
-            low = line.lower()
-            if line.startswith("■") or line.startswith("▶"):
-                return LOG_LEVEL_INFO
-            if "error" in low or "错误" in line or "failed" in low:
-                return LOG_LEVEL_ERROR
-            if "warn" in low or "警告" in line:
-                return LOG_LEVEL_WARN
-            return LOG_LEVEL_INFO
-
-        def _continue_import():
-            global import_running, import_progress
-            r = poll_fn()
-            if isinstance(r, str):
-                for line in r.split(chr(10)):
-                    if not line: continue
-                    push_log(line, _classify_importer_line(line), "运行 WorldImporter")
-                    p = parse_progress(line)
-                    if p is not None: import_progress = p
-                wm.progress_update(import_progress)
-                for w in bpy.context.window_manager.windows:
-                    for a in w.screen.areas:
-                        a.tag_redraw()
-                return 0.3
-            if r is None: return 0.3
-            import_running = False
-            wm.progress_end()
-            if r:
-                import_progress = 100.0
-                log_stage_end("运行 WorldImporter", "进程成功退出")
-                def _do():
-                    try:
-                        finish_import(
-                            _ctx,_prefs,_imp_time,_config,_prep_time,
-                            _save,_version,_dot_mc,"",
-                            _undivided,_is_custom,_ctx_window,_ctx_area)
-                    except Exception as _ex:
-                        error_log(f"finish_import 异常: {_ex}")
-                        import traceback; traceback.print_exc()
-                    return None
-                bpy.app.timers.register(_do)
-            else:
-                error_log("WorldImporter 进程返回失败（退出码非 0）")
-                log_stage_end("运行 WorldImporter", "进程失败")
-            for w in bpy.context.window_manager.windows:
-                for a in w.screen.areas: a.tag_redraw()
-            return None
-
-        bpy.app.timers.register(_continue_import)
+        self.poll_fn = poll_fn
+        self._ctx = context
+        self._ctx_window = context.window
+        self._ctx_area = context.area
+        self._prefs = addon_prefs
+        self._imp_time = imported_time
+        self._config = dict(worldconfig)
+        self._prep_time = prepared_time
+        self._save = self.save if hasattr(self, "save") else ""
+        self._version = self.version if hasattr(self, "version") else ""
+        self._dot_mc = self.dot_minecraftPath if hasattr(self, "dot_minecraftPath") else ""
+        self._undivided = "undivided" in dir() and undivided
+        self._is_custom = (not addon_prefs.is_Game_Path) or addon_prefs.Custom_Path
+        self._wm = context.window_manager
+        self._wm.progress_begin(0, 100)
+        # modal 化：在 operator 生命周期内轮询进程并完成后处理，
+        # 避免在 bpy.app.timers 回调中调用 bpy.ops（drawing 状态会拒绝修改数据）。
+        self._timer = self._wm.event_timer_add(0.3, window=context.window)
+        self._wm.modal_handler_add(self)
         self.report({'INFO'}, 'WorldImporter running...')
-        return {'FINISHED'}
+        return {'RUNNING_MODAL'}
+
+    def modal(self, context, event):
+        global import_running, import_progress
+        if event.type != 'TIMER':
+            return {'RUNNING_MODAL'}
+        r = self.poll_fn()
+        if isinstance(r, str):
+            for line in r.split(chr(10)):
+                if not line: continue
+                push_log(line, _classify_importer_line(line), "运行 WorldImporter")
+                p = parse_progress(line)
+                if p is not None: import_progress = p
+            self._wm.progress_update(import_progress)
+            for w in bpy.context.window_manager.windows:
+                for a in w.screen.areas:
+                    a.tag_redraw()
+            return {'RUNNING_MODAL'}
+        if r is None:
+            return {'RUNNING_MODAL'}
+        import_running = False
+        self._wm.progress_end()
+        if self._timer is not None:
+            context.window_manager.event_timer_remove(self._timer)
+            self._timer = None
+        if r:
+            import_progress = 100.0
+            log_stage_end("运行 WorldImporter", "进程成功退出")
+            try:
+                finish_import(
+                    self._ctx, self._prefs, self._imp_time, self._config,
+                    self._prep_time, self._save, self._version, self._dot_mc, "",
+                    self._undivided, self._is_custom, self._ctx_window, self._ctx_area)
+            except Exception as _ex:
+                error_log(f"finish_import 异常: {_ex}")
+                import traceback; traceback.print_exc()
+            return {'FINISHED'}
+        else:
+            error_log("WorldImporter 进程返回失败（退出码非 0）")
+            log_stage_end("运行 WorldImporter", "进程失败")
+            return {'CANCELLED'}
+
+    def cancel(self, context):
+        global import_running
+        import_running = False
+        if getattr(self, "_timer", None):
+            context.window_manager.event_timer_remove(self._timer)
+            self._timer = None
+        if getattr(self, "_wm", None):
+            self._wm.progress_end()
 
 
 # ==================== 续传函数（定时器主线程调用） ====================
+
+def _classify_importer_line(line):
+    """根据 WorldImporter 输出内容粗略判断日志级别"""
+    low = line.lower()
+    if line.startswith("■") or line.startswith("▶"):
+        return LOG_LEVEL_INFO
+    if "error" in low or "错误" in line or "failed" in low:
+        return LOG_LEVEL_ERROR
+    if "warn" in low or "警告" in line:
+        return LOG_LEVEL_WARN
+    return LOG_LEVEL_INFO
+
 
 def finish_import(ctx, prefs, imported_time, worldconfig, prepared_time,
                   save, version, dot_minecraftPath, worldPath, undivided, is_custom,
@@ -684,6 +677,7 @@ def finish_import(ctx, prefs, imported_time, worldconfig, prepared_time,
 
     have_obj = False
     real_name_dic = {}
+    material_should_delete = []
     before_objects = set(bpy.data.objects)
     log_stage_begin("列举导出文件")
     try:
@@ -721,6 +715,7 @@ def finish_import(ctx, prefs, imported_time, worldconfig, prepared_time,
                     n = fuq_bl_dot_number(n)
                 if n in real_name_dic:
                     obj.data.materials[i] = bpy.data.materials[real_name_dic[n]]
+                    material_should_delete.append(mat.name)
                 else:
                     real_name_dic[n] = mat.name
             add_to_mcmts_collection(object=obj, context=ctx)
@@ -729,10 +724,20 @@ def finish_import(ctx, prefs, imported_time, worldconfig, prepared_time,
             view_2_active_object(ctx)
     log_stage_end("导入 OBJ", f"{len(real_name_dic)} 个唯一材质")
 
+    for name in set(material_should_delete):
+        mat_del = bpy.data.materials.get(name)
+        if mat_del is not None and mat_del.users == 0:
+            bpy.data.materials.remove(mat_del)
+    if material_should_delete:
+        log_step(f"清理重复材质 {len(set(material_should_delete))} 个")
+
     debug_log(f"Materials: {len(real_name_dic)} unique")
 
     if not have_obj:
-        error_log("WorldImporter 未导出任何 obj 文件")
+        if obj_files:
+            error_log(f"OBJ 导入失败（{len(obj_files)} 个文件均未导入成功）")
+        else:
+            error_log("WorldImporter 未导出任何 obj 文件")
         log_stage_end("后处理导入", "无 obj")
         return
 

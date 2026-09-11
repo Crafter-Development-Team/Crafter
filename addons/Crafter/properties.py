@@ -38,7 +38,10 @@ class PanelOutputItem(bpy.types.PropertyGroup):
     is_switch: BoolProperty(name="Is Switch", default=False)# type: ignore
     switch_state: BoolProperty(name="Switch State", default=False)# type: ignore
     mix_factor: FloatProperty(name="Mix Factor", default=0.0, min=0.0, max=1.0)# type: ignore
-    float_value: FloatProperty(name="Float Value", default=0.0)# type: ignore
+    float_subtype: StringProperty(name="Float Subtype", default="NONE")# type: ignore
+    float_min: FloatProperty(name="Float Min", default=-1e9)# type: ignore
+    float_max: FloatProperty(name="Float Max", default=1e9)# type: ignore
+    has_float_range: BoolProperty(name="Has Float Range", default=False)# type: ignore
     color_value: FloatVectorProperty(name="Color Value", size=4, default=(1.0, 1.0, 1.0, 1.0), subtype='COLOR')# type: ignore
     vector_value: FloatVectorProperty(name="Vector Value", size=3, default=(0.0, 0.0, 0.0))# type: ignore
     on_index: IntProperty(name="On Index", default=-1)# type: ignore
@@ -50,3 +53,4 @@ class PanelItem(bpy.types.PropertyGroup):
     node_tree_name: StringProperty(name="Node Tree Name")# type: ignore
     outputs: CollectionProperty(type=PanelOutputItem, name="Outputs")# type: ignore
     outputs_index: IntProperty(name="Outputs Index", default=0)# type: ignore
+    on_off_missing: BoolProperty(name="On/Off Missing", default=False)# type: ignore
