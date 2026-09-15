@@ -389,14 +389,16 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
                 resourcepacksPaths.append(resourcepacksPath.name)
             log_step(f"使用游戏资源包，共 {len(resourcepacksPaths)} 个")
         else:
-            dir_resourcepacks = os.path.join(dir_resourcepacks_plans, addon_prefs.Resources_Plans_List[addon_prefs.Resources_Plans_List_index].name)
-            dir_crafter_json = os.path.join(dir_resourcepacks, "crafter.json")
-
+            plan = addon_prefs.Resources_Plans_List[addon_prefs.Resources_Plans_List_index]
             addon_prefs.Resources_List.clear()
-            with open(dir_crafter_json, "r", encoding="utf-8") as file:
-                json_crafter = json.load(file)
-            for resource in json_crafter:
-                resourcepacksPaths.append(os.path.join(dir_resourcepacks, resource + ".zip"))
+            if not plan.is_Vanilla:
+                dir_resourcepacks = os.path.join(dir_resourcepacks_plans, plan.name)
+                dir_crafter_json = os.path.join(dir_resourcepacks, "crafter.json")
+
+                with open(dir_crafter_json, "r", encoding="utf-8") as file:
+                    json_crafter = json.load(file)
+                for resource in json_crafter:
+                    resourcepacksPaths.append(os.path.join(dir_resourcepacks, resource + ".zip"))
             log_step(f"使用资源方案，共 {len(resourcepacksPaths)} 个")
         log_stage_end("加载资源包路径", f"{len(resourcepacksPaths)} 个资源包")
         # 获取无lod方块列表

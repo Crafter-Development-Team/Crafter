@@ -31,11 +31,14 @@ class VIEW3D_OT_CrafterReplaceResources(bpy.types.Operator):
         if not (-1 < addon_prefs.Resources_Plans_List_index and addon_prefs.Resources_Plans_List_index < len(addon_prefs.Resources_Plans_List)):
             return {'CANCELLED'}
         bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
-        dir_resourcepacks = os.path.join(dir_resourcepacks_plans, addon_prefs.Resources_Plans_List[addon_prefs.Resources_Plans_List_index].name)
-        dir_crafter_json = os.path.join(dir_resourcepacks, "crafter.json")
-        # 加载json
-        with open(dir_crafter_json, 'r', encoding='utf-8') as file:
-            crafter_json = json.load(file)
+        plan = addon_prefs.Resources_Plans_List[addon_prefs.Resources_Plans_List_index]
+        dir_resourcepacks = os.path.join(dir_resourcepacks_plans, plan.name)
+        crafter_json = []
+        if not plan.is_Vanilla:
+            dir_crafter_json = os.path.join(dir_resourcepacks, "crafter.json")
+            # 加载json
+            with open(dir_crafter_json, 'r', encoding='utf-8') as file:
+                crafter_json = json.load(file)
         images = []
         for resource in crafter_json:
             dir_resourcepack = os.path.join(dir_resourcepacks, resource)
@@ -224,6 +227,9 @@ class VIEW3D_OT_CrafterReloadResourcesPlans(bpy.types.Operator):#刷新 资源�
         addon_prefs = context.preferences.addons[__addon_name__].preferences
 
         addon_prefs.Resources_Plans_List.clear()
+        vanilla_plan = addon_prefs.Resources_Plans_List.add()
+        vanilla_plan.name = "Vanilla"
+        vanilla_plan.is_Vanilla = True
         for folder in os.listdir(dir_resourcepacks_plans):
             if os.path.isdir(os.path.join(dir_resourcepacks_plans, folder)):
                 plan_name = addon_prefs.Resources_Plans_List.add()
@@ -244,46 +250,51 @@ class VIEW3D_OT_CrafterReloadResources(bpy.types.Operator):#刷新 资源包 列
 
     def execute(self, context: bpy.types.Context):
         addon_prefs = context.preferences.addons[__addon_name__].preferences
-        dir_resourcepacks = os.path.join(dir_resourcepacks_plans, addon_prefs.Resources_Plans_List[addon_prefs.Resources_Plans_List_index].name)
-        try:
-            list_dir_resourcepacks = os.listdir(dir_resourcepacks)
-        except (FileNotFoundError, PermissionError):
-            list_dir_resourcepacks = []
-        dir_crafter_json = os.path.join(dir_resourcepacks, "crafter.json")
+        if not (0 <= addon_prefs.Resources_Plans_List_index < len(addon_prefs.Resources_Plans_List)):
+            return {'FINISHED'}
+        plan = addon_prefs.Resources_Plans_List[addon_prefs.Resources_Plans_List_index]
 
         addon_prefs.Resources_List.clear()
-        json_crafter_copy =[]
-        if "crafter.json" in list_dir_resourcepacks:
-            try:
-                with open(dir_crafter_json, "r", encoding="utf-8") as file:
-                    json_crafter = json.load(file)
-            except:
-                json_crafter = []
-            json_crafter_copy =json_crafter.copy()
-        json_crafter = []
-        for folder in list_dir_resourcepacks:
-            if folder.endswith(".zip") and (not folder[:-4] in json_crafter_copy):
-                json_crafter.append(folder[:-4])
-        for resourcepack in json_crafter_copy:
-            if os.path.exists(os.path.join(dir_resourcepacks, resourcepack + ".zip")):
-                json_crafter.append(resourcepack)
-                
-        index = 0
         try:
             bpy.utils.previews.remove(icons_plan_resource)
         except:
             pass
         icons_plan_resource.clear()
 
-        for resourcepack in json_crafter:
-            resourcepack_name = addon_prefs.Resources_List.add()
-            resourcepack_name.name = resourcepack
-            dir_resourcepack = os.path.join(dir_resourcepacks, resourcepack + ".zip")
-            load_icon_from_zip(zip_path=dir_resourcepack, icons=icons_plan_resource, name_icons="plan_resource", index=index)
-            index += 1
+        if not plan.is_Vanilla:
+            dir_resourcepacks = os.path.join(dir_resourcepacks_plans, plan.name)
+            try:
+                list_dir_resourcepacks = os.listdir(dir_resourcepacks)
+            except (FileNotFoundError, PermissionError):
+                list_dir_resourcepacks = []
+            dir_crafter_json = os.path.join(dir_resourcepacks, "crafter.json")
 
-        with open(dir_crafter_json, "w", encoding="utf-8") as file:
-            json.dump(json_crafter, file, ensure_ascii=False, indent=4)
+            json_crafter_copy =[]
+            if "crafter.json" in list_dir_resourcepacks:
+                try:
+                    with open(dir_crafter_json, "r", encoding="utf-8") as file:
+                        json_crafter = json.load(file)
+                except:
+                    json_crafter = []
+                json_crafter_copy =json_crafter.copy()
+            json_crafter = []
+            for folder in list_dir_resourcepacks:
+                if folder.endswith(".zip") and (not folder[:-4] in json_crafter_copy):
+                    json_crafter.append(folder[:-4])
+            for resourcepack in json_crafter_copy:
+                if os.path.exists(os.path.join(dir_resourcepacks, resourcepack + ".zip")):
+                    json_crafter.append(resourcepack)
+
+            index = 0
+            for resourcepack in json_crafter:
+                resourcepack_name = addon_prefs.Resources_List.add()
+                resourcepack_name.name = resourcepack
+                dir_resourcepack = os.path.join(dir_resourcepacks, resourcepack + ".zip")
+                load_icon_from_zip(zip_path=dir_resourcepack, icons=icons_plan_resource, name_icons="plan_resource", index=index)
+                index += 1
+
+            with open(dir_crafter_json, "w", encoding="utf-8") as file:
+                json.dump(json_crafter, file, ensure_ascii=False, indent=4)
 
         if (addon_prefs.Resources_List_index < 0 or addon_prefs.Resources_List_index >= len(addon_prefs.Resources_List)) and addon_prefs.Resources_List_index != 0:
             addon_prefs.Resources_List_index = 0

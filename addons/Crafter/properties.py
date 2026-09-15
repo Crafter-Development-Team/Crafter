@@ -19,6 +19,7 @@ class Resource(bpy.types.PropertyGroup):
 # ==========加载资源属性==========
 class ResourcePlan(bpy.types.PropertyGroup):
     Resources_Plan: StringProperty(name="Resources Plan",)# type: ignore
+    is_Vanilla: BoolProperty(name="Is Vanilla", default=False)# type: ignore
 class ResourcePlansInfo(bpy.types.PropertyGroup):
     Resource: StringProperty(name="Resource",)# type: ignore
 # ==========加载材质属性==========
