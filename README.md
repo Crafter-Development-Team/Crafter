@@ -21,6 +21,28 @@
 
 ### 导入
 
+## tint 接口约定（预设作者）
+
+导入时 WorldImporter 会在 `importer/tint.json` 输出每个材质的 tint 元数据，插件按下面的约定按需供给：
+
+- 命名群系输入：CI 组只要暴露 `grass`/`foliage`/`dryfoliage`/`water`/`waterFog`/`fog`/`sky` 中任意一个，插件就会按需追加 `Crafter-biomeTex` 节点并连上对应输出（与元数据无关，CI 想要就给）。
+- 统一接口（可选）：
+  - `tint_color`（Color）：元数据有 `kind` 时，群系类连对应群系图输出，`fixed` 类写 JSON 里的线性常量色；元数据没有 `kind`（明确不上色）写白色；没有元数据（旧导出器）则不动这个接口。
+  - `tint_enable`（Float 0/1）：有元数据时写 1/0，用于让预设把开关权交给元数据；不暴露就不受元数据约束。
+- `kind` 的有无就是“是否上色”：条目在但没有 `kind` 表示明确不上色，条目/自定义属性不存在表示没有元数据（旧导出器，只做命名连接）。
+
+`tint.json` 形如：
+
+```json
+{
+  "minecraft:block/grass_block_top": {"kind": "grass"},
+  "minecraft:block/spruce_leaves":  {"kind": "fixed", "color": [0.11, 0.31, 0.11]},
+  "minecraft:block/stone":          {}
+}
+```
+
+同一张纹理出现多种 tint 结果时，导出器会复制材质并加后缀（如 `@grass`、`@c619961`），插件无需特殊处理。
+
 ## 维护插件注意事项
 
 ### 设置与运行

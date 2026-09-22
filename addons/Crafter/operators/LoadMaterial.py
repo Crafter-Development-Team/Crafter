@@ -104,7 +104,11 @@ def process_single_material(material, context, classification_list, banlist, ban
         if "Base Color" in group_CI.inputs:
             group_CI.inputs["Base Color"].default_value = [float(material.name[6:10]), float(material.name[11:15]), float(material.name[16:20]), 1]
         link_CI_output(group_CI=group_CI, node_output_EEVEE=node_output_EEVEE, node_output_Cycles=node_output_Cycles, links=links)
-        link_biome_tex(node_biomeTex=node_biomeTex, group_CI=group_CI, links=links)
+        tint = get_material_tint(material)
+        try:
+            apply_tint(group_CI=group_CI, nodes=nodes, links=links, tint=tint)
+        except Exception as ex:
+            warn_log(f"apply_tint 失败 [{material.name}]: {ex}")
         add_node_parser(group_CI=group_CI, nodes=nodes, links=links)
         return
 
@@ -175,7 +179,11 @@ def process_single_material(material, context, classification_list, banlist, ban
     group_CI.location = (node_output_EEVEE.location.x - 200, node_output_EEVEE.location.y)
     find_CI_group(group_CI=group_CI, real_block_name=real_block_name, classification_list=classification_list)
     link_CI_output(group_CI=group_CI, node_output_EEVEE=node_output_EEVEE, node_output_Cycles=node_output_Cycles, links=links)
-    link_biome_tex(node_biomeTex=node_biomeTex, group_CI=group_CI, links=links)
+    tint = get_material_tint(material)
+    try:
+        apply_tint(group_CI=group_CI, nodes=nodes, links=links, tint=tint)
+    except Exception as ex:
+        warn_log(f"apply_tint 失败 [{material.name}]: {ex}")
     node_C_PBR_Parser = add_node_parser(group_CI=group_CI, nodes=nodes, links=links)
     if not imported_by_crafter:
         node_tex_normal, node_tex_PBR = load_normal_and_PBR(node_tex_base=node_tex_base, nodes=nodes, links=links)

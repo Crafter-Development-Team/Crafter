@@ -537,6 +537,13 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
                     removed_obj += 1
                 except:
                     pass
+        # 旧的 tint 元数据一并清理，避免和本次导出的 objs 不匹配
+        try:
+            dir_old_tint = os.path.join(dir_importer, "tint.json")
+            if os.path.exists(dir_old_tint):
+                os.remove(dir_old_tint)
+        except:
+            pass
         log_step(f"删除 {removed_obj} 个旧 obj 文件")
         log_stage_end("清理旧导出")
             
@@ -743,6 +750,28 @@ def finish_import(ctx, prefs, imported_time, worldconfig, prepared_time,
         log_stage_end("后处理导入", "无 obj")
         return
 
+    # 读取 C++ 导出器的 tint 元数据（不存在则完全回退旧的分类依据逻辑）
+    log_stage_begin("读取 tint 元数据")
+    tint_map = None
+    dir_tint_json = os.path.join(dir_importer, "tint.json")
+    if os.path.exists(dir_tint_json):
+        try:
+            with open(dir_tint_json, "r", encoding="utf-8") as f:
+                raw_tints = json.load(f)
+            tint_map = {fuq_bl_dot_number(k): v for k, v in raw_tints.items()}
+            log_step(f"tint.json 载入 {len(tint_map)} 条")
+        except Exception as ex:
+            warn_log(f"tint.json 读取失败，回退分类依据: {ex}")
+            tint_map = None
+    else:
+        log_step("未找到 tint.json，回退分类依据上色")
+    log_stage_end("读取 tint 元数据")
+
+    def material_tint_entry(mat):
+        if tint_map is None:
+            return None
+        return tint_map.get(fuq_bl_dot_number(mat.name))
+
     # Copy biomeTex
     log_stage_begin("复制 biomeTex")
     dir_bt = os.path.join(dir_importer, "biomeTex")
@@ -757,12 +786,14 @@ def finish_import(ctx, prefs, imported_time, worldconfig, prepared_time,
         warn_log(f"biomeTex 复制异常: {ex}")
     log_stage_end("复制 biomeTex")
 
-    # Clone biomeTex node group
+    # Clone biomeTex node group（无条件克隆：CI 之后按需索取群系色）
     log_stage_begin("克隆 biomeTex 节点组")
+    node_group = None
     try:
         node_group_src = bpy.data.node_groups["Crafter-biomeTex"]
         node_group = node_group_src.copy()
         node_group.name = "Crafter-biomeTex_" + imported_time
+        node_group.use_fake_user = True
         loaded_imgs = 0
         for node in node_group.nodes:
             if node.type == "TEX_IMAGE":
@@ -785,12 +816,19 @@ def finish_import(ctx, prefs, imported_time, worldconfig, prepared_time,
         node_group = None
     log_stage_end("克隆 biomeTex 节点组")
 
-    # Apply node group to materials
-    log_stage_begin("应用 biomeTex 到材质")
+    # 预处理材质：写入 tint 元数据，并整理贴图节点
+    log_stage_begin("预处理材质")
     apply_list = [nm for nm in real_name_dic.values() if not nm.startswith('color#') and nm in bpy.data.materials]
     log_step(f"待处理材质: {len(apply_list)} 个")
     for nm in apply_list:
         mat = bpy.data.materials[nm]
+        entry = material_tint_entry(mat)
+        # 写入 tint 元数据，之后单独执行 Load Material 时也能按接口接线（空 kind 表示明确不上色）
+        if tint_map is not None:
+            mat["Crafter_tint_kind"] = str(entry.get("kind", "")) if entry else ""
+            if entry and entry.get("color"):
+                color = entry["color"]
+                mat["Crafter_tint_color"] = (float(color[0]), float(color[1]), float(color[2]))
         nodes = mat.node_tree.nodes
         links = mat.node_tree.links
         ntb = None; out_ev = None; pri = None; todel = []
@@ -807,14 +845,10 @@ def finish_import(ctx, prefs, imported_time, worldconfig, prepared_time,
         for nd in todel: nodes.remove(nd)
         if ntb and pri:
             links.new(ntb.outputs["Alpha"], pri.inputs["Alpha"])
-        if out_ev and node_group:
-            nbn = nodes.new("ShaderNodeGroup")
-            nbn.location = (out_ev.location.x - 400, out_ev.location.y - 550)
-            nbn.node_tree = node_group
         if ntb:
             load_normal_and_PBR(node_tex_base=ntb, nodes=nodes, links=links)
             nodes.active = ntb
-    log_stage_end("应用 biomeTex 到材质", f"{len(apply_list)} 个材质")
+    log_stage_end("预处理材质", f"{len(apply_list)} 个材质")
 
     log_stage_begin("打包纹理")
     try:

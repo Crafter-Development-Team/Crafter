@@ -26,6 +26,12 @@ len_color_jin = 21
 name_library = "Crafter"
 names_Crafter_Moving_texture = ["Crafter-动态纹理_首", "Crafter-动态纹理_首_渐变", "Crafter-动态纹理_尾", "Crafter-UV缩放"]
 
+# ========== tint 接口约定 ==========
+# tint.json 里的 kind 取值；与 Crafter-biomeTex 的输出名一致（waterFog 为大写 F）
+TINT_BIOME_KINDS = ("grass", "foliage", "dryfoliage", "water", "waterFog", "fog", "sky")
+tint_interface_enable = "tint_enable"
+tint_interface_color = "tint_color"
+
 
 def load_icon_from_zip(zip_path, icons, name_icons, index):
     dir_temp = tempfile.mkdtemp()
@@ -944,6 +950,136 @@ def link_biome_tex(node_biomeTex, group_CI, links):
         for output in node_biomeTex.outputs:
             if output.name in group_CI.inputs:
                 links.new(output, group_CI.inputs[output.name])
+
+def find_biome_tex_group():
+    '''
+    找当前导入克隆出来的 biomeTex 节点组（名字形如 Crafter-biomeTex_<时间>）。
+    找不到克隆时退回源组 Crafter-biomeTex。
+    '''
+    fallback = None
+    best = None
+    best_index = -1
+    for group in bpy.data.node_groups:
+        if group.name == "Crafter-biomeTex":
+            fallback = group
+        elif group.name.startswith("Crafter-biomeTex_"):
+            suffix = group.name[len("Crafter-biomeTex_"):]
+            index = int(suffix) if suffix.isdigit() else -1
+            if best is None or index > best_index:
+                best = group
+                best_index = index
+    return best if best is not None else fallback
+
+def ensure_biome_tex_node(nodes, group_CI, group=None):
+    '''
+    材质里没有 biomeTex 组节点时按需追加；已有就直接返回。
+    位置沿用旧行为：放在 EEVEE 输出节点左下方。
+    '''
+    for node in nodes:
+        if node.type == "GROUP" and node.node_tree is not None and node.node_tree.name.startswith("Crafter-biomeTex"):
+            return node
+    if group is None:
+        group = find_biome_tex_group()
+    if group is None:
+        return None
+    node = nodes.new(type="ShaderNodeGroup")
+    node.node_tree = group
+    out_ev = None
+    for nd in nodes:
+        if nd.type == "OUTPUT_MATERIAL" and getattr(nd, "target", "") in ("EEVEE", "ALL"):
+            out_ev = nd
+            break
+    if out_ev is not None:
+        node.location = (out_ev.location.x - 400, out_ev.location.y - 550)
+    elif group_CI is not None:
+        node.location = (group_CI.location.x - 600, group_CI.location.y - 400)
+    return node
+
+def biome_tex_output_names(group):
+    '''
+    取 biomeTex 节点组的输出名。Blender 4.x 的 ShaderNodeTree 没有 outputs 属性，
+    需要走 interface.items_tree；旧版本回退到 outputs。
+    '''
+    names = []
+    interface = getattr(group, "interface", None)
+    if interface is not None:
+        for item in interface.items_tree:
+            if getattr(item, "item_type", "") == "SOCKET" and getattr(item, "in_out", "") == "OUTPUT":
+                names.append(item.name)
+        if names:
+            return names
+    outputs = getattr(group, "outputs", None)
+    if outputs is not None:
+        return [socket.name for socket in outputs]
+    return names
+
+def get_material_tint(material):
+    '''
+    读取导入时写入的 tint 元数据（见 ImportWorld.finish_import）。
+    return: {"kind", "color"?}；{} 表示明确不上色；None 表示没有元数据（旧导出器）
+    '''
+    if material is None:
+        return None
+    try:
+        keys = material.keys()
+    except AttributeError:
+        return None
+    if "Crafter_tint_kind" not in keys:
+        return None
+    tint = {}
+    kind = str(material["Crafter_tint_kind"])
+    if kind:
+        tint["kind"] = kind
+        if "Crafter_tint_color" in keys:
+            color = material["Crafter_tint_color"]
+            tint["color"] = (float(color[0]), float(color[1]), float(color[2]))
+    return tint
+
+def apply_tint(group_CI, nodes, links, tint):
+    '''
+    CI 驱动的 tint 供给：
+    - CI 组暴露的命名群系输入（grass/foliage/dryfoliage/water/waterFog/fog/sky）：
+      按需追加 biomeTex 节点并连接（CI 想要就给，与元数据无关）。
+    - tint_color：元数据有 kind 时，群系类连对应输出、fixed 类写常量；无 kind（明确不上色）
+      写白色；没有元数据（旧导出器）则不动。
+    - tint_enable：有元数据时写 0/1。
+    tint: {"kind", "color"?} / {} / None
+    '''
+    group_biomeTex = find_biome_tex_group()
+    node_biomeTex = None
+
+    kind = tint.get("kind") if tint is not None else None
+    named_outputs = []
+    if group_biomeTex is not None:
+        available_outputs = biome_tex_output_names(group_biomeTex)
+        named_outputs = [name for name in available_outputs if name in group_CI.inputs]
+    need_biome_output = (tint_interface_color in group_CI.inputs) and (kind in TINT_BIOME_KINDS)
+    if named_outputs or need_biome_output:
+        node_biomeTex = ensure_biome_tex_node(nodes=nodes, group_CI=group_CI, group=group_biomeTex)
+    if node_biomeTex is not None:
+        for name in named_outputs:
+            links.new(node_biomeTex.outputs[name], group_CI.inputs[name])
+
+    if tint is None:
+        return
+
+    if tint_interface_color in group_CI.inputs:
+        socket = group_CI.inputs[tint_interface_color]
+        for link in list(socket.links):
+            links.remove(link)
+        if kind == "fixed":
+            color = tint.get("color", (1.0, 1.0, 1.0))
+            socket.default_value = (color[0], color[1], color[2], 1.0)
+        elif kind in TINT_BIOME_KINDS:
+            output = node_biomeTex.outputs.get(kind) if node_biomeTex is not None else None
+            if output is not None:
+                links.new(output, socket)
+            else:
+                socket.default_value = (1.0, 1.0, 1.0, 1.0)
+        else:
+            socket.default_value = (1.0, 1.0, 1.0, 1.0)
+    if tint_interface_enable in group_CI.inputs:
+        group_CI.inputs[tint_interface_enable].default_value = 1.0 if kind else 0.0
 
 def reload_Undivided_Vsersions(context: bpy.types.Context,dir_versions):#刷新无版本隔离列表
 
