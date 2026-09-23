@@ -726,6 +726,17 @@ def fuq_bl_dot_number(name: str):
             name = name[:last_dot_index]
     return name
 
+def material_base_name(name: str):
+    '''
+    从材质名取分类用的完整名：去掉 blender 的 .xxx 后缀、去掉第一个 @ 之后的
+    tint/CTM 后缀，保留命名空间与路径（如 minecraft:block/oak_leaves）。
+    '''
+    name = fuq_bl_dot_number(name)
+    at = name.find("@")
+    if at != -1:
+        name = name[:at]
+    return name
+
 def add_to_mcmts_collection(object,context):
     '''
     object: 目标对象

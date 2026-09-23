@@ -135,8 +135,6 @@ def process_single_material(material, context, classification_list, banlist, ban
             else:
                 node.interpolation = "Closest"
                 node_tex_base = node
-                block_name = fuq_bl_dot_number(node_tex_base.image.name)
-                real_block_name = block_name[:-4]
         if node.type == "OUTPUT_MATERIAL":
             if node.target == "EEVEE":
                 node_output_EEVEE = node
@@ -151,10 +149,15 @@ def process_single_material(material, context, classification_list, banlist, ban
             else:
                 if node.node_tree.name.startswith("Crafter-biomeTex"):
                     node_biomeTex = node
-    if node_tex_base is None:
-        name_material_real = fuq_bl_dot_number(material.name)
-        last_gang_index = name_material_real.rfind('/')
-        real_block_name = name_material_real[last_gang_index + 1:]
+    # 分类取值：优先材质名的完整名（如 minecraft:block/oak_leaves；CTM 材质去掉 @ 后缀后
+    # 得到原材质名），没有命名空间时回退图像名（兼容用户自己导入的 OBJ）
+    if ":" in material.name:
+        real_block_name = material_base_name(material.name)
+    elif node_tex_base is not None:
+        block_name = fuq_bl_dot_number(node_tex_base.image.name)
+        real_block_name = block_name[:-4]
+    else:
+        real_block_name = material_base_name(material.name)
     if real_block_name is None:
         return
     ban = False

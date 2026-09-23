@@ -43,6 +43,13 @@
 
 同一张纹理出现多种 tint 结果时，导出器会复制材质并加后缀（如 `@grass`、`@c619961`），插件无需特殊处理。
 
+## 分类依据与材质名
+
+- 默认分类依据（`classification basis/minecraft.json`）只用 `full` 精确匹配，条目是完整材质名（如 `minecraft:block/oak_leaves`），不再用 `keyw` 子串匹配，避免误伤模组纹理。
+- 插件分类时优先取材质名的完整名（去掉第一个 `@` 之后的后缀）；没有命名空间的材质回退图像名（兼容自己导入的 OBJ）。
+- CTM 材质名格式为 `<原材质名>@<短标识>`：OptiFine tile 是 `@ctm/00_<hash4>`、atlas 是 `@ctm/atlas_...`、mcmeta CTM 是 `@ctm_mcmeta/<签名>`；Create 连接纹理是 `@create_ct`。`@` 之后只用于区分材质，插件分类只看 `@` 之前。
+- 自定义分类依据可以继续用 `keyw` 子串（针对完整名匹配）或 `full`（精确匹配完整名）。
+
 ## 维护插件注意事项
 
 ### 设置与运行
