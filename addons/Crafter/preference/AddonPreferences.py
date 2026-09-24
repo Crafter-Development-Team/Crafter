@@ -98,6 +98,12 @@ class CrafterAddonPreferences(AddonPreferences):
                                    max=1.0)# type: ignore
     allowDoubleFace: BoolProperty(name="Allow Double Face",
                                   default=False,)# type: ignore
+    overlayLayerStep: FloatProperty(name="Overlay Offset",
+                                    description="Per-layer outward offset for coincident overlay faces (grass side / CTM overlay). Increase it if z-fighting persists in EEVEE",
+                                    default=0.003,
+                                    min=0.0002,
+                                    max=0.05,
+                                    precision=4)# type: ignore
     notexportFullModel: BoolProperty(name="As Chunk",
                                   default=False,)# type: ignore
     autoPartitionSettings: BoolProperty(name="Auto Chunk Settings",
@@ -147,9 +153,6 @@ class CrafterAddonPreferences(AddonPreferences):
     LOD3renderDistance: IntProperty(name="LOD3 Distance",
                                    default=8,
                                    min=0)# type: ignore
-    shell: BoolProperty(name="Shell ",
-                        description="Enable this option when reporting a bug and include the shell output content",
-                        default=True,)# type: ignore
     Game_Resources: BoolProperty(name="Game Resources",
                                   default=True,)# type: ignore
     Auto_Load_Material: BoolProperty(name="Load Material",

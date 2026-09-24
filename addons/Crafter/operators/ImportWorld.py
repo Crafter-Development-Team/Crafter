@@ -78,9 +78,9 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
 
         col_2_setting = row_cols.column()
         col_2_setting.prop(addon_prefs, "useChunkPrecision")
+        col_2_setting.prop(addon_prefs, "overlayLayerStep")
         col_2_setting.prop(addon_prefs, "keepBoundary")
         col_2_setting.prop(addon_prefs, "cullCave")
-        col_2_setting.prop(addon_prefs, "shell")
         col_2_setting.prop(addon_prefs, "useGreedyMesh")
 
         if addon_prefs.exportLightBlock:
@@ -469,6 +469,7 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             "exportLightBlockOnly":addon_prefs.exportLightBlockOnly,
             "lightBlockSize":addon_prefs.lightBlockSize,
             "allowDoubleFace":addon_prefs.allowDoubleFace,
+            "overlayLayerStep":addon_prefs.overlayLayerStep,
             "exportFullModel":not effective_as_chunk,
             "autoPartitionSettings":addon_prefs.autoPartitionSettings,
             "partitionSize":effective_partition_size,

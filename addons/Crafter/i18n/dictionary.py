@@ -35,6 +35,8 @@ dictionary = {
         "Only Export Light Block":"只导出光源方块",
         "Light Block Size":"光源方块大小",
         "Allow Double Face":"允许重叠面",
+        "Overlay Offset":"叠加层偏移",
+        "Per-layer outward offset for coincident overlay faces (grass side / CTM overlay). Increase it if z-fighting persists in EEVEE":"重合叠加面（草侧 / CTM overlay）的逐层外移量；EEVEE 下仍闪烁时可调大",
         "As Chunk":"分块",
         "Auto Chunk Settings":"自动分块设置",
         "Force full model":"不分块",
@@ -113,7 +115,6 @@ dictionary = {
         "Import the solid area":"导入实心区域",
         "Starting coordinates":"起始坐标",
         "Ending coordinates":"结束坐标",
-        "Enable this option when reporting a bug and include the shell output content":"反馈bug时,请启用此项并附带shell输出的内容",
         "Automatically calculate chunk size and batch memory from the selected area and available RAM":"根据选中的区域和可用内存自动计算分块边长和批处理量",
             # ==========加载材质==========
         "Parsed Normal Strength":"解析法向强度",
