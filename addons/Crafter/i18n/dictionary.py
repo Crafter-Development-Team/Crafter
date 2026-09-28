@@ -135,6 +135,8 @@ dictionary = {
         "Set Parsed Normal Strength": "设置解析法向强度",
         "Add Crafter-time": "添加Crafter-time",
         "Remove Crafter-time": "移除Crafter-time",
+        "Add Crafter-time on Import": "导入时添加Crafter-time",
+        "Automatically add the Crafter-time geometry node to imported objects. It provides the current second count to material nodes (dynamic textures and water flowing), but it will reduce the preview frame rate": "导入时自动为物体添加Crafter-time几何节点.它能向材质节点提供当前秒数(动态纹理、流动水),但会降低预览帧率",
         "Show Material Panel": "显示材质面板",
         "Advanced Switch Mode": "高级开关模式",
         "Enable mix factor to blend On and Off": "开启后可用系数混合开与关",

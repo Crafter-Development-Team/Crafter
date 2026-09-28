@@ -730,7 +730,8 @@ def finish_import(ctx, prefs, imported_time, worldconfig, prepared_time,
                     real_name_dic[n] = mat.name
             add_to_mcmts_collection(object=obj, context=ctx)
             add_to_crafter_mcmts_collection(object=obj, context=ctx)
-            add_Crafter_time(obj=obj)
+            if prefs.Add_Crafter_time_On_Import:
+                add_Crafter_time(obj=obj)
             view_2_active_object(ctx)
     log_stage_end("导入 OBJ", f"{len(real_name_dic)} 个唯一材质")
 

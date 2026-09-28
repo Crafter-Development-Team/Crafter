@@ -210,7 +210,8 @@ def load_material_for_object(context, obj):
         process_single_material(mat, context, classification_list, banlist, ban_keyw, imported_by_crafter=False)
     add_to_mcmts_collection(object=obj, context=context)
     add_to_crafter_mcmts_collection(object=obj, context=context)
-    add_Crafter_time(obj=obj)
+    if addon_prefs.Add_Crafter_time_On_Import:
+        add_Crafter_time(obj=obj)
     bpy.ops.crafter.set_pbr_parser()
 
 class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):
@@ -315,7 +316,8 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):
             if obj.type == "MESH":
                 add_to_mcmts_collection(object=obj,context=context)
                 add_to_crafter_mcmts_collection(object=obj,context=context)
-                add_Crafter_time(obj=obj)
+                if addon_prefs.Add_Crafter_time_On_Import:
+                    add_Crafter_time(obj=obj)
                 
         bpy.ops.crafter.set_pbr_parser()
 

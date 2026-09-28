@@ -201,6 +201,9 @@ class CrafterAddonPreferences(AddonPreferences):
                                           max=100.0,
                                           description=" ",
                                           update=lambda self,context: self.set_parsed_normal_strength(context))# type: ignore
+    Add_Crafter_time_On_Import: BoolProperty(name="Add Crafter-time on Import",
+                                             description="Automatically add the Crafter-time geometry node to imported objects. It provides the current second count to material nodes (dynamic textures and water flowing), but it will reduce the preview frame rate",
+                                             default=False)# type: ignore
     Materials_List: CollectionProperty(name="Materials",type=Material)#type: ignore
     Materials_List_index: IntProperty(name="Material",default=0)# type: ignore
     Classification_Basis_List: CollectionProperty(name="Classification Basis",type=ClassificationBasisl)# type: ignore
