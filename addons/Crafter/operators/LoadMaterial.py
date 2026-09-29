@@ -17,40 +17,37 @@ is_chinese = lang in ("zh_HANS", "zh_HANT")
 # ========== 提取的分类数据加载函数 ==========
 def load_classification_data(addon_prefs):
     '''
-    从分类基础目录加载所有 JSON 分类文件，合并成统一的分类列表、封禁列表和封禁关键词列表。
+    从分类基础目录加载所有 JSON 分类文件，规范化合并并编译为结构化分类规则。
+    组的值可以是字典（单条目）或字典列表（条目间 OR）；多文件同名组的条目按加载顺序拼接。
     addon_prefs: 插件偏好设置，从中获取当前选中的分类基础文件夹名称
-    return: (classification_list, banlist, ban_keyw) 三元组
+    return: 编译后的规则列表（见 Defs.compile_classification_list）
     '''
     classification_folder_name = addon_prefs.Classification_Basis_List[addon_prefs.Classification_Basis_List_index].name
     classification_folder_dir = os.path.join(dir_classification_basis, classification_folder_name)
-    classification_list = {}
-    banlist = []
-    ban_keyw = []
+    classification_raw = {}   # 组名 -> [条目, ...]
     for filename in os.listdir(classification_folder_dir):
         file_path = os.path.join(classification_folder_dir, filename)
         if filename.endswith(".json"):
             try:
                 with open(file_path, 'r', encoding='utf-8') as file:
                     data = json.load(file)
-                    classification_list = make_dict_together(classification_list, data)
-                    if "ban" in data:
-                        banlist.extend(data["ban"])
-                    if "ban_keyw" in data:
-                        ban_keyw.extend(data["ban_keyw"])
+                    for group_name, group in data.items():
+                        entries = group if isinstance(group, list) else [group]
+                        for entry in entries:
+                            if isinstance(entry, dict):
+                                classification_raw.setdefault(group_name, []).append(entry)
             except:
                 pass
-    return classification_list, banlist, ban_keyw
+    return compile_classification_list(classification_raw)
 
 # ========== 提取的单材质处理函数 ==========
-def process_single_material(material, context, classification_list, banlist, ban_keyw, imported_by_crafter=False):
+def process_single_material(material, context, classification_list, imported_by_crafter=False):
     '''
     处理单个材质：扫描 TEX_IMAGE 节点识别基础色/PBR贴图，构建 CI- 节点组，
     装配 PBR 解析器，连接法向和 PBR 贴图。
     material:             要处理的材质
     context:             Blender 上下文
-    classification_list: 分类列表（来自 load_classification_data）
-    banlist:             封禁方块名列表
-    ban_keyw:            封禁关键词列表
+    classification_list: 分类规则列表（来自 load_classification_data）
     imported_by_crafter: 是否由 Crafter 导入触发（True=保留已有贴图节点不重新从文件查找PBR）
     '''
     node_tree_material = material.node_tree
@@ -160,13 +157,6 @@ def process_single_material(material, context, classification_list, banlist, ban
         real_block_name = material_base_name(material.name)
     if real_block_name is None:
         return
-    ban = False
-    for ban_key in ban_keyw:
-        if real_block_name in ban_key:
-            ban = True
-            break
-    if ban or real_block_name in banlist:
-        return
     for node in nodes_wait_remove:
         nodes.remove(node)
     node_output_Cycles = nodes.new(type="ShaderNodeOutputMaterial")
@@ -205,9 +195,9 @@ def load_material_for_object(context, obj):
     obj:     目标物体
     '''
     addon_prefs = context.preferences.addons[__addon_name__].preferences
-    classification_list, banlist, ban_keyw = load_classification_data(addon_prefs)
+    classification_list = load_classification_data(addon_prefs)
     for mat in obj.data.materials:
-        process_single_material(mat, context, classification_list, banlist, ban_keyw, imported_by_crafter=False)
+        process_single_material(mat, context, classification_list, imported_by_crafter=False)
     add_to_mcmts_collection(object=obj, context=context)
     add_to_crafter_mcmts_collection(object=obj, context=context)
     if addon_prefs.Add_Crafter_time_On_Import:
@@ -271,27 +261,8 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):
         collection_Crafter_Materials_Settings.objects.link(bpy.data.objects["材质设置/Material Settings"])
         bpy.data.objects["材质设置/Material Settings"].hide_viewport = True
         bpy.data.objects["材质设置/Material Settings"].hide_render = True
-        # 获取分类依据地址
-        classification_folder_name = addon_prefs.Classification_Basis_List[addon_prefs.Classification_Basis_List_index].name
-        classification_folder_dir = os.path.join(dir_classification_basis, classification_folder_name)
-        # 初始化 COs,classification_list,banlist, ban_keyw
-        classification_list = {}
-        banlist = []
-        ban_keyw = []
-        # 获取classification_list
-        for filename in os.listdir(classification_folder_dir):
-            file_path = os.path.join(classification_folder_dir, filename)
-            if filename.endswith(".json"):
-                try:
-                    with open(file_path, 'r', encoding='utf-8') as file:
-                        data = json.load(file)
-                        classification_list = make_dict_together(classification_list, data)
-                        if "ban" in data:
-                            banlist.extend(data["ban"])
-                        if "ban_keyw" in data:
-                            ban_keyw.extend(data["ban_keyw"])
-                except:
-                    pass
+        # 获取分类依据规则
+        classification_list = load_classification_data(addon_prefs)
         # 应用 Parsed_Normal_Strength
         bpy.ops.crafter.set_parsed_normal_strength()
 
@@ -310,7 +281,7 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):
             if name_material in context.scene.Crafter_crafter_mcmts:
                 imported_by_crafter = True
             material = bpy.data.materials[name_material]
-            process_single_material(material, context, classification_list, banlist, ban_keyw, imported_by_crafter)
+            process_single_material(material, context, classification_list, imported_by_crafter)
         # 添加选中物体的材质到合集
         for obj in context.selected_objects:
             if obj.type == "MESH":

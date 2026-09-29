@@ -8,6 +8,8 @@ import sqlite3
 import ctypes
 import tempfile
 import textwrap
+import re
+import fnmatch
 
 # 只在Windows上导入wintypes
 if platform.system() == "Windows":
@@ -489,24 +491,6 @@ def open_folder(folder_path: str):
     else:  # Linux
         subprocess.run(["xdg-open", folder_path])
 
-def make_dict_together(dict1, dict2):
-    '''
-    递归合并json最底层的键值对
-    dict1: 字典1
-    dict2: 字典2
-    '''
-    for key, value in dict2.items():
-        if key in dict1:
-            if isinstance(dict1[key], dict) and isinstance(value, dict):
-                make_dict_together(dict1[key], value)
-            elif isinstance(dict1[key], list) and isinstance(value, list):
-                dict1[key] = list(set(dict1[key] + value))
-            else:
-                dict1[key] = value
-        else:
-            dict1[key] = value
-    return dict1
-
 def unzip(zip_path, extract_to):
     '''
     解压压缩文件
@@ -779,57 +763,133 @@ def add_to_crafter_mcmts_collection(object,context):
             if context.scene.Crafter_crafter_mcmts[i].name not in list_name_context_material:
                 context.scene.Crafter_crafter_mcmts.remove(i)
                 
+# ========== 分类依据：结构化匹配 ==========
+# 规则格式：{组名: 条目 或 [条目...]}；条目 = {"block": [...], "key": [...], "texture": [...]}
+# 语义：组内条目 OR；条目内维度 AND（出现过的维度都要命中）；维度内元素 OR（支持 fnmatch 通配）。
+_CLASSIFICATION_DIMS = ("block", "key", "texture")
+
+def parse_material_name(name: str):
+    '''
+    解析材质名为结构化字段。
+    格式：[namespace:]block[#贴图键][~贴图名]（传入前需已去掉 tint/CTM 的 @ 后缀）
+    缺省命名空间为 minecraft；无 ~ 时贴图名回退为方块名。
+    color# 等特殊材质返回 None（不参与结构化匹配）。
+    return: {"block": "ns:方块id", "key": str|None, "texture": str|None} 或 None
+    '''
+    if not name:
+        return None
+    if name.startswith("color#"):
+        return None
+    left = name
+    texture = None
+    tilde = left.find("~")
+    if tilde != -1:
+        texture = left[tilde + 1:]
+        left = left[:tilde]
+    key = None
+    sharp = left.find("#")
+    if sharp != -1:
+        key = left[sharp + 1:]
+        left = left[:sharp]
+    if not left:
+        return None
+    if ":" in left:
+        namespace, block = left.split(":", 1)
+    else:
+        namespace, block = "minecraft", left
+    if not namespace:
+        namespace = "minecraft"
+    if not texture:
+        texture = block
+    return {"block": namespace + ":" + block, "key": key or None, "texture": texture or None}
+
+def _compile_classification_pattern(pattern: str):
+    '''把一条匹配项编译为 ("exact", 字符串) 或 ("wild", 正则)（fnmatch 通配）'''
+    if any(ch in pattern for ch in "*?["):
+        return ("wild", re.compile(fnmatch.translate(pattern)))
+    return ("exact", pattern)
+
+def _compile_classification_entry(entry) -> dict:
+    '''编译一条条目为 {维度: (精确集合, 通配正则列表)}'''
+    dims = {}
+    if not isinstance(entry, dict):
+        return dims
+    for dim in _CLASSIFICATION_DIMS:
+        items = entry.get(dim)
+        if not isinstance(items, list) or not items:
+            continue
+        exact = set()
+        wild = []
+        for item in items:
+            if not isinstance(item, str) or not item:
+                continue
+            kind, value = _compile_classification_pattern(item)
+            if kind == "exact":
+                exact.add(value)
+            else:
+                wild.append(value)
+        if exact or wild:
+            dims[dim] = (exact, wild)
+    return dims
+
+def compile_classification_list(raw_list) -> list:
+    '''
+    把合并后的分类依据字典编译成有序规则列表：[(组名, [条目, ...]), ...]。
+    组的值可以是字典（单条目）或字典列表（条目间 OR）。保留 JSON 顺序作为优先级。
+    '''
+    rules = []
+    if not isinstance(raw_list, dict):
+        return rules
+    for group_name, group in raw_list.items():
+        entries = group if isinstance(group, list) else [group]
+        compiled = []
+        for entry in entries:
+            dims = _compile_classification_entry(entry)
+            if dims:
+                compiled.append(dims)
+        if compiled:
+            rules.append((group_name, compiled))
+    return rules
+
+def _classification_field_match(value, field) -> bool:
+    if value is None:
+        return False
+    exact, wild = field
+    if value in exact:
+        return True
+    for pattern in wild:
+        if pattern.match(value):
+            return True
+    return False
+
+def match_classification_rule(rules, parsed) -> str:
+    '''
+    在编译后的规则列表中找到第一个命中的组名；未命中返回 None。
+    '''
+    if parsed is None:
+        return None
+    for group_name, entries in rules:
+        for dims in entries:
+            matched = True
+            for dim, field in dims.items():
+                if not _classification_field_match(parsed.get(dim), field):
+                    matched = False
+                    break
+            if matched:
+                return group_name
+    return None
+
 def find_CI_group(classification_list,real_block_name,group_CI):
     '''
-    classification_list: 分类列表
-    real_block_name: 真实方块名称
+    classification_list: 编译后的分类规则列表（见 compile_classification_list）
+    real_block_name: 材质全名（已去掉 @ 后缀）
     group_CI: CI节点组
     '''
-    found = False
-    for group_name in classification_list:
-        if group_name == "ban" or group_name == "ban_keyw":
-            continue
-        banout = False
-        if "ban_keyw" in classification_list[group_name]:
-            for item in classification_list[group_name]["ban_keyw"]:
-                if item in real_block_name:
-                    banout = True
-                    break
-        if banout:
-            continue
-        if "ban" in classification_list[group_name]:
-            for item in classification_list[group_name]["ban"]:
-                if item == real_block_name:
-                    banout = True
-                    break
-        if banout:
-            continue
-        if "full" in classification_list[group_name]:
-            for item in classification_list[group_name]["full"]:
-                if item == real_block_name:
-                    name_node = "CI-" + group_name
-                    if name_node in bpy.data.node_groups:
-                        group_CI.node_tree = bpy.data.node_groups[name_node]
-                    else:
-                        group_CI.node_tree = bpy.data.node_groups["CI-"]
-                    found = True
-                    break
-        if found:
-            break
-        if "keyw" in classification_list[group_name]:
-            for item in classification_list[group_name]["keyw"]:
-                if item in real_block_name:
-                    name_node = "CI-" + group_name
-                    if name_node in bpy.data.node_groups:
-                        group_CI.node_tree = bpy.data.node_groups[name_node]
-                    else:
-                        group_CI.node_tree = bpy.data.node_groups["CI-"]
-                    found = True
-                    break
-        if found:
-            break
-    if not found:
-                group_CI.node_tree = bpy.data.node_groups["CI-"]
+    group_name = match_classification_rule(classification_list, parse_material_name(real_block_name))
+    name_node = "CI-" + group_name if group_name else "CI-"
+    if name_node not in bpy.data.node_groups:
+        name_node = "CI-"
+    group_CI.node_tree = bpy.data.node_groups[name_node]
 
 def link_CI_output(group_CI, node_output_EEVEE, node_output_Cycles, links):
     '''
