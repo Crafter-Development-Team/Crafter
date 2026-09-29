@@ -70,20 +70,23 @@ class VIEW3D_OT_CrafterReplaceResources(bpy.types.Operator):
             nodes = node_tree_material.nodes
             links = node_tree_material.links
             is_materialed = False
+            group_CI = None
+            node_C_PBR_Parser = None
+            base_texture_nodes = []   # 基础层 + overlay 帧内的所有基础色贴图
+            nodes_wait_remove = []
             for node in nodes:
                 if node.type == 'TEX_IMAGE':
                     if node.image == None:
-                        nodes.remove(node)
+                        nodes_wait_remove.append(node)
                     else:
                         name_image = fuq_bl_dot_number(node.image.name)
                         if name_image.endswith("_n.png") or name_image.endswith("_s.png") or name_image.endswith("_a.png"):
-                            # 移除pbr、法向材质节点
+                            # 移除pbr、法向材质节点（之后按新贴图逐层重建）
                             bpy.data.images.remove(node.image)
-                            nodes.remove(node)
+                            nodes_wait_remove.append(node)
                         elif name_image.endswith(".png"):
                             node.interpolation = "Closest"
                             if not is_Vanilla:
-                                node_tex_base = node
                                 found_texture = False
                                 i = 0
                                 while i < len(images) and not found_texture:
@@ -94,6 +97,7 @@ class VIEW3D_OT_CrafterReplaceResources(bpy.types.Operator):
                                             found_texture = True
                                         j += 1
                                     i += 1
+                            base_texture_nodes.append(node)
                 elif node.type == 'GROUP':
                     if node.node_tree != None:
                         if node.node_tree.name.startswith("CI-"):
@@ -101,9 +105,26 @@ class VIEW3D_OT_CrafterReplaceResources(bpy.types.Operator):
                             group_CI = node
                         if node.node_tree.name.startswith("C-PBR_Parser"):
                             node_C_PBR_Parser = node
+            for node in nodes_wait_remove:
+                try:
+                    nodes.remove(node)
+                except:
+                    pass
             if is_materialed and (not is_Vanilla):
-                node_tex_normal, node_tex_PBR = load_normal_and_PBR(node_tex_base=node_tex_base, nodes=nodes, links=links,)
-                link_base_normal_PBR(node_tex_base=node_tex_base, group_CI=group_CI, links=links, node_C_PBR_Parser=node_C_PBR_Parser,node_tex_normal=node_tex_normal, node_tex_PBR=node_tex_PBR)
+                # 逐层重建 PBR/法向：基础层接基础 CI/Parser；overlay 帧内的层重建后
+                # 接回帧内的 overlay Parser/CI（Alpha 不接），避免换包后断链。
+                for node_tex_base in base_texture_nodes:
+                    is_overlay = in_overlay_frame(node_tex_base)
+                    parent = node_tex_base.parent if is_overlay else None
+                    node_tex_normal, node_tex_PBR = load_normal_and_PBR(node_tex_base=node_tex_base, nodes=nodes, links=links, parent=parent)
+                    if is_overlay:
+                        frame = node_tex_base.parent
+                        overlay_ci = overlay_frame_ci(nodes, frame)
+                        overlay_parser = overlay_frame_parser(nodes, frame)
+                        if overlay_ci is not None and overlay_parser is not None:
+                            link_base_normal_PBR(node_tex_base=None, group_CI=overlay_ci, links=links, node_C_PBR_Parser=overlay_parser, node_tex_normal=node_tex_normal, node_tex_PBR=node_tex_PBR)
+                        continue
+                    link_base_normal_PBR(node_tex_base=node_tex_base, group_CI=group_CI, links=links, node_C_PBR_Parser=node_C_PBR_Parser,node_tex_normal=node_tex_normal, node_tex_PBR=node_tex_PBR)
                 
         for obj in context.selected_objects:
             if obj.type == "MESH":

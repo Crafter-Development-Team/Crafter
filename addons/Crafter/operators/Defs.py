@@ -34,6 +34,185 @@ TINT_BIOME_KINDS = ("grass", "foliage", "dryfoliage", "water", "waterFog", "fog"
 tint_interface_enable = "tint_enable"
 tint_interface_color = "tint_color"
 
+# ========== overlay 帧约定 ==========
+# 导入时把导出器给出的共面叠加层(overlay.json)贴图放进材质内的 NodeFrame，
+# label 形如 "C#<层序号>|<导出器完整材质名>"（序号从 1 开始，越大越靠上）。
+# 旧前缀 "Crafter-overlay#" 仍然兼容识别。
+# 分类/合成留到 Load Material 阶段，此处只承载贴图与元数据。
+overlay_frame_prefix = "C#"
+overlay_frame_prefix_legacy = "Crafter-overlay#"
+overlay_layer_stride = 1000.0   # 每层 overlay 帧在基础材质下方的纵向间距
+overlay_node_offset_x = 50.0    # 帧内贴图相对帧左上角的 x 偏移(与基础材质 x 列对齐)
+overlay_mix_step = 250.0        # 输出前 Mix 链每层占用的横向间距(其他节点据此左移)
+overlay_extra_shift = 100.0     # 有 overlay 时其他节点额外左移量(给 Parser 让出与贴图列的间隙)
+overlay_mix_y_offset = 0.0      # Mix 相对输出节点的纵向偏移(0=顶对齐即插座齐平, 普通节点首个插槽同高)
+parser_offset_x = 300.0         # Parser 相对 CI 的 x 偏移(留出 parser 自身宽度, 避免压住 CI)
+
+
+def overlay_frame_label(index, name):
+    '''生成 overlay 帧的 label'''
+    return overlay_frame_prefix + str(index) + "|" + str(name)
+
+
+def parse_overlay_frame_label(label):
+    '''
+    解析 overlay 帧 label -> (层序号, 完整材质名)；非 overlay 帧返回 (None, None)。
+    兼容旧前缀 Crafter-overlay#。
+    '''
+    if not label:
+        return None, None
+    if label.startswith(overlay_frame_prefix):
+        body = label[len(overlay_frame_prefix):]
+    elif label.startswith(overlay_frame_prefix_legacy):
+        body = label[len(overlay_frame_prefix_legacy):]
+    else:
+        return None, None
+    sep = body.find("|")
+    if sep == -1:
+        return None, None
+    index_text = body[:sep]
+    name = body[sep + 1:]
+    if not index_text.isdigit() or not name:
+        return None, None
+    return int(index_text), name
+
+
+def find_overlay_frames(nodes):
+    '''
+    收集材质节点里的 overlay 帧，按层序号排序返回 [(index, name, frame), ...]
+    '''
+    frames = []
+    for node in nodes:
+        if node.type == "FRAME":
+            index, name = parse_overlay_frame_label(node.label)
+            if index is not None:
+                frames.append((index, name, node))
+    frames.sort(key=lambda item: item[0])
+    return frames
+
+
+def overlay_layout_shift(nodes):
+    '''
+    overlay 图层在输出节点前占用的布局宽度: 层数 x overlay_mix_step;
+    有 overlay 时其他节点额外再左移 overlay_extra_shift(给 Parser 让出与贴图列的间隙)。
+    '''
+    count = len(find_overlay_frames(nodes))
+    if count <= 0:
+        return 0.0
+    return count * overlay_mix_step + overlay_extra_shift
+
+
+def in_overlay_frame(node):
+    '''
+    节点是否位于某个 overlay 帧内（沿 parent 链查找）
+    '''
+    parent = getattr(node, "parent", None)
+    while parent is not None:
+        if parent.type == "FRAME":
+            index, _ = parse_overlay_frame_label(parent.label)
+            if index is not None:
+                return True
+        parent = getattr(parent, "parent", None)
+    return False
+
+
+def overlay_frame_base_texture(nodes, frame):
+    '''
+    取 overlay 帧内的基础色贴图节点（直接子节点中第一张非 _n/_s/_a 的 png）
+    '''
+    for node in nodes:
+        if node.parent != frame:
+            continue
+        if node.type == "TEX_IMAGE" and node.image is not None:
+            name_image = fuq_bl_dot_number(node.image.name)
+            if name_image.endswith("_n.png") or name_image.endswith("_s.png") or name_image.endswith("_a.png"):
+                continue
+            return node
+    return None
+
+
+def overlay_frame_ci(nodes, frame):
+    '''
+    取 overlay 帧内的 CI 节点（Load Material 生成，直接子节点）
+    '''
+    for node in nodes:
+        if node.parent != frame:
+            continue
+        if node.type == "GROUP" and node.node_tree is not None and node.node_tree.name.startswith("CI-"):
+            return node
+    return None
+
+
+def overlay_frame_parser(nodes, frame):
+    '''
+    取 overlay 帧内的 C-PBR_Parser 节点（Load Material 生成，直接子节点）
+    '''
+    for node in nodes:
+        if node.parent != frame:
+            continue
+        if node.type == "GROUP" and node.node_tree is not None and node.node_tree.name.startswith("C-PBR_Parser"):
+            return node
+    return None
+
+
+def build_overlay_frames(material, overlays, dir_importer):
+    '''
+    为材质创建 overlay 帧：每层一个 NodeFrame（label 记录导出器给的完整材质名），
+    帧按层号排在基础材质正下方同一 x 列（整体一条竖排），帧内放叠加层基础色贴图 +
+    法向/PBR 贴图（动态纹理帧保持嵌套在 overlay 帧内），tint 元数据写入材质自定义
+    属性（Crafter_overlay<i>_kind/_color）供 Load Material 阶段使用。
+    material:     目标 Blender 材质
+    overlays:     overlay.json 中该材质的层列表 [{"name","texture","kind"?,"color"?}, ...]
+    dir_importer: WorldImporter 输出目录（贴图路径相对该目录）
+    '''
+    node_tree = material.node_tree
+    if node_tree is None:
+        return
+    nodes = node_tree.nodes
+    links = node_tree.links
+
+    base_location = None
+    for node in nodes:
+        if node.type == "TEX_IMAGE" and node.image is not None:
+            base_location = node.location
+            break
+    if base_location is None:
+        base_location = [0.0, 0.0]
+
+    for index, layer in enumerate(overlays, start=1):
+        if not isinstance(layer, dict):
+            continue
+        name = str(layer.get("name", ""))
+        texture = str(layer.get("texture", ""))
+        if not name or not texture:
+            continue
+        texture_path = os.path.join(dir_importer, texture.replace("/", os.sep))
+        if not os.path.exists(texture_path):
+            warn_log(f"overlay 贴图缺失，跳过: {texture}")
+            continue
+
+        frame = nodes.new(type="NodeFrame")
+        frame.label = overlay_frame_label(index, name)
+        # 基础材质正下方同一 x 列, 层号越大越靠下; 帧内贴图 x 与基础材质基础色对齐
+        frame.location = (base_location[0] - overlay_node_offset_x,
+                          base_location[1] - overlay_layer_stride * index)
+
+        node_tex = nodes.new(type="ShaderNodeTexImage")
+        node_tex.image = bpy.data.images.load(texture_path)
+        node_tex.interpolation = "Closest"
+        # 先挂帧再设坐标 (node.location 是父帧相对坐标)
+        node_tex.parent = frame
+        node_tex.location = (overlay_node_offset_x, 0.0)
+
+        load_normal_and_PBR(node_tex_base=node_tex, nodes=nodes, links=links, parent=frame)
+
+        # tint 元数据（同 tint.json 约定；color 为线性值）
+        material["Crafter_overlay" + str(index) + "_kind"] = str(layer.get("kind", "")) if layer.get("kind") else ""
+        color = layer.get("color")
+        if color and len(color) >= 3:
+            material["Crafter_overlay" + str(index) + "_color"] = (
+                float(color[0]), float(color[1]), float(color[2]))
+
 
 def load_icon_from_zip(zip_path, icons, name_icons, index):
     dir_temp = tempfile.mkdtemp()
@@ -512,7 +691,7 @@ def add_node_group_if_not_exists(names):
                 print(f"Error loading node group '{name}': {e}")
                 continue
 
-def add_node_moving_texture(node_tex, nodes, links, list_info_moving):
+def add_node_moving_texture(node_tex, nodes, links, list_info_moving, parent=None):
     '''
     为基础色节点添加动态纹理节点并连接
     node_tex_base: 基础纹理节点
@@ -520,6 +699,7 @@ def add_node_moving_texture(node_tex, nodes, links, list_info_moving):
     links:目标材质连接组
     list_info_moving: 动态纹理节点信息列表
     row_base: 基础色纹理行数
+    parent: 动态纹理帧要挂到的父帧（overlay 帧），None 表示不挂
     return:动态纹理节点信息
     '''
     if node_tex.image.size[0] == 0:
@@ -584,20 +764,26 @@ def add_node_moving_texture(node_tex, nodes, links, list_info_moving):
         
         node_frame = nodes.new(type="NodeFrame")
         node_frame.label = "Crafter-动态纹理"
+        if parent is not None:
+            node_frame.parent = parent
+        # 动态纹理帧要与参考贴图共享同一坐标空间: 挂帧后归零,
+        # 否则帧内节点的 location 会被当成父帧相对坐标错位
+        node_frame.location = (0.0, 0.0)
 
+        # 注意: node.location 是父帧相对坐标, 必须先挂 parent 再设 location
         node_Moving_texture_end = nodes.new(type="ShaderNodeGroup")
-        node_Moving_texture_end.location = (node_tex.location.x - 200, node_tex.location.y)
         node_Moving_texture_end.node_tree = bpy.data.node_groups["Crafter-动态纹理_尾"]
         node_Moving_texture_end.parent = node_frame
+        node_Moving_texture_end.location = (node_tex.location.x - 200, node_tex.location.y)
 
         node_Fac = nodes.new(type="ShaderNodeValToRGB")
-        node_Fac.location = (node_tex.location.x - 750, node_tex.location.y)
         node_Fac.color_ramp.interpolation = "CONSTANT"
         node_Fac.parent = node_frame
+        node_Fac.location = (node_tex.location.x - 750, node_tex.location.y)
 
         node_Moving_texture_start = nodes.new(type="ShaderNodeGroup")
-        node_Moving_texture_start.location = (node_tex.location.x - 900, node_tex.location.y)
         node_Moving_texture_start.parent = node_frame
+        node_Moving_texture_start.location = (node_tex.location.x - 900, node_tex.location.y)
         
         if interpolate:
             node_Moving_texture_start.node_tree = bpy.data.node_groups["Crafter-动态纹理_首_渐变"]
@@ -627,24 +813,24 @@ def add_node_moving_texture(node_tex, nodes, links, list_info_moving):
                 else:
                     last_out_put_alpha = node_Mix.outputs["Result"]
                 node_Fac = nodes.new(type="ShaderNodeValToRGB")
-                node_Fac.location = (node_tex.location.x - 750, node_tex.location.y + ((n // 32) * 250))
                 node_Fac.color_ramp.interpolation = "CONSTANT"
                 node_Fac.parent = node_frame
+                node_Fac.location = (node_tex.location.x - 750, node_tex.location.y + ((n // 32) * 250))
                 links.new(node_Moving_texture_start.outputs["Fac"], node_Fac.inputs["Fac"])
 
                 node_Math = nodes.new(type="ShaderNodeMath")
-                node_Math.location = (node_tex.location.x - 500, node_tex.location.y + ((n // 32) * 250) - 250)
                 node_Math.operation = "LESS_THAN"
                 node_Math.use_clamp = False
                 node_Math.parent = node_frame
+                node_Math.location = (node_tex.location.x - 500, node_tex.location.y + ((n // 32) * 250) - 250)
                 links.new(node_Moving_texture_start.outputs["Fac"], node_Math.inputs["Value"])
                 node_Math.inputs["Value_001"].default_value = adding_frames / frames
 
                 node_Mix = nodes.new(type="ShaderNodeMix")
-                node_Mix.location = (node_tex.location.x - 350, node_tex.location.y + ((n // 32) * 250) - 250)
                 node_Mix.data_type = "FLOAT"
                 node_Mix.clamp_factor = False
                 node_Mix.parent = node_frame
+                node_Mix.location = (node_tex.location.x - 350, node_tex.location.y + ((n // 32) * 250) - 250)
 
                 links.new(node_Math.outputs["Value"], node_Mix.inputs["Factor"])
                 links.new(node_Fac.outputs["Alpha"], node_Mix.inputs["A"])
@@ -687,10 +873,13 @@ def add_node_moving_texture(node_tex, nodes, links, list_info_moving):
                         return info_old
                 node_frame = nodes.new(type="NodeFrame")
                 node_frame.label = "Crafter-动态纹理"
+                if parent is not None:
+                    node_frame.parent = parent
+                node_frame.location = (0.0, 0.0)
                 node_scall_UV = nodes.new(type="ShaderNodeGroup")
-                node_scall_UV.location = (node_tex.location.x - 200, node_tex.location.y)
                 node_scall_UV.node_tree = bpy.data.node_groups["Crafter-UV缩放"]
                 node_scall_UV.parent = node_frame
+                node_scall_UV.location = (node_tex.location.x - 200, node_tex.location.y)
                 node_scall_UV.inputs["row_tex / row"].default_value = row_base
                 links.new(node_scall_UV.outputs["Vector"], node_tex.inputs["Vector"])
                 return [node_scall_UV, None]
@@ -919,40 +1108,48 @@ def link_CI_output(group_CI, node_output_EEVEE, node_output_Cycles, links):
         if "Thickness" in node_output_Cycles.inputs:
             links.new(group_CI.outputs["Cycles-Thickness"], node_output_Cycles.inputs["Thickness"])
 
-def add_node_parser(group_CI, nodes, links):
+def add_node_parser(group_CI, nodes, links, parent=None):
     '''
     gout_CI: 材质组节点
     nodes: 目标材质节点组
     links:目标材质连接组
+    parent: 新建节点要挂到的父帧（overlay 帧），None 表示不挂
     return: node_C_PBR_Parser
     '''
     node_C_PBR_Parser = nodes.new(type="ShaderNodeGroup")
-    node_C_PBR_Parser.location = (group_CI.location.x - 200, group_CI.location.y - 160)
+    # 先挂父帧再设 location (node.location 是父帧相对坐标)
+    if parent is not None:
+        node_C_PBR_Parser.parent = parent
+    node_C_PBR_Parser.location = (group_CI.location.x - parser_offset_x, group_CI.location.y - 160)
     node_C_PBR_Parser.node_tree = bpy.data.node_groups["C-PBR_Parser"]
     for output in node_C_PBR_Parser.outputs:
         if output.name in group_CI.inputs:
             links.new(output, group_CI.inputs[output.name])
     return node_C_PBR_Parser
 
-def add_node_pbr(location_base_tex, y_subtract, dir, nodes, links, list_info_moving):
+def add_node_pbr(location_base_tex, y_subtract, dir, nodes, links, list_info_moving, parent=None):
     if os.path.exists(bpy.path.abspath(dir)):
         node_pbr = nodes.new(type="ShaderNodeTexImage")
+        # 先挂父帧再设 location (node.location 是父帧相对坐标)
+        if parent is not None:
+            node_pbr.parent = parent
         node_pbr.location = (location_base_tex.x, location_base_tex.y - y_subtract)
         node_pbr.image = bpy.data.images.load(dir)
         node_pbr.interpolation = "Closest"
         bpy.data.images[node_pbr.image.name].colorspace_settings.name = "Non-Color"
-        info_moving = add_node_moving_texture(node_pbr, nodes, links, list_info_moving)
+        info_moving = add_node_moving_texture(node_pbr, nodes, links, list_info_moving, parent=parent)
         list_info_moving.append(info_moving)
         return node_pbr
     else:
         return None
 
-def load_normal_and_PBR(node_tex_base, nodes, links):
+def load_normal_and_PBR(node_tex_base, nodes, links, parent=None):
     '''
     以基础色节点添加法向贴图节点和PBR贴图节点、连接并添加动态纹理节点
     node_tex_base: 基础色节点
     nodes: 目标材质节点组
     links:目标材质连接组
+    parent: 新建节点(含动态纹理帧)要挂到的父帧（overlay 帧），None 表示不挂
     '''
     node_tex_normal = None
     node_tex_PBR = None
@@ -965,16 +1162,16 @@ def load_normal_and_PBR(node_tex_base, nodes, links):
         dir_a = os.path.join(dir_image,name_block + "_a.png")
         
         list_info_moving = []
-        info_moving_tex = add_node_moving_texture(node_tex_base, nodes, links, list_info_moving)
+        info_moving_tex = add_node_moving_texture(node_tex_base, nodes, links, list_info_moving, parent=parent)
         list_info_moving.append(info_moving_tex)
 
         node_tex_normal = None
         node_tex_PBR = None
         location_base_tex = node_tex_base.location
 
-        node_tex_normal = add_node_pbr(location_base_tex, 300, dir_n, nodes, links, list_info_moving)
-        node_tex_PBR = add_node_pbr(location_base_tex, 600, dir_s, nodes, links, list_info_moving)
-        node_tex_PBR = add_node_pbr(location_base_tex, 600, dir_a, nodes, links, list_info_moving)
+        node_tex_normal = add_node_pbr(location_base_tex, 300, dir_n, nodes, links, list_info_moving, parent=parent)
+        node_tex_PBR = add_node_pbr(location_base_tex, 600, dir_s, nodes, links, list_info_moving, parent=parent)
+        node_tex_PBR = add_node_pbr(location_base_tex, 600, dir_a, nodes, links, list_info_moving, parent=parent)
 
     return node_tex_normal, node_tex_PBR
 
@@ -1035,7 +1232,11 @@ def find_biome_tex_group():
             fallback = group
         elif group.name.startswith("Crafter-biomeTex_"):
             suffix = group.name[len("Crafter-biomeTex_"):]
-            index = int(suffix) if suffix.isdigit() else -1
+            # 只认克隆出来的数字后缀(如 Crafter-biomeTex_1699999999)，
+            # 忽略依赖组 Crafter-biomeTex_vector 等非数字后缀
+            if not suffix.isdigit():
+                continue
+            index = int(suffix)
             if best is None or index > best_index:
                 best = group
                 best_index = index
@@ -1043,28 +1244,44 @@ def find_biome_tex_group():
 
 def ensure_biome_tex_node(nodes, group_CI, group=None):
     '''
-    材质里没有 biomeTex 组节点时按需追加；已有就直接返回。
-    位置沿用旧行为：放在 EEVEE 输出节点左下方。
+    材质里没有 biomeTex 组节点时按需追加；已有则顺便把 x 对齐到 Parser 列。
+    位置：与基础 Parser 同 x 列（基础 CI 左侧 parser_offset_x 处），纵向放在 EEVEE 输出节点下方。
     '''
+    node_biome = None
     for node in nodes:
         if node.type == "GROUP" and node.node_tree is not None and node.node_tree.name.startswith("Crafter-biomeTex"):
-            return node
-    if group is None:
-        group = find_biome_tex_group()
-    if group is None:
-        return None
-    node = nodes.new(type="ShaderNodeGroup")
-    node.node_tree = group
+            node_biome = node
+            break
+
     out_ev = None
     for nd in nodes:
         if nd.type == "OUTPUT_MATERIAL" and getattr(nd, "target", "") in ("EEVEE", "ALL"):
             out_ev = nd
             break
+
+    # Parser 列的 x: 基础 CI 在输出左侧 (层数+1)*step(无 overlay 为 200)，Parser 再左移 parser_offset_x
+    target_x = None
     if out_ev is not None:
-        node.location = (out_ev.location.x - 400, out_ev.location.y - 550)
+        overlay_count = len(find_overlay_frames(nodes))
+        ci_offset = overlay_mix_step * (overlay_count + 1) if overlay_count > 0 else 200.0
+        target_x = out_ev.location.x - ci_offset - parser_offset_x
+
+    if node_biome is not None:
+        if target_x is not None:
+            node_biome.location = (target_x, node_biome.location.y)
+        return node_biome
+
+    if group is None:
+        group = find_biome_tex_group()
+    if group is None:
+        return None
+    node_biome = nodes.new(type="ShaderNodeGroup")
+    node_biome.node_tree = group
+    if target_x is not None:
+        node_biome.location = (target_x, out_ev.location.y - 550)
     elif group_CI is not None:
-        node.location = (group_CI.location.x - 600, group_CI.location.y - 400)
-    return node
+        node_biome.location = (group_CI.location.x - 600, group_CI.location.y - 400)
+    return node_biome
 
 def biome_tex_output_names(group):
     '''
@@ -1103,6 +1320,30 @@ def get_material_tint(material):
         tint["kind"] = kind
         if "Crafter_tint_color" in keys:
             color = material["Crafter_tint_color"]
+            tint["color"] = (float(color[0]), float(color[1]), float(color[2]))
+    return tint
+
+def get_overlay_tint(material, index):
+    '''
+    读取导入时写入的 overlay 层 tint 元数据（Crafter_overlay<i>_kind/_color）。
+    约定同 get_material_tint：{"kind", "color"?}；{} 表示明确不上色；None 表示没有元数据。
+    '''
+    if material is None:
+        return None
+    try:
+        keys = material.keys()
+    except AttributeError:
+        return None
+    kind_key = "Crafter_overlay" + str(index) + "_kind"
+    if kind_key not in keys:
+        return None
+    tint = {}
+    kind = str(material[kind_key])
+    if kind:
+        tint["kind"] = kind
+        color_key = "Crafter_overlay" + str(index) + "_color"
+        if color_key in keys:
+            color = material[color_key]
             tint["color"] = (float(color[0]), float(color[1]), float(color[2]))
     return tint
 

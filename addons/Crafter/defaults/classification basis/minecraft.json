@@ -8,10 +8,6 @@
         {"block": ["minecraft:grass_block"], "key": ["top", "overlay"]}
     ],
 
-    "grass_block_side": [
-        {"block": ["minecraft:grass_block"], "key": ["side"]}
-    ],
-
     "tran_move": [
         {"block": [
             "minecraft:acacia_sapling", "minecraft:allium", "minecraft:azure_bluet",

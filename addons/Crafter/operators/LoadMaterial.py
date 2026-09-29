@@ -116,6 +116,9 @@ def process_single_material(material, context, classification_list, imported_by_
     node_biomeTex = None
     node_output_EEVEE = None
     for node in nodes:
+        # overlay 帧内的贴图/节点属于叠加层，不参与基础色扫描（也不能被删）
+        if in_overlay_frame(node):
+            continue
         if node.type == "TEX_IMAGE" and node.image is not None:
             name_image = fuq_bl_dot_number(node.image.name)
             if name_image.endswith("_n.png") or name_image.endswith("_s.png") or name_image.endswith("_a.png"):
@@ -169,7 +172,12 @@ def process_single_material(material, context, classification_list, imported_by_
     except:
         pass
     group_CI = nodes.new(type="ShaderNodeGroup")
-    group_CI.location = (node_output_EEVEE.location.x - 200, node_output_EEVEE.location.y)
+    # 给输出前面的 overlay Mix 链留位置: 有 overlay 时基础 CI 与 Mix 链按同一步长左移
+    # (CI -> Mix1 -> ... -> 输出的左边缘间距统一为 overlay_mix_step)
+    overlay_count = len(find_overlay_frames(nodes))
+    ci_offset_x = overlay_mix_step * (overlay_count + 1) if overlay_count > 0 else 200.0
+    group_CI.location = (node_output_EEVEE.location.x - ci_offset_x,
+                         node_output_EEVEE.location.y)
     find_CI_group(group_CI=group_CI, real_block_name=real_block_name, classification_list=classification_list)
     link_CI_output(group_CI=group_CI, node_output_EEVEE=node_output_EEVEE, node_output_Cycles=node_output_Cycles, links=links)
     tint = get_material_tint(material)
@@ -183,6 +191,178 @@ def process_single_material(material, context, classification_list, imported_by_
     link_base_normal_PBR(node_tex_base=node_tex_base, group_CI=group_CI, links=links, node_C_PBR_Parser=node_C_PBR_Parser, node_tex_normal=node_tex_normal, node_tex_PBR=node_tex_PBR)
     if node_tex_base is not None:
         nodes.active = node_tex_base
+    # overlay 图层：帧内建 CI/Parser，并用 Mix Shader 按层盖到基础表面上
+    try:
+        process_overlay_frames(material, nodes, links, group_CI,
+                               node_output_EEVEE, node_output_Cycles, classification_list)
+    except Exception as ex:
+        warn_log(f"overlay 处理失败 [{material.name}]: {ex}")
+
+# ========== overlay 图层加载 ==========
+
+def _clear_overlay_generated_nodes(nodes, frame):
+    '''
+    清掉 overlay 帧内上一次 Load Material 生成的节点（CI/Parser/Mix Shader），
+    保留贴图/动态纹理/biomeTex，保证重复加载材质幂等。
+    '''
+    wait_remove = []
+    for node in nodes:
+        if node.parent != frame:
+            continue
+        if node.type == "GROUP":
+            tree = node.node_tree
+            if tree is None or tree.name.startswith("CI-") or tree.name.startswith("C-PBR_Parser"):
+                wait_remove.append(node)
+        elif node.bl_idname == "ShaderNodeMixShader":
+            wait_remove.append(node)
+    for node in wait_remove:
+        try:
+            nodes.remove(node)
+        except:
+            pass
+
+def _overlay_frame_pbr_textures(nodes, frame):
+    '''
+    取 overlay 帧内的法向/PBR 贴图节点（规则同基础层：_n 为法向，_s/_a 为 PBR）
+    '''
+    node_tex_normal = None
+    node_tex_PBR = None
+    for node in nodes:
+        if node.parent != frame:
+            continue
+        if node.type == "TEX_IMAGE" and node.image is not None:
+            name_image = fuq_bl_dot_number(node.image.name)
+            if name_image.endswith("_n.png"):
+                node_tex_normal = node
+            if name_image.endswith("_s.png") or name_image.endswith("_a.png"):
+                node_tex_PBR = node
+    return node_tex_normal, node_tex_PBR
+
+def _remove_overlay_mix_nodes(nodes):
+    '''
+    清掉上一轮建在输出节点前面的 overlay Mix 链（按自定义属性标记识别）
+    '''
+    wait_remove = []
+    for node in nodes:
+        if node.bl_idname != "ShaderNodeMixShader":
+            continue
+        try:
+            if node.get("Crafter_overlay_mix"):
+                wait_remove.append(node)
+        except Exception:
+            pass
+    for node in wait_remove:
+        try:
+            nodes.remove(node)
+        except:
+            pass
+
+def _apply_overlay_layout_shift(material, nodes, new_shift):
+    '''
+    根据 overlay 图层数把"其他节点"(贴图/帧/群组等; 输出节点与链上的 CI/Parser/Mix、
+    biomeTex 除外)左移 new_shift，给输出节点前面的 Mix 链让位。位移量记在材质属性
+    Crafter_overlay_shift 上，重复加载时按差值位移，不会越移越偏。
+    '''
+    try:
+        old_shift = float(material.get("Crafter_overlay_shift", 0.0) or 0.0)
+    except Exception:
+        old_shift = 0.0
+    delta = new_shift - old_shift
+    if abs(delta) > 1e-6:
+        for node in nodes:
+            if node.parent is not None:
+                continue
+            if node.type == "OUTPUT_MATERIAL":
+                continue
+            if node.type == "GROUP" and node.node_tree is not None and (
+                    node.node_tree.name.startswith("CI-") or
+                    node.node_tree.name.startswith("C-PBR_Parser") or
+                    node.node_tree.name.startswith("Crafter-biomeTex")):
+                continue
+            if node.bl_idname == "ShaderNodeMixShader":
+                continue
+            node.location = (node.location.x - delta, node.location.y)
+    material["Crafter_overlay_shift"] = new_shift
+
+def process_overlay_frames(material, nodes, links, group_CI,
+                           node_output_EEVEE, node_output_Cycles, classification_list):
+    '''
+    overlay 图层加载：
+    - 每个 overlay 帧按 label 里的完整材质名分类建 CI（挂在帧内），帧内贴图接 CI 的
+      Base Color 与 C-PBR_Parser。
+    - 再用 Mix Shader 按层序把各层 CI 的 Surface 输出叠到基础 CI 表面上：
+        A = 上一层结果（首层为基础 CI 输出），B = 本层 CI 输出，Fac = 本层基础色贴图 Alpha。
+    - overlay CI 的 Alpha 输入故意不接（保持默认 1）：CI 内部已经用 Alpha 把 Transparent
+      混进 Surface 输出，若再接一遍会二次乘 alpha（颜色 a²、还会透出背景）；透明度统一由
+      外层 Mix 控制即为标准 alpha-over。
+    - 帧内 CI 与基础 CI 同一 x 列（parser 随之对齐），各层 CI/Parser 各成一条竖列。
+    - Mix 链建在输出节点前面（最上层离输出最近，其余依次向左，纵向微调对齐插座）；
+      其他节点按层数左移让位，位移量记录在材质属性上，重复加载按差值位移不会漂移。
+    - 可重复调用：先清掉上一轮的 Mix 链与帧内 CI/Parser 再重建。
+    '''
+    frames = find_overlay_frames(nodes)
+    _remove_overlay_mix_nodes(nodes)
+    # 按 overlay 数量把其他节点左移, 给输出节点前面的 Mix 链让位(记录差值, 重复加载不漂移)
+    _apply_overlay_layout_shift(material, nodes, overlay_layout_shift(nodes))
+    if not frames or group_CI is None:
+        return
+
+    # 每个输出目标一条链: (CI 输出名, 输出节点)
+    targets = []
+    if node_output_EEVEE is not None and "EEVEE-Surface" in group_CI.outputs:
+        targets.append(("EEVEE-Surface", node_output_EEVEE))
+    if node_output_Cycles is not None and "Cycles-Surface" in group_CI.outputs:
+        targets.append(("Cycles-Surface", node_output_Cycles))
+    if not targets:
+        return
+    chain = {name: group_CI.outputs[name] for name, _ in targets}
+
+    for seq, (index, name, frame) in enumerate(frames, start=1):
+        _clear_overlay_generated_nodes(nodes, frame)
+        node_tex = overlay_frame_base_texture(nodes, frame)
+        if node_tex is None:
+            continue
+
+        node_CI = nodes.new(type="ShaderNodeGroup")
+        node_CI.parent = frame
+        # 与基础 CI 同 x 列(帧无父帧, 直接相减得到帧内相对 x), parser 随之对齐
+        node_CI.location = (group_CI.location.x - frame.location.x, node_tex.location.y)
+        find_CI_group(group_CI=node_CI,
+                      real_block_name=material_base_name(name),
+                      classification_list=classification_list)
+        if "Base Color" in node_CI.inputs:
+            links.new(node_tex.outputs["Color"], node_CI.inputs["Base Color"])
+
+        tint = get_overlay_tint(material, index)
+        try:
+            apply_tint(group_CI=node_CI, nodes=nodes, links=links, tint=tint)
+        except Exception as ex:
+            warn_log(f"apply_tint 失败 [overlay {name}]: {ex}")
+
+        node_parser = add_node_parser(group_CI=node_CI, nodes=nodes, links=links, parent=frame)
+        node_tex_normal, node_tex_PBR = _overlay_frame_pbr_textures(nodes, frame)
+        link_base_normal_PBR(node_tex_base=None, group_CI=node_CI, links=links,
+                             node_C_PBR_Parser=node_parser,
+                             node_tex_normal=node_tex_normal, node_tex_PBR=node_tex_PBR)
+
+        for surface_name, output_node in targets:
+            if surface_name not in node_CI.outputs:
+                continue
+            mix_node = nodes.new(type="ShaderNodeMixShader")
+            mix_node["Crafter_overlay_mix"] = 1   # 标记: 便于重复加载时清理
+            mix_node.label = "Crafter-overlay"
+            # 输出节点前面: 最上层离输出最近, 其余依次向左(其他节点已按层数左移让位);
+            # 纵向略微下移, 让 Mix 的输出插槽与输出节点的 Surface 插槽齐平
+            mix_node.location = (output_node.location.x - overlay_mix_step * (len(frames) - seq + 1),
+                                 output_node.location.y - overlay_mix_y_offset)
+            links.new(node_tex.outputs["Alpha"], mix_node.inputs[0])
+            links.new(chain[surface_name], mix_node.inputs[1])
+            links.new(node_CI.outputs[surface_name], mix_node.inputs[2])
+            out_socket = output_node.inputs["Surface"]
+            for old_link in list(out_socket.links):
+                links.remove(old_link)
+            links.new(mix_node.outputs[0], out_socket)
+            chain[surface_name] = mix_node.outputs[0]
 
 # ========== 提取的为物体加载材质的函数（供外部调用，假设 C-PBR_Parser 已存在）==========
 def load_material_for_object(context, obj):
@@ -368,6 +548,9 @@ class VIEW3D_OT_CrafterLoadParallax(bpy.types.Operator):
             node_CI = None
             node_C_PBR_Parser = None
             for node in nodes:
+                # overlay 帧内的节点属于叠加层，不参与视差的基底/贴图查找
+                if in_overlay_frame(node):
+                    continue
                 if node.type == "TEX_IMAGE" and node.image != None:
                     name_image = fuq_bl_dot_number(node.image.name)
                     if name_image.endswith("_n.png") or name_image.endswith("_s.png") or name_image.endswith("_a.png"):
@@ -519,6 +702,8 @@ class VIEW3D_OT_CrafterRemoveParallax(bpy.types.Operator):
             node_C_PBR_Parser = None
             nodes_wait_delete = []
             for node in nodes:
+                if in_overlay_frame(node):
+                    continue
                 if node.type == "FRAME":
                     if node.label == "Crafter-视差":
                         node_frame = node
@@ -533,6 +718,8 @@ class VIEW3D_OT_CrafterRemoveParallax(bpy.types.Operator):
                         if node.node_tree.name == "C-PBR_Parser":
                             node_C_PBR_Parser = node
             for node in nodes:
+                if in_overlay_frame(node):
+                    continue
                 if node_frame != None:
                     if node.parent == node_frame:
                         nodes_wait_delete.append(node)
@@ -570,6 +757,9 @@ class VIEW3D_OT_CrafterRemoveParallax(bpy.types.Operator):
             nodes_moving_end = []
             nodes_tex = []
             for node in nodes:
+                # overlay 帧内的贴图有自己的动态纹理节点，不能被基础层的动态纹理重连
+                if in_overlay_frame(node):
+                    continue
                 if node.type == "TEX_IMAGE":
                     nodes_tex.append(node)
                 if node.type == "GROUP":

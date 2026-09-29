@@ -538,11 +538,17 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
                     removed_obj += 1
                 except:
                     pass
-        # 旧的 tint 元数据一并清理，避免和本次导出的 objs 不匹配
+        # 旧的 tint/overlay 元数据一并清理，避免和本次导出的 objs 不匹配
         try:
             dir_old_tint = os.path.join(dir_importer, "tint.json")
             if os.path.exists(dir_old_tint):
                 os.remove(dir_old_tint)
+        except:
+            pass
+        try:
+            dir_old_overlay = os.path.join(dir_importer, "overlay.json")
+            if os.path.exists(dir_old_overlay):
+                os.remove(dir_old_overlay)
         except:
             pass
         log_step(f"删除 {removed_obj} 个旧 obj 文件")
@@ -774,6 +780,23 @@ def finish_import(ctx, prefs, imported_time, worldconfig, prepared_time,
             return None
         return tint_map.get(fuq_bl_dot_number(mat.name))
 
+    # 读取 C++ 导出器的 overlay 元数据（base 材质 -> 叠加层序列）
+    log_stage_begin("读取 overlay 元数据")
+    overlay_map = None
+    dir_overlay_json = os.path.join(dir_importer, "overlay.json")
+    if os.path.exists(dir_overlay_json):
+        try:
+            with open(dir_overlay_json, "r", encoding="utf-8") as f:
+                raw_overlays = json.load(f)
+            overlay_map = {fuq_bl_dot_number(k): v for k, v in raw_overlays.items()}
+            log_step(f"overlay.json 载入 {len(overlay_map)} 条")
+        except Exception as ex:
+            warn_log(f"overlay.json 读取失败: {ex}")
+            overlay_map = None
+    else:
+        log_step("未找到 overlay.json（旧导出器或无叠加层）")
+    log_stage_end("读取 overlay 元数据")
+
     # Copy biomeTex
     log_stage_begin("复制 biomeTex")
     dir_bt = os.path.join(dir_importer, "biomeTex")
@@ -851,6 +874,26 @@ def finish_import(ctx, prefs, imported_time, worldconfig, prepared_time,
             load_normal_and_PBR(node_tex_base=ntb, nodes=nodes, links=links)
             nodes.active = ntb
     log_stage_end("预处理材质", f"{len(apply_list)} 个材质")
+
+    # 共面叠加层：把 overlay.json 的叠加贴图/法向放进材质内的 overlay 帧，
+    # 分类与合成留到 Load Material（CI）阶段，本轮只建帧与贴图元数据。
+    if overlay_map:
+        log_stage_begin("创建 overlay 帧")
+        made = 0
+        for nm in apply_list:
+            mat = bpy.data.materials.get(nm)
+            if mat is None or mat.node_tree is None:
+                continue
+            overlays = overlay_map.get(fuq_bl_dot_number(mat.name))
+            if not overlays:
+                continue
+            try:
+                build_overlay_frames(mat, overlays, dir_importer)
+                made += 1
+            except Exception as ex:
+                warn_log(f"overlay 帧创建失败 [{mat.name}]: {ex}")
+        log_step(f"{made} 个材质写入 overlay 帧")
+        log_stage_end("创建 overlay 帧")
 
     log_stage_begin("打包纹理")
     try:
