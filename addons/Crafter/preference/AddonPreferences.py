@@ -98,6 +98,12 @@ class CrafterAddonPreferences(AddonPreferences):
                                    max=1.0)# type: ignore
     allowDoubleFace: BoolProperty(name="Allow Double Face",
                                   default=False,)# type: ignore
+    overlayLayerStep: FloatProperty(name="Overlay Offset",
+                                    description="Per-layer outward offset for coincident overlay faces (grass side / CTM overlay). Increase it if z-fighting persists in EEVEE",
+                                    default=0.003,
+                                    min=0.0002,
+                                    max=0.05,
+                                    precision=4)# type: ignore
     notexportFullModel: BoolProperty(name="As Chunk",
                                   default=False,)# type: ignore
     autoPartitionSettings: BoolProperty(name="Auto Chunk Settings",
@@ -147,9 +153,6 @@ class CrafterAddonPreferences(AddonPreferences):
     LOD3renderDistance: IntProperty(name="LOD3 Distance",
                                    default=8,
                                    min=0)# type: ignore
-    shell: BoolProperty(name="Shell ",
-                        description="Enable this option when reporting a bug and include the shell output content",
-                        default=True,)# type: ignore
     Game_Resources: BoolProperty(name="Game Resources",
                                   default=True,)# type: ignore
     Auto_Load_Material: BoolProperty(name="Load Material",
@@ -198,6 +201,9 @@ class CrafterAddonPreferences(AddonPreferences):
                                           max=100.0,
                                           description=" ",
                                           update=lambda self,context: self.set_parsed_normal_strength(context))# type: ignore
+    Add_Crafter_time_On_Import: BoolProperty(name="Add Crafter-time on Import",
+                                             description="Automatically add the Crafter-time geometry node to imported objects. It provides the current second count to material nodes (dynamic textures and water flowing), but it will reduce the preview frame rate",
+                                             default=False)# type: ignore
     Materials_List: CollectionProperty(name="Materials",type=Material)#type: ignore
     Materials_List_index: IntProperty(name="Material",default=0)# type: ignore
     Classification_Basis_List: CollectionProperty(name="Classification Basis",type=ClassificationBasisl)# type: ignore

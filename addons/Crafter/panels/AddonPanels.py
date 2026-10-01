@@ -116,6 +116,7 @@ class VIEW3D_PT_CrafterMaterials(bpy.types.Panel):
         row_Crafter_time_ops = row_Crafter_time.row(align=True)
         row_Crafter_time_ops.operator("crafter.add_craftertime",icon="LINKED",text="Add")
         row_Crafter_time_ops.operator("crafter.remove_craftertime",icon="UNLINKED",text="Remove")
+        row_Crafter_time_ops.prop(addon_prefs, "Add_Crafter_time_On_Import", text="")
 
         row_parallax = box_other.row()
         col1_parallax = row_parallax.column()

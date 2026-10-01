@@ -17,40 +17,37 @@ is_chinese = lang in ("zh_HANS", "zh_HANT")
 # ========== 提取的分类数据加载函数 ==========
 def load_classification_data(addon_prefs):
     '''
-    从分类基础目录加载所有 JSON 分类文件，合并成统一的分类列表、封禁列表和封禁关键词列表。
+    从分类基础目录加载所有 JSON 分类文件，规范化合并并编译为结构化分类规则。
+    组的值可以是字典（单条目）或字典列表（条目间 OR）；多文件同名组的条目按加载顺序拼接。
     addon_prefs: 插件偏好设置，从中获取当前选中的分类基础文件夹名称
-    return: (classification_list, banlist, ban_keyw) 三元组
+    return: 编译后的规则列表（见 Defs.compile_classification_list）
     '''
     classification_folder_name = addon_prefs.Classification_Basis_List[addon_prefs.Classification_Basis_List_index].name
     classification_folder_dir = os.path.join(dir_classification_basis, classification_folder_name)
-    classification_list = {}
-    banlist = []
-    ban_keyw = []
+    classification_raw = {}   # 组名 -> [条目, ...]
     for filename in os.listdir(classification_folder_dir):
         file_path = os.path.join(classification_folder_dir, filename)
         if filename.endswith(".json"):
             try:
                 with open(file_path, 'r', encoding='utf-8') as file:
                     data = json.load(file)
-                    classification_list = make_dict_together(classification_list, data)
-                    if "ban" in data:
-                        banlist.extend(data["ban"])
-                    if "ban_keyw" in data:
-                        ban_keyw.extend(data["ban_keyw"])
+                    for group_name, group in data.items():
+                        entries = group if isinstance(group, list) else [group]
+                        for entry in entries:
+                            if isinstance(entry, dict):
+                                classification_raw.setdefault(group_name, []).append(entry)
             except:
                 pass
-    return classification_list, banlist, ban_keyw
+    return compile_classification_list(classification_raw)
 
 # ========== 提取的单材质处理函数 ==========
-def process_single_material(material, context, classification_list, banlist, ban_keyw, imported_by_crafter=False):
+def process_single_material(material, context, classification_list, imported_by_crafter=False):
     '''
     处理单个材质：扫描 TEX_IMAGE 节点识别基础色/PBR贴图，构建 CI- 节点组，
     装配 PBR 解析器，连接法向和 PBR 贴图。
     material:             要处理的材质
     context:             Blender 上下文
-    classification_list: 分类列表（来自 load_classification_data）
-    banlist:             封禁方块名列表
-    ban_keyw:            封禁关键词列表
+    classification_list: 分类规则列表（来自 load_classification_data）
     imported_by_crafter: 是否由 Crafter 导入触发（True=保留已有贴图节点不重新从文件查找PBR）
     '''
     node_tree_material = material.node_tree
@@ -104,7 +101,11 @@ def process_single_material(material, context, classification_list, banlist, ban
         if "Base Color" in group_CI.inputs:
             group_CI.inputs["Base Color"].default_value = [float(material.name[6:10]), float(material.name[11:15]), float(material.name[16:20]), 1]
         link_CI_output(group_CI=group_CI, node_output_EEVEE=node_output_EEVEE, node_output_Cycles=node_output_Cycles, links=links)
-        link_biome_tex(node_biomeTex=node_biomeTex, group_CI=group_CI, links=links)
+        tint = get_material_tint(material)
+        try:
+            apply_tint(group_CI=group_CI, nodes=nodes, links=links, tint=tint)
+        except Exception as ex:
+            warn_log(f"apply_tint 失败 [{material.name}]: {ex}")
         add_node_parser(group_CI=group_CI, nodes=nodes, links=links)
         return
 
@@ -115,6 +116,9 @@ def process_single_material(material, context, classification_list, banlist, ban
     node_biomeTex = None
     node_output_EEVEE = None
     for node in nodes:
+        # overlay 帧内的贴图/节点属于叠加层，不参与基础色扫描（也不能被删）
+        if in_overlay_frame(node):
+            continue
         if node.type == "TEX_IMAGE" and node.image is not None:
             name_image = fuq_bl_dot_number(node.image.name)
             if name_image.endswith("_n.png") or name_image.endswith("_s.png") or name_image.endswith("_a.png"):
@@ -131,8 +135,6 @@ def process_single_material(material, context, classification_list, banlist, ban
             else:
                 node.interpolation = "Closest"
                 node_tex_base = node
-                block_name = fuq_bl_dot_number(node_tex_base.image.name)
-                real_block_name = block_name[:-4]
         if node.type == "OUTPUT_MATERIAL":
             if node.target == "EEVEE":
                 node_output_EEVEE = node
@@ -147,18 +149,16 @@ def process_single_material(material, context, classification_list, banlist, ban
             else:
                 if node.node_tree.name.startswith("Crafter-biomeTex"):
                     node_biomeTex = node
-    if node_tex_base is None:
-        name_material_real = fuq_bl_dot_number(material.name)
-        last_gang_index = name_material_real.rfind('/')
-        real_block_name = name_material_real[last_gang_index + 1:]
+    # 分类取值：优先材质名的完整名（如 minecraft:block/oak_leaves；CTM 材质去掉 @ 后缀后
+    # 得到原材质名），没有命名空间时回退图像名（兼容用户自己导入的 OBJ）
+    if ":" in material.name:
+        real_block_name = material_base_name(material.name)
+    elif node_tex_base is not None:
+        block_name = fuq_bl_dot_number(node_tex_base.image.name)
+        real_block_name = block_name[:-4]
+    else:
+        real_block_name = material_base_name(material.name)
     if real_block_name is None:
-        return
-    ban = False
-    for ban_key in ban_keyw:
-        if real_block_name in ban_key:
-            ban = True
-            break
-    if ban or real_block_name in banlist:
         return
     for node in nodes_wait_remove:
         nodes.remove(node)
@@ -172,16 +172,197 @@ def process_single_material(material, context, classification_list, banlist, ban
     except:
         pass
     group_CI = nodes.new(type="ShaderNodeGroup")
-    group_CI.location = (node_output_EEVEE.location.x - 200, node_output_EEVEE.location.y)
+    # 给输出前面的 overlay Mix 链留位置: 有 overlay 时基础 CI 与 Mix 链按同一步长左移
+    # (CI -> Mix1 -> ... -> 输出的左边缘间距统一为 overlay_mix_step)
+    overlay_count = len(find_overlay_frames(nodes))
+    ci_offset_x = overlay_mix_step * (overlay_count + 1) if overlay_count > 0 else 200.0
+    group_CI.location = (node_output_EEVEE.location.x - ci_offset_x,
+                         node_output_EEVEE.location.y)
     find_CI_group(group_CI=group_CI, real_block_name=real_block_name, classification_list=classification_list)
     link_CI_output(group_CI=group_CI, node_output_EEVEE=node_output_EEVEE, node_output_Cycles=node_output_Cycles, links=links)
-    link_biome_tex(node_biomeTex=node_biomeTex, group_CI=group_CI, links=links)
+    tint = get_material_tint(material)
+    try:
+        apply_tint(group_CI=group_CI, nodes=nodes, links=links, tint=tint)
+    except Exception as ex:
+        warn_log(f"apply_tint 失败 [{material.name}]: {ex}")
     node_C_PBR_Parser = add_node_parser(group_CI=group_CI, nodes=nodes, links=links)
     if not imported_by_crafter:
         node_tex_normal, node_tex_PBR = load_normal_and_PBR(node_tex_base=node_tex_base, nodes=nodes, links=links)
     link_base_normal_PBR(node_tex_base=node_tex_base, group_CI=group_CI, links=links, node_C_PBR_Parser=node_C_PBR_Parser, node_tex_normal=node_tex_normal, node_tex_PBR=node_tex_PBR)
     if node_tex_base is not None:
         nodes.active = node_tex_base
+    # overlay 图层：帧内建 CI/Parser，并用 Mix Shader 按层盖到基础表面上
+    try:
+        process_overlay_frames(material, nodes, links, group_CI,
+                               node_output_EEVEE, node_output_Cycles, classification_list)
+    except Exception as ex:
+        warn_log(f"overlay 处理失败 [{material.name}]: {ex}")
+
+# ========== overlay 图层加载 ==========
+
+def _clear_overlay_generated_nodes(nodes, frame):
+    '''
+    清掉 overlay 帧内上一次 Load Material 生成的节点（CI/Parser/Mix Shader），
+    保留贴图/动态纹理/biomeTex，保证重复加载材质幂等。
+    '''
+    wait_remove = []
+    for node in nodes:
+        if node.parent != frame:
+            continue
+        if node.type == "GROUP":
+            tree = node.node_tree
+            if tree is None or tree.name.startswith("CI-") or tree.name.startswith("C-PBR_Parser"):
+                wait_remove.append(node)
+        elif node.bl_idname == "ShaderNodeMixShader":
+            wait_remove.append(node)
+    for node in wait_remove:
+        try:
+            nodes.remove(node)
+        except:
+            pass
+
+def _overlay_frame_pbr_textures(nodes, frame):
+    '''
+    取 overlay 帧内的法向/PBR 贴图节点（规则同基础层：_n 为法向，_s/_a 为 PBR）
+    '''
+    node_tex_normal = None
+    node_tex_PBR = None
+    for node in nodes:
+        if node.parent != frame:
+            continue
+        if node.type == "TEX_IMAGE" and node.image is not None:
+            name_image = fuq_bl_dot_number(node.image.name)
+            if name_image.endswith("_n.png"):
+                node_tex_normal = node
+            if name_image.endswith("_s.png") or name_image.endswith("_a.png"):
+                node_tex_PBR = node
+    return node_tex_normal, node_tex_PBR
+
+def _remove_overlay_mix_nodes(nodes):
+    '''
+    清掉上一轮建在输出节点前面的 overlay Mix 链（按自定义属性标记识别）
+    '''
+    wait_remove = []
+    for node in nodes:
+        if node.bl_idname != "ShaderNodeMixShader":
+            continue
+        try:
+            if node.get("Crafter_overlay_mix"):
+                wait_remove.append(node)
+        except Exception:
+            pass
+    for node in wait_remove:
+        try:
+            nodes.remove(node)
+        except:
+            pass
+
+def _apply_overlay_layout_shift(material, nodes, new_shift):
+    '''
+    根据 overlay 图层数把"其他节点"(贴图/帧/群组等; 输出节点与链上的 CI/Parser/Mix、
+    biomeTex 除外)左移 new_shift，给输出节点前面的 Mix 链让位。位移量记在材质属性
+    Crafter_overlay_shift 上，重复加载时按差值位移，不会越移越偏。
+    '''
+    try:
+        old_shift = float(material.get("Crafter_overlay_shift", 0.0) or 0.0)
+    except Exception:
+        old_shift = 0.0
+    delta = new_shift - old_shift
+    if abs(delta) > 1e-6:
+        for node in nodes:
+            if node.parent is not None:
+                continue
+            if node.type == "OUTPUT_MATERIAL":
+                continue
+            if node.type == "GROUP" and node.node_tree is not None and (
+                    node.node_tree.name.startswith("CI-") or
+                    node.node_tree.name.startswith("C-PBR_Parser") or
+                    node.node_tree.name.startswith("Crafter-biomeTex")):
+                continue
+            if node.bl_idname == "ShaderNodeMixShader":
+                continue
+            node.location = (node.location.x - delta, node.location.y)
+    material["Crafter_overlay_shift"] = new_shift
+
+def process_overlay_frames(material, nodes, links, group_CI,
+                           node_output_EEVEE, node_output_Cycles, classification_list):
+    '''
+    overlay 图层加载：
+    - 每个 overlay 帧按 label 里的完整材质名分类建 CI（挂在帧内），帧内贴图接 CI 的
+      Base Color 与 C-PBR_Parser。
+    - 再用 Mix Shader 按层序把各层 CI 的 Surface 输出叠到基础 CI 表面上：
+        A = 上一层结果（首层为基础 CI 输出），B = 本层 CI 输出，Fac = 本层基础色贴图 Alpha。
+    - overlay CI 的 Alpha 输入故意不接（保持默认 1）：CI 内部已经用 Alpha 把 Transparent
+      混进 Surface 输出，若再接一遍会二次乘 alpha（颜色 a²、还会透出背景）；透明度统一由
+      外层 Mix 控制即为标准 alpha-over。
+    - 帧内 CI 与基础 CI 同一 x 列（parser 随之对齐），各层 CI/Parser 各成一条竖列。
+    - Mix 链建在输出节点前面（最上层离输出最近，其余依次向左，纵向微调对齐插座）；
+      其他节点按层数左移让位，位移量记录在材质属性上，重复加载按差值位移不会漂移。
+    - 可重复调用：先清掉上一轮的 Mix 链与帧内 CI/Parser 再重建。
+    '''
+    frames = find_overlay_frames(nodes)
+    _remove_overlay_mix_nodes(nodes)
+    # 按 overlay 数量把其他节点左移, 给输出节点前面的 Mix 链让位(记录差值, 重复加载不漂移)
+    _apply_overlay_layout_shift(material, nodes, overlay_layout_shift(nodes))
+    if not frames or group_CI is None:
+        return
+
+    # 每个输出目标一条链: (CI 输出名, 输出节点)
+    targets = []
+    if node_output_EEVEE is not None and "EEVEE-Surface" in group_CI.outputs:
+        targets.append(("EEVEE-Surface", node_output_EEVEE))
+    if node_output_Cycles is not None and "Cycles-Surface" in group_CI.outputs:
+        targets.append(("Cycles-Surface", node_output_Cycles))
+    if not targets:
+        return
+    chain = {name: group_CI.outputs[name] for name, _ in targets}
+
+    for seq, (index, name, frame) in enumerate(frames, start=1):
+        _clear_overlay_generated_nodes(nodes, frame)
+        node_tex = overlay_frame_base_texture(nodes, frame)
+        if node_tex is None:
+            continue
+
+        node_CI = nodes.new(type="ShaderNodeGroup")
+        node_CI.parent = frame
+        # 与基础 CI 同 x 列(帧无父帧, 直接相减得到帧内相对 x), parser 随之对齐
+        node_CI.location = (group_CI.location.x - frame.location.x, node_tex.location.y)
+        find_CI_group(group_CI=node_CI,
+                      real_block_name=material_base_name(name),
+                      classification_list=classification_list)
+        if "Base Color" in node_CI.inputs:
+            links.new(node_tex.outputs["Color"], node_CI.inputs["Base Color"])
+
+        tint = get_overlay_tint(material, index)
+        try:
+            apply_tint(group_CI=node_CI, nodes=nodes, links=links, tint=tint)
+        except Exception as ex:
+            warn_log(f"apply_tint 失败 [overlay {name}]: {ex}")
+
+        node_parser = add_node_parser(group_CI=node_CI, nodes=nodes, links=links, parent=frame)
+        node_tex_normal, node_tex_PBR = _overlay_frame_pbr_textures(nodes, frame)
+        link_base_normal_PBR(node_tex_base=None, group_CI=node_CI, links=links,
+                             node_C_PBR_Parser=node_parser,
+                             node_tex_normal=node_tex_normal, node_tex_PBR=node_tex_PBR)
+
+        for surface_name, output_node in targets:
+            if surface_name not in node_CI.outputs:
+                continue
+            mix_node = nodes.new(type="ShaderNodeMixShader")
+            mix_node["Crafter_overlay_mix"] = 1   # 标记: 便于重复加载时清理
+            mix_node.label = "Crafter-overlay"
+            # 输出节点前面: 最上层离输出最近, 其余依次向左(其他节点已按层数左移让位);
+            # 纵向略微下移, 让 Mix 的输出插槽与输出节点的 Surface 插槽齐平
+            mix_node.location = (output_node.location.x - overlay_mix_step * (len(frames) - seq + 1),
+                                 output_node.location.y - overlay_mix_y_offset)
+            links.new(node_tex.outputs["Alpha"], mix_node.inputs[0])
+            links.new(chain[surface_name], mix_node.inputs[1])
+            links.new(node_CI.outputs[surface_name], mix_node.inputs[2])
+            out_socket = output_node.inputs["Surface"]
+            for old_link in list(out_socket.links):
+                links.remove(old_link)
+            links.new(mix_node.outputs[0], out_socket)
+            chain[surface_name] = mix_node.outputs[0]
 
 # ========== 提取的为物体加载材质的函数（供外部调用，假设 C-PBR_Parser 已存在）==========
 def load_material_for_object(context, obj):
@@ -194,12 +375,13 @@ def load_material_for_object(context, obj):
     obj:     目标物体
     '''
     addon_prefs = context.preferences.addons[__addon_name__].preferences
-    classification_list, banlist, ban_keyw = load_classification_data(addon_prefs)
+    classification_list = load_classification_data(addon_prefs)
     for mat in obj.data.materials:
-        process_single_material(mat, context, classification_list, banlist, ban_keyw, imported_by_crafter=False)
+        process_single_material(mat, context, classification_list, imported_by_crafter=False)
     add_to_mcmts_collection(object=obj, context=context)
     add_to_crafter_mcmts_collection(object=obj, context=context)
-    add_Crafter_time(obj=obj)
+    if addon_prefs.Add_Crafter_time_On_Import:
+        add_Crafter_time(obj=obj)
     bpy.ops.crafter.set_pbr_parser()
 
 class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):
@@ -259,27 +441,8 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):
         collection_Crafter_Materials_Settings.objects.link(bpy.data.objects["材质设置/Material Settings"])
         bpy.data.objects["材质设置/Material Settings"].hide_viewport = True
         bpy.data.objects["材质设置/Material Settings"].hide_render = True
-        # 获取分类依据地址
-        classification_folder_name = addon_prefs.Classification_Basis_List[addon_prefs.Classification_Basis_List_index].name
-        classification_folder_dir = os.path.join(dir_classification_basis, classification_folder_name)
-        # 初始化 COs,classification_list,banlist, ban_keyw
-        classification_list = {}
-        banlist = []
-        ban_keyw = []
-        # 获取classification_list
-        for filename in os.listdir(classification_folder_dir):
-            file_path = os.path.join(classification_folder_dir, filename)
-            if filename.endswith(".json"):
-                try:
-                    with open(file_path, 'r', encoding='utf-8') as file:
-                        data = json.load(file)
-                        classification_list = make_dict_together(classification_list, data)
-                        if "ban" in data:
-                            banlist.extend(data["ban"])
-                        if "ban_keyw" in data:
-                            ban_keyw.extend(data["ban_keyw"])
-                except:
-                    pass
+        # 获取分类依据规则
+        classification_list = load_classification_data(addon_prefs)
         # 应用 Parsed_Normal_Strength
         bpy.ops.crafter.set_parsed_normal_strength()
 
@@ -298,13 +461,14 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):
             if name_material in context.scene.Crafter_crafter_mcmts:
                 imported_by_crafter = True
             material = bpy.data.materials[name_material]
-            process_single_material(material, context, classification_list, banlist, ban_keyw, imported_by_crafter)
+            process_single_material(material, context, classification_list, imported_by_crafter)
         # 添加选中物体的材质到合集
         for obj in context.selected_objects:
             if obj.type == "MESH":
                 add_to_mcmts_collection(object=obj,context=context)
                 add_to_crafter_mcmts_collection(object=obj,context=context)
-                add_Crafter_time(obj=obj)
+                if addon_prefs.Add_Crafter_time_On_Import:
+                    add_Crafter_time(obj=obj)
                 
         bpy.ops.crafter.set_pbr_parser()
 
@@ -384,6 +548,9 @@ class VIEW3D_OT_CrafterLoadParallax(bpy.types.Operator):
             node_CI = None
             node_C_PBR_Parser = None
             for node in nodes:
+                # overlay 帧内的节点属于叠加层，不参与视差的基底/贴图查找
+                if in_overlay_frame(node):
+                    continue
                 if node.type == "TEX_IMAGE" and node.image != None:
                     name_image = fuq_bl_dot_number(node.image.name)
                     if name_image.endswith("_n.png") or name_image.endswith("_s.png") or name_image.endswith("_a.png"):
@@ -535,6 +702,8 @@ class VIEW3D_OT_CrafterRemoveParallax(bpy.types.Operator):
             node_C_PBR_Parser = None
             nodes_wait_delete = []
             for node in nodes:
+                if in_overlay_frame(node):
+                    continue
                 if node.type == "FRAME":
                     if node.label == "Crafter-视差":
                         node_frame = node
@@ -549,6 +718,8 @@ class VIEW3D_OT_CrafterRemoveParallax(bpy.types.Operator):
                         if node.node_tree.name == "C-PBR_Parser":
                             node_C_PBR_Parser = node
             for node in nodes:
+                if in_overlay_frame(node):
+                    continue
                 if node_frame != None:
                     if node.parent == node_frame:
                         nodes_wait_delete.append(node)
@@ -586,6 +757,9 @@ class VIEW3D_OT_CrafterRemoveParallax(bpy.types.Operator):
             nodes_moving_end = []
             nodes_tex = []
             for node in nodes:
+                # overlay 帧内的贴图有自己的动态纹理节点，不能被基础层的动态纹理重连
+                if in_overlay_frame(node):
+                    continue
                 if node.type == "TEX_IMAGE":
                     nodes_tex.append(node)
                 if node.type == "GROUP":

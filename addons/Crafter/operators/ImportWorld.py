@@ -78,9 +78,9 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
 
         col_2_setting = row_cols.column()
         col_2_setting.prop(addon_prefs, "useChunkPrecision")
+        col_2_setting.prop(addon_prefs, "overlayLayerStep")
         col_2_setting.prop(addon_prefs, "keepBoundary")
         col_2_setting.prop(addon_prefs, "cullCave")
-        col_2_setting.prop(addon_prefs, "shell")
         col_2_setting.prop(addon_prefs, "useGreedyMesh")
 
         if addon_prefs.exportLightBlock:
@@ -389,14 +389,16 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
                 resourcepacksPaths.append(resourcepacksPath.name)
             log_step(f"使用游戏资源包，共 {len(resourcepacksPaths)} 个")
         else:
-            dir_resourcepacks = os.path.join(dir_resourcepacks_plans, addon_prefs.Resources_Plans_List[addon_prefs.Resources_Plans_List_index].name)
-            dir_crafter_json = os.path.join(dir_resourcepacks, "crafter.json")
-
+            plan = addon_prefs.Resources_Plans_List[addon_prefs.Resources_Plans_List_index]
             addon_prefs.Resources_List.clear()
-            with open(dir_crafter_json, "r", encoding="utf-8") as file:
-                json_crafter = json.load(file)
-            for resource in json_crafter:
-                resourcepacksPaths.append(os.path.join(dir_resourcepacks, resource + ".zip"))
+            if not plan.is_Vanilla:
+                dir_resourcepacks = os.path.join(dir_resourcepacks_plans, plan.name)
+                dir_crafter_json = os.path.join(dir_resourcepacks, "crafter.json")
+
+                with open(dir_crafter_json, "r", encoding="utf-8") as file:
+                    json_crafter = json.load(file)
+                for resource in json_crafter:
+                    resourcepacksPaths.append(os.path.join(dir_resourcepacks, resource + ".zip"))
             log_step(f"使用资源方案，共 {len(resourcepacksPaths)} 个")
         log_stage_end("加载资源包路径", f"{len(resourcepacksPaths)} 个资源包")
         # 获取无lod方块列表
@@ -467,6 +469,7 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             "exportLightBlockOnly":addon_prefs.exportLightBlockOnly,
             "lightBlockSize":addon_prefs.lightBlockSize,
             "allowDoubleFace":addon_prefs.allowDoubleFace,
+            "overlayLayerStep":addon_prefs.overlayLayerStep,
             "exportFullModel":not effective_as_chunk,
             "autoPartitionSettings":addon_prefs.autoPartitionSettings,
             "partitionSize":effective_partition_size,
@@ -535,6 +538,19 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
                     removed_obj += 1
                 except:
                     pass
+        # 旧的 tint/overlay 元数据一并清理，避免和本次导出的 objs 不匹配
+        try:
+            dir_old_tint = os.path.join(dir_importer, "tint.json")
+            if os.path.exists(dir_old_tint):
+                os.remove(dir_old_tint)
+        except:
+            pass
+        try:
+            dir_old_overlay = os.path.join(dir_importer, "overlay.json")
+            if os.path.exists(dir_old_overlay):
+                os.remove(dir_old_overlay)
+        except:
+            pass
         log_step(f"删除 {removed_obj} 个旧 obj 文件")
         log_stage_end("清理旧导出")
             
@@ -720,7 +736,8 @@ def finish_import(ctx, prefs, imported_time, worldconfig, prepared_time,
                     real_name_dic[n] = mat.name
             add_to_mcmts_collection(object=obj, context=ctx)
             add_to_crafter_mcmts_collection(object=obj, context=ctx)
-            add_Crafter_time(obj=obj)
+            if prefs.Add_Crafter_time_On_Import:
+                add_Crafter_time(obj=obj)
             view_2_active_object(ctx)
     log_stage_end("导入 OBJ", f"{len(real_name_dic)} 个唯一材质")
 
@@ -741,6 +758,45 @@ def finish_import(ctx, prefs, imported_time, worldconfig, prepared_time,
         log_stage_end("后处理导入", "无 obj")
         return
 
+    # 读取 C++ 导出器的 tint 元数据（不存在则完全回退旧的分类依据逻辑）
+    log_stage_begin("读取 tint 元数据")
+    tint_map = None
+    dir_tint_json = os.path.join(dir_importer, "tint.json")
+    if os.path.exists(dir_tint_json):
+        try:
+            with open(dir_tint_json, "r", encoding="utf-8") as f:
+                raw_tints = json.load(f)
+            tint_map = {fuq_bl_dot_number(k): v for k, v in raw_tints.items()}
+            log_step(f"tint.json 载入 {len(tint_map)} 条")
+        except Exception as ex:
+            warn_log(f"tint.json 读取失败，回退分类依据: {ex}")
+            tint_map = None
+    else:
+        log_step("未找到 tint.json，回退分类依据上色")
+    log_stage_end("读取 tint 元数据")
+
+    def material_tint_entry(mat):
+        if tint_map is None:
+            return None
+        return tint_map.get(fuq_bl_dot_number(mat.name))
+
+    # 读取 C++ 导出器的 overlay 元数据（base 材质 -> 叠加层序列）
+    log_stage_begin("读取 overlay 元数据")
+    overlay_map = None
+    dir_overlay_json = os.path.join(dir_importer, "overlay.json")
+    if os.path.exists(dir_overlay_json):
+        try:
+            with open(dir_overlay_json, "r", encoding="utf-8") as f:
+                raw_overlays = json.load(f)
+            overlay_map = {fuq_bl_dot_number(k): v for k, v in raw_overlays.items()}
+            log_step(f"overlay.json 载入 {len(overlay_map)} 条")
+        except Exception as ex:
+            warn_log(f"overlay.json 读取失败: {ex}")
+            overlay_map = None
+    else:
+        log_step("未找到 overlay.json（旧导出器或无叠加层）")
+    log_stage_end("读取 overlay 元数据")
+
     # Copy biomeTex
     log_stage_begin("复制 biomeTex")
     dir_bt = os.path.join(dir_importer, "biomeTex")
@@ -755,12 +811,14 @@ def finish_import(ctx, prefs, imported_time, worldconfig, prepared_time,
         warn_log(f"biomeTex 复制异常: {ex}")
     log_stage_end("复制 biomeTex")
 
-    # Clone biomeTex node group
+    # Clone biomeTex node group（无条件克隆：CI 之后按需索取群系色）
     log_stage_begin("克隆 biomeTex 节点组")
+    node_group = None
     try:
         node_group_src = bpy.data.node_groups["Crafter-biomeTex"]
         node_group = node_group_src.copy()
         node_group.name = "Crafter-biomeTex_" + imported_time
+        node_group.use_fake_user = True
         loaded_imgs = 0
         for node in node_group.nodes:
             if node.type == "TEX_IMAGE":
@@ -783,12 +841,19 @@ def finish_import(ctx, prefs, imported_time, worldconfig, prepared_time,
         node_group = None
     log_stage_end("克隆 biomeTex 节点组")
 
-    # Apply node group to materials
-    log_stage_begin("应用 biomeTex 到材质")
+    # 预处理材质：写入 tint 元数据，并整理贴图节点
+    log_stage_begin("预处理材质")
     apply_list = [nm for nm in real_name_dic.values() if not nm.startswith('color#') and nm in bpy.data.materials]
     log_step(f"待处理材质: {len(apply_list)} 个")
     for nm in apply_list:
         mat = bpy.data.materials[nm]
+        entry = material_tint_entry(mat)
+        # 写入 tint 元数据，之后单独执行 Load Material 时也能按接口接线（空 kind 表示明确不上色）
+        if tint_map is not None:
+            mat["Crafter_tint_kind"] = str(entry.get("kind", "")) if entry else ""
+            if entry and entry.get("color"):
+                color = entry["color"]
+                mat["Crafter_tint_color"] = (float(color[0]), float(color[1]), float(color[2]))
         nodes = mat.node_tree.nodes
         links = mat.node_tree.links
         ntb = None; out_ev = None; pri = None; todel = []
@@ -805,14 +870,30 @@ def finish_import(ctx, prefs, imported_time, worldconfig, prepared_time,
         for nd in todel: nodes.remove(nd)
         if ntb and pri:
             links.new(ntb.outputs["Alpha"], pri.inputs["Alpha"])
-        if out_ev and node_group:
-            nbn = nodes.new("ShaderNodeGroup")
-            nbn.location = (out_ev.location.x - 400, out_ev.location.y - 550)
-            nbn.node_tree = node_group
         if ntb:
             load_normal_and_PBR(node_tex_base=ntb, nodes=nodes, links=links)
             nodes.active = ntb
-    log_stage_end("应用 biomeTex 到材质", f"{len(apply_list)} 个材质")
+    log_stage_end("预处理材质", f"{len(apply_list)} 个材质")
+
+    # 共面叠加层：把 overlay.json 的叠加贴图/法向放进材质内的 overlay 帧，
+    # 分类与合成留到 Load Material（CI）阶段，本轮只建帧与贴图元数据。
+    if overlay_map:
+        log_stage_begin("创建 overlay 帧")
+        made = 0
+        for nm in apply_list:
+            mat = bpy.data.materials.get(nm)
+            if mat is None or mat.node_tree is None:
+                continue
+            overlays = overlay_map.get(fuq_bl_dot_number(mat.name))
+            if not overlays:
+                continue
+            try:
+                build_overlay_frames(mat, overlays, dir_importer)
+                made += 1
+            except Exception as ex:
+                warn_log(f"overlay 帧创建失败 [{mat.name}]: {ex}")
+        log_step(f"{made} 个材质写入 overlay 帧")
+        log_stage_end("创建 overlay 帧")
 
     log_stage_begin("打包纹理")
     try:

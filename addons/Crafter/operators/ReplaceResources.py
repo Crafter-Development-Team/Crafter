@@ -31,11 +31,14 @@ class VIEW3D_OT_CrafterReplaceResources(bpy.types.Operator):
         if not (-1 < addon_prefs.Resources_Plans_List_index and addon_prefs.Resources_Plans_List_index < len(addon_prefs.Resources_Plans_List)):
             return {'CANCELLED'}
         bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
-        dir_resourcepacks = os.path.join(dir_resourcepacks_plans, addon_prefs.Resources_Plans_List[addon_prefs.Resources_Plans_List_index].name)
-        dir_crafter_json = os.path.join(dir_resourcepacks, "crafter.json")
-        # 加载json
-        with open(dir_crafter_json, 'r', encoding='utf-8') as file:
-            crafter_json = json.load(file)
+        plan = addon_prefs.Resources_Plans_List[addon_prefs.Resources_Plans_List_index]
+        dir_resourcepacks = os.path.join(dir_resourcepacks_plans, plan.name)
+        crafter_json = []
+        if not plan.is_Vanilla:
+            dir_crafter_json = os.path.join(dir_resourcepacks, "crafter.json")
+            # 加载json
+            with open(dir_crafter_json, 'r', encoding='utf-8') as file:
+                crafter_json = json.load(file)
         images = []
         for resource in crafter_json:
             dir_resourcepack = os.path.join(dir_resourcepacks, resource)
@@ -59,27 +62,31 @@ class VIEW3D_OT_CrafterReplaceResources(bpy.types.Operator):
         for obj in context.selected_objects:
             if obj.type == "MESH":
                 add_to_mcmts_collection(object=obj,context=context)
-                add_Crafter_time(obj=obj)
+                if addon_prefs.Add_Crafter_time_On_Import:
+                    add_Crafter_time(obj=obj)
         for name_material in context.scene.Crafter_mcmts:
             material = bpy.data.materials[name_material.name]
             node_tree_material = material.node_tree
             nodes = node_tree_material.nodes
             links = node_tree_material.links
             is_materialed = False
+            group_CI = None
+            node_C_PBR_Parser = None
+            base_texture_nodes = []   # 基础层 + overlay 帧内的所有基础色贴图
+            nodes_wait_remove = []
             for node in nodes:
                 if node.type == 'TEX_IMAGE':
                     if node.image == None:
-                        nodes.remove(node)
+                        nodes_wait_remove.append(node)
                     else:
                         name_image = fuq_bl_dot_number(node.image.name)
                         if name_image.endswith("_n.png") or name_image.endswith("_s.png") or name_image.endswith("_a.png"):
-                            # 移除pbr、法向材质节点
+                            # 移除pbr、法向材质节点（之后按新贴图逐层重建）
                             bpy.data.images.remove(node.image)
-                            nodes.remove(node)
+                            nodes_wait_remove.append(node)
                         elif name_image.endswith(".png"):
                             node.interpolation = "Closest"
                             if not is_Vanilla:
-                                node_tex_base = node
                                 found_texture = False
                                 i = 0
                                 while i < len(images) and not found_texture:
@@ -90,6 +97,7 @@ class VIEW3D_OT_CrafterReplaceResources(bpy.types.Operator):
                                             found_texture = True
                                         j += 1
                                     i += 1
+                            base_texture_nodes.append(node)
                 elif node.type == 'GROUP':
                     if node.node_tree != None:
                         if node.node_tree.name.startswith("CI-"):
@@ -97,9 +105,26 @@ class VIEW3D_OT_CrafterReplaceResources(bpy.types.Operator):
                             group_CI = node
                         if node.node_tree.name.startswith("C-PBR_Parser"):
                             node_C_PBR_Parser = node
+            for node in nodes_wait_remove:
+                try:
+                    nodes.remove(node)
+                except:
+                    pass
             if is_materialed and (not is_Vanilla):
-                node_tex_normal, node_tex_PBR = load_normal_and_PBR(node_tex_base=node_tex_base, nodes=nodes, links=links,)
-                link_base_normal_PBR(node_tex_base=node_tex_base, group_CI=group_CI, links=links, node_C_PBR_Parser=node_C_PBR_Parser,node_tex_normal=node_tex_normal, node_tex_PBR=node_tex_PBR)
+                # 逐层重建 PBR/法向：基础层接基础 CI/Parser；overlay 帧内的层重建后
+                # 接回帧内的 overlay Parser/CI（Alpha 不接），避免换包后断链。
+                for node_tex_base in base_texture_nodes:
+                    is_overlay = in_overlay_frame(node_tex_base)
+                    parent = node_tex_base.parent if is_overlay else None
+                    node_tex_normal, node_tex_PBR = load_normal_and_PBR(node_tex_base=node_tex_base, nodes=nodes, links=links, parent=parent)
+                    if is_overlay:
+                        frame = node_tex_base.parent
+                        overlay_ci = overlay_frame_ci(nodes, frame)
+                        overlay_parser = overlay_frame_parser(nodes, frame)
+                        if overlay_ci is not None and overlay_parser is not None:
+                            link_base_normal_PBR(node_tex_base=None, group_CI=overlay_ci, links=links, node_C_PBR_Parser=overlay_parser, node_tex_normal=node_tex_normal, node_tex_PBR=node_tex_PBR)
+                        continue
+                    link_base_normal_PBR(node_tex_base=node_tex_base, group_CI=group_CI, links=links, node_C_PBR_Parser=node_C_PBR_Parser,node_tex_normal=node_tex_normal, node_tex_PBR=node_tex_PBR)
                 
         for obj in context.selected_objects:
             if obj.type == "MESH":
@@ -224,6 +249,9 @@ class VIEW3D_OT_CrafterReloadResourcesPlans(bpy.types.Operator):#刷新 资源�
         addon_prefs = context.preferences.addons[__addon_name__].preferences
 
         addon_prefs.Resources_Plans_List.clear()
+        vanilla_plan = addon_prefs.Resources_Plans_List.add()
+        vanilla_plan.name = "Vanilla"
+        vanilla_plan.is_Vanilla = True
         for folder in os.listdir(dir_resourcepacks_plans):
             if os.path.isdir(os.path.join(dir_resourcepacks_plans, folder)):
                 plan_name = addon_prefs.Resources_Plans_List.add()
@@ -244,46 +272,51 @@ class VIEW3D_OT_CrafterReloadResources(bpy.types.Operator):#刷新 资源包 列
 
     def execute(self, context: bpy.types.Context):
         addon_prefs = context.preferences.addons[__addon_name__].preferences
-        dir_resourcepacks = os.path.join(dir_resourcepacks_plans, addon_prefs.Resources_Plans_List[addon_prefs.Resources_Plans_List_index].name)
-        try:
-            list_dir_resourcepacks = os.listdir(dir_resourcepacks)
-        except (FileNotFoundError, PermissionError):
-            list_dir_resourcepacks = []
-        dir_crafter_json = os.path.join(dir_resourcepacks, "crafter.json")
+        if not (0 <= addon_prefs.Resources_Plans_List_index < len(addon_prefs.Resources_Plans_List)):
+            return {'FINISHED'}
+        plan = addon_prefs.Resources_Plans_List[addon_prefs.Resources_Plans_List_index]
 
         addon_prefs.Resources_List.clear()
-        json_crafter_copy =[]
-        if "crafter.json" in list_dir_resourcepacks:
-            try:
-                with open(dir_crafter_json, "r", encoding="utf-8") as file:
-                    json_crafter = json.load(file)
-            except:
-                json_crafter = []
-            json_crafter_copy =json_crafter.copy()
-        json_crafter = []
-        for folder in list_dir_resourcepacks:
-            if folder.endswith(".zip") and (not folder[:-4] in json_crafter_copy):
-                json_crafter.append(folder[:-4])
-        for resourcepack in json_crafter_copy:
-            if os.path.exists(os.path.join(dir_resourcepacks, resourcepack + ".zip")):
-                json_crafter.append(resourcepack)
-                
-        index = 0
         try:
             bpy.utils.previews.remove(icons_plan_resource)
         except:
             pass
         icons_plan_resource.clear()
 
-        for resourcepack in json_crafter:
-            resourcepack_name = addon_prefs.Resources_List.add()
-            resourcepack_name.name = resourcepack
-            dir_resourcepack = os.path.join(dir_resourcepacks, resourcepack + ".zip")
-            load_icon_from_zip(zip_path=dir_resourcepack, icons=icons_plan_resource, name_icons="plan_resource", index=index)
-            index += 1
+        if not plan.is_Vanilla:
+            dir_resourcepacks = os.path.join(dir_resourcepacks_plans, plan.name)
+            try:
+                list_dir_resourcepacks = os.listdir(dir_resourcepacks)
+            except (FileNotFoundError, PermissionError):
+                list_dir_resourcepacks = []
+            dir_crafter_json = os.path.join(dir_resourcepacks, "crafter.json")
 
-        with open(dir_crafter_json, "w", encoding="utf-8") as file:
-            json.dump(json_crafter, file, ensure_ascii=False, indent=4)
+            json_crafter_copy =[]
+            if "crafter.json" in list_dir_resourcepacks:
+                try:
+                    with open(dir_crafter_json, "r", encoding="utf-8") as file:
+                        json_crafter = json.load(file)
+                except:
+                    json_crafter = []
+                json_crafter_copy =json_crafter.copy()
+            json_crafter = []
+            for folder in list_dir_resourcepacks:
+                if folder.endswith(".zip") and (not folder[:-4] in json_crafter_copy):
+                    json_crafter.append(folder[:-4])
+            for resourcepack in json_crafter_copy:
+                if os.path.exists(os.path.join(dir_resourcepacks, resourcepack + ".zip")):
+                    json_crafter.append(resourcepack)
+
+            index = 0
+            for resourcepack in json_crafter:
+                resourcepack_name = addon_prefs.Resources_List.add()
+                resourcepack_name.name = resourcepack
+                dir_resourcepack = os.path.join(dir_resourcepacks, resourcepack + ".zip")
+                load_icon_from_zip(zip_path=dir_resourcepack, icons=icons_plan_resource, name_icons="plan_resource", index=index)
+                index += 1
+
+            with open(dir_crafter_json, "w", encoding="utf-8") as file:
+                json.dump(json_crafter, file, ensure_ascii=False, indent=4)
 
         if (addon_prefs.Resources_List_index < 0 or addon_prefs.Resources_List_index >= len(addon_prefs.Resources_List)) and addon_prefs.Resources_List_index != 0:
             addon_prefs.Resources_List_index = 0

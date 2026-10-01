@@ -1,216 +1,120 @@
 {
-    "ban_keyw":[
+    "water": [
+        {"block": ["minecraft:water"]},
+        {"block": ["minecraft:water_cauldron"], "key": ["content"]}
     ],
-    "ban":[
+
+    "grass_block_top": [
+        {"block": ["minecraft:grass_block"], "key": ["top", "overlay"]}
     ],
-    "water":{
-        "full":[
-            "water",
-            "water_flow",
-            "water_still"
-        ]
-    },
-    "grass_block_top":{
-        "keyw":[
-            "grass_block_top",
-            "grass_block_side_overlay"
-        ]
-    },
-    "grass_block_side":{
-        "keyw":[
-            "grass_block_side"
-        ]
-    },
-    "tran_move":{
-        "keyw":[
-            "azalea_plant",
-            "azalea_side",
-            "azalea_top",
-            "flowering_azalea_side",
-            "flowering_azalea_top",
-            "spore_blossom",
-            "bamboo_stage",
-            "beetroots_stage",
-            "carrots_stage",
-            "potatoes_stage",
-            "wheat_stage",
-            "dead_bush",
-            "big_dripleaf_top",
-            "big_dripleaf_side",
-            "big_dripleaf_tip",
-            "big_dripleaf_stem",
-            "small_dripleaf_top",
-            "small_dripleaf_side",
-            "small_dripleaf_stem_top",
-            "small_dripleaf_stem_bottom",
-            "allium",
-            "azure_bluet",
-            "blue_orchid",
-            "cornflower",
-            "dandelion",
-            "eyeblossom",
-            "lily_of_the_valley",
-            "oxeye_daisy",
-            "poppy",
-            "torchflower",
-            "orange_tulip",
-            "pink_tulip",
-            "red_tulip",
-            "white_tulip",
-            "wither_rose",
-            "lilac_top",
-            "lilac_bottom",
-            "peony_top",
-            "peony_bottom",
-            "pitcher_crop_top_stage",
-            "pitcher_crop_bottom_stage",
-            "rose_bush_top",
-            "rose_bush_bottom",
-            "sunflower_top",
-            "sunflower_bottom",
-            "sunflower_front",
-            "short_dry_grass",
-            "tall_dry_grass",
-            "mangrove_propagule",
-            "wildflowers",
-            "wildflowers_stem",
-            "firefly_bush",
-            "pale_moss_carpet_side_small",
-            "pale_hanging_moss_tip",
-            "pink_petals",
-            "pink_petals_stem",
-            "oak_sapling",
-            "spruce_sapling",
-            "birch_sapling",
-            "jungle_sapling",
-            "acacia_sapling",
-            "dark_oak_sapling",
-            "cherry_sapling",
-            "pale_oak_sapling",
-            "sweet_berry_bush_stage",
-            "seagrass",
-            "tall_seagrass_top",
-            "tall_seagrass_bottom",
-            "cave_vines",
-            "bamboo_large_leaves",
-            "bamboo_small_leaves",
-            "hanging_roots",
-            "cactus_flower"
-        ]
-    },
-    "grass_tran_move":{
-        "keyw":[
-            "melon_stem",
-            "attached_melon_stem",
-            "pumpkin_stem",
-            "attached_pumpkin_stem",
-            "fern",
-            "large_fern_top",
-            "large_fern_bottom",
-            "short_grass",
-            "tall_grass_top",
-            "tall_grass_bottom",
-            "lily_pad"
-        ],
-        "full":[
-            "grass",
-            "vine",
-            "bush"
-        ]
-    },
-    "dryfoliage_tran":{
-        "keyw":[
-            "leaf_litter"
-        ]
-    },
-    "sss_tran_move": {
-        "keyw":[
-            "azalea_leaves",
-            "flowering_azalea_leaves",
-            "cherry_leaves",
-            "pale_oak_leaves",
-            "mangrove_roots_top",
-            "mangrove_roots_side"
-        ]
-    },
-    "foliage_sss_tran_move":{
-        "ban_keyw":[
-            "pale_oak_leaves",
-            "flower"
-        ],
-        "keyw":[
-        ]
-    },
-    "oak_leaves":{
-        "ban_keyw":[
-            "pale_oak_leaves",
-            "dark_oak_leaves",
-            "flower"
-        ],
-        "keyw":[
-            "oak_leaves"
-        ]
-    },
-    "jungle_leaves":{
-        "ban_keyw":[
-            "flower"
-        ],
-        "keyw":[
-            "jungle_leaves"
-        ]
-    },
-    "acacia_leaves":{
-        "ban_keyw":[
-            "flower"
-        ],
-        "keyw":[
-            "acacia_leaves"
-        ]
-    },
-    "dark_oak_leaves":{
-        "ban_keyw":[
-            "flower"
-        ],
-        "keyw":[
-            "dark_oak_leaves"
-        ]
-    },
-    "mangrove_leaves":{
-        "ban_keyw":[
-            "flower"
-        ],
-        "keyw":[
-            "mangrove_leaves"
-        ]
-    },
-    "spruce_leaves":{
-        "keyw":[
-            "spruce_leaves"
-        ]
-    },
-    "birch_leaves":{
-        "keyw":[
-            "birch_leaves"
-        ]
-    },
-    "sss_tran":{
-        "keyw":[
-            "bamboo_stalk",
-            "cactus_side",
-            "cactus_top",
-            "cocoa_stage"
-        ]
-    },
-    "tran":{
-        "keyw":[
-            "sugar_cane"
-        ]
-    },
-    "no_rain":{
-        "keyw":[
-            "lava_still",
-            "lava_flow",
-            "lava"
-        ]
-    }
+
+    "tran_move": [
+        {"block": [
+            "minecraft:acacia_sapling", "minecraft:allium", "minecraft:azure_bluet",
+            "minecraft:beetroots", "minecraft:birch_sapling", "minecraft:blue_orchid",
+            "minecraft:cactus_flower", "minecraft:carrots", "minecraft:cave_vines",
+            "minecraft:cherry_sapling", "minecraft:cornflower", "minecraft:dandelion",
+            "minecraft:dark_oak_sapling", "minecraft:dead_bush", "minecraft:eyeblossom",
+            "minecraft:firefly_bush", "minecraft:hanging_roots", "minecraft:jungle_sapling",
+            "minecraft:lilac", "minecraft:lily_of_the_valley", "minecraft:oak_sapling",
+            "minecraft:orange_tulip", "minecraft:oxeye_daisy", "minecraft:pale_hanging_moss",
+            "minecraft:pale_moss_carpet", "minecraft:pale_oak_sapling", "minecraft:peony",
+            "minecraft:pink_petals", "minecraft:pink_tulip", "minecraft:poppy",
+            "minecraft:potatoes", "minecraft:red_tulip", "minecraft:rose_bush",
+            "minecraft:seagrass", "minecraft:short_dry_grass", "minecraft:sweet_berry_bush",
+            "minecraft:tall_dry_grass", "minecraft:tall_seagrass", "minecraft:torchflower",
+            "minecraft:torchflower_crop", "minecraft:wheat", "minecraft:white_tulip",
+            "minecraft:wildflowers", "minecraft:wither_rose"
+        ]},
+        {"block": ["minecraft:azalea", "minecraft:flowering_azalea"]},
+        {"block": ["minecraft:big_dripleaf", "minecraft:big_dripleaf_stem"]},
+        {"block": ["minecraft:small_dripleaf", "minecraft:small_dripleaf_stem"]},
+        {"block": ["minecraft:pitcher_crop", "minecraft:pitcher_plant"]},
+        {"block": ["minecraft:mangrove_propagule"]},
+        {"block": ["minecraft:spore_blossom"]},
+        {"block": ["minecraft:sunflower"]},
+        {"block": ["minecraft:bamboo"], "key": ["texture"]},
+        {"block": ["minecraft:bamboo_sapling"]},
+        {"block": [
+            "minecraft:potted_acacia_sapling", "minecraft:potted_allium",
+            "minecraft:potted_azure_bluet", "minecraft:potted_birch_sapling",
+            "minecraft:potted_blue_orchid", "minecraft:potted_cherry_sapling",
+            "minecraft:potted_cornflower", "minecraft:potted_dandelion",
+            "minecraft:potted_dark_oak_sapling", "minecraft:potted_dead_bush",
+            "minecraft:potted_jungle_sapling", "minecraft:potted_lily_of_the_valley",
+            "minecraft:potted_oak_sapling", "minecraft:potted_orange_tulip",
+            "minecraft:potted_oxeye_daisy", "minecraft:potted_pink_tulip",
+            "minecraft:potted_poppy", "minecraft:potted_red_tulip",
+            "minecraft:potted_spruce_sapling", "minecraft:potted_torchflower",
+            "minecraft:potted_white_tulip", "minecraft:potted_wither_rose"
+        ], "key": ["plant"]},
+        {"block": ["minecraft:potted_mangrove_propagule"], "key": ["sapling"]}
+    ],
+
+    "grass_tran_move": [
+        {"block": [
+            "minecraft:attached_melon_stem", "minecraft:attached_pumpkin_stem",
+            "minecraft:bush", "minecraft:fern", "minecraft:grass", "minecraft:large_fern",
+            "minecraft:lily_pad", "minecraft:melon_stem", "minecraft:pumpkin_stem",
+            "minecraft:short_grass", "minecraft:tall_grass", "minecraft:vine"
+        ]},
+        {"block": ["minecraft:potted_fern"], "key": ["plant"]}
+    ],
+
+    "dryfoliage_tran": [
+        {"block": ["minecraft:leaf_litter"]}
+    ],
+
+    "sss_tran_move": [
+        {"block": [
+            "minecraft:azalea_leaves", "minecraft:cherry_leaves",
+            "minecraft:flowering_azalea_leaves", "minecraft:pale_oak_leaves",
+            "minecraft:mangrove_roots", "minecraft:muddy_mangrove_roots"
+        ]}
+    ],
+
+    "oak_leaves": [
+        {"block": ["minecraft:oak_leaves"]}
+    ],
+
+    "jungle_leaves": [
+        {"block": ["minecraft:jungle_leaves"]}
+    ],
+
+    "acacia_leaves": [
+        {"block": ["minecraft:acacia_leaves"]}
+    ],
+
+    "dark_oak_leaves": [
+        {"block": ["minecraft:dark_oak_leaves"]}
+    ],
+
+    "mangrove_leaves": [
+        {"block": ["minecraft:mangrove_leaves"]}
+    ],
+
+    "spruce_leaves": [
+        {"block": ["minecraft:spruce_leaves"]}
+    ],
+
+    "birch_leaves": [
+        {"block": ["minecraft:birch_leaves"]}
+    ],
+
+    "sss_tran": [
+        {"block": ["minecraft:bamboo"], "key": ["all"]},
+        {"block": ["minecraft:potted_bamboo"], "key": ["bamboo"]},
+        {"block": ["minecraft:cactus"], "key": ["side", "top"]},
+        {"block": ["minecraft:potted_cactus"], "key": ["cactus", "cactus_top"]},
+        {"block": ["minecraft:cocoa"]}
+    ],
+
+    "tran": [
+        {"block": ["minecraft:sugar_cane"]}
+    ],
+
+    "no_rain": [
+        {"block": ["minecraft:lava"]},
+        {"block": ["minecraft:lava_cauldron"], "key": ["content"]}
+    ]
 }
