@@ -62,9 +62,9 @@ def calculate_auto_chunk_settings(total_memory=None, available_memory=None):
     """根据可用内存计算 partitionSize/maxTasksPerBatch。
 
     partitionSize 的单位是 chunk 边长；maxTasksPerBatch 的单位是 chunk section。
-    分区预算为可用内存的 95%，每区块按 _PER_CHUNK_BYTES（25MiB）估算峰值。
-    批次以区块计、封顶 64（chunksPerBatch），分区边长是其副产物
-    （边长² = 批次区块数，一个批次恰好容纳一个完整分组），
+    工作预算为可用内存的 70%，保留 Blender、缓存及最终网格的余量。
+    输出分组与加载批次解耦：分区最多 4×4，批次最多 64 个区块，
+    避免整个批次只有一个超大组而无法利用多个模型工作线程。
     换算为 section 任务数（固定按最高高度 _MAX_SECTIONS_Y）后写入 maxTasksPerBatch。
     返回值只使用旧版 C++ 已支持的配置字段，因此保持向后兼容。
     """
@@ -73,14 +73,17 @@ def calculate_auto_chunk_settings(total_memory=None, available_memory=None):
 
     total_memory = max(int(total_memory), 1 * _GIB)
 
-    working_budget = int(available_memory * 0.95)
-    chunks_per_batch = max(1, working_budget // _PER_CHUNK_BYTES)
-    partition_size = max(1, int(math.sqrt(chunks_per_batch)))
+    available_memory = max(0, int(available_memory))
+    working_budget = int(available_memory * 0.70)
+    chunks_per_batch = min(64, max(1, working_budget // _PER_CHUNK_BYTES))
+    cpu_threads = min(32, max(1, os.cpu_count() or 1))
+    # Fit several independently schedulable groups inside the loading budget.
+    target_groups = min(cpu_threads, chunks_per_batch)
+    partition_size = min(4, max(1, int(math.sqrt(chunks_per_batch / target_groups))))
     max_tasks_per_batch = chunks_per_batch * _MAX_SECTIONS_Y
-
-    # MSVC 运行时下模型组并行已完成压力验证；上限 4 可避开超大模型并行时的
-    # 内存峰值，同时在 16 逻辑核机器上约可获得 2 倍实际加速。
-    model_threads = min(4, max(1, os.cpu_count() or 1))
+    # Keep a per-worker memory allowance instead of a fixed CPU limit.
+    memory_threads = max(1, working_budget // (128 * _MIB))
+    model_threads = min(cpu_threads, memory_threads)
 
     return {
         "partitionSize": int(partition_size),
