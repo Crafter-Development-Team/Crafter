@@ -6,27 +6,14 @@ import tempfile
 import threading
 import time
 import shutil
+from .map_selector_runtime import probe_java, read_coordinates
 
 from ..config import __addon_name__
 from bpy.props import *
 from .Defs import *
 
 def try_java(exe_path):
-    """验证单个Java是否可用，可用返回路径，否则返回None"""
-    if not os.path.exists(exe_path):
-        return None
-    try:
-        result = subprocess.run([exe_path, "-version"], capture_output=True, timeout=15)
-        output = (result.stdout + result.stderr).decode(errors="ignore").lower()
-        if result.returncode != 0:
-            return None
-        if "error:" in output or "a fatal error" in output:
-            return None
-        if "32-bit" in output:
-            return None
-        return exe_path
-    except Exception:
-        return None
+    return probe_java(exe_path)
 
 def search_java_in_dir(dir_java, java_exe_name):
     """在目录及其子目录中查找第一个可用的Java，找到即返回"""
@@ -189,22 +176,16 @@ class VIEW3D_OT_CrafterMapSelector(bpy.types.Operator):
             self.report({'ERROR'}, f"找不到地图选择器JAR文件: {jar_path}")
             return {'CANCELLED'}
 
-        # 创建临时文件用于坐标通信
-        temp_dir = tempfile.gettempdir()
-        coord_file = os.path.join(temp_dir, "minecraft_coords.json")
-        
-        # 如果存在旧的坐标文件，删除它
-        if os.path.exists(coord_file):
-            try:
-                os.remove(coord_file)
-            except:
-                pass
-        
+        # Separate sessions must never delete/consume another selector's result.
+        temp_dir = tempfile.mkdtemp(prefix="crafter_map_selector_")
+        coord_file = os.path.join(temp_dir, "coordinates.json")
+
         # 启动地图选择器
         try:
             # 检测Java路径
             java_path = find_java_path(addon_prefs)
             if not java_path:
+                shutil.rmtree(temp_dir, ignore_errors=True)
                 self.report({'ERROR'}, "Java not found, please specify the path")
                 bpy.ops.crafter.java_input('INVOKE_DEFAULT')
                 return {'CANCELLED'}
@@ -244,59 +225,42 @@ class VIEW3D_OT_CrafterMapSelector(bpy.types.Operator):
 
             self.report({'INFO'}, "正在启动地图选择器...")
             
-            # 在后台线程中启动进程
-            def run_map_selector():
+            # A file log avoids pipe deadlock and unbounded communicate() buffers.
+            log_path = os.path.join(temp_dir, "selector.log")
+            with open(log_path, "wb") as log:
+                process = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT,
+                                           cwd=os.path.dirname(jar_path))
+
+            def poll_selector():
+                if process.poll() is None:
+                    return 0.25
                 try:
-                    process = subprocess.Popen(
-                        cmd,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
-                        cwd=os.path.dirname(jar_path)
-                    )
-                    
-                    # 等待进程完成
-                    _, stderr = process.communicate()
-                    
-                    if process.returncode == 0:
-                        # 检查坐标文件是否存在
-                        if os.path.exists(coord_file):
-                            try:
-                                with open(coord_file, 'r') as f:
-                                    coords = json.load(f)
-                                
-                                # 更新Blender中的坐标
-                                addon_prefs.XYZ_1 = (coords['minX'], coords['minY'], coords['minZ'])
-                                addon_prefs.XYZ_2 = (coords['maxX'], coords['maxY'], coords['maxZ'])
-                                
-                                # 强制刷新UI
-                                reloadwindow()
-                                print(f"坐标已更新: XYZ_1={addon_prefs.XYZ_1}, XYZ_2={addon_prefs.XYZ_2}")
-                                
-                                
-                                # 清理临时文件
-                                if os.path.exists(coord_file):
-                                    os.remove(coord_file)
-                                
-                            except Exception as e:
-                                print(f"读取坐标文件时出错: {e}")
-                        else:
-                            print("地图选择器已关闭，未选择坐标")
-                    else:
-                        print(f"地图选择器启动失败，返回码: {process.returncode}")
-                        if stderr:
-                            print(f"错误信息: {stderr.decode()}")
-                
-                except Exception as e:
-                    print(f"启动地图选择器时出错: {e}")
-            
-            # 启动后台线程
-            thread = threading.Thread(target=run_map_selector)
-            thread.daemon = True
-            thread.start()
-            
+                    if process.returncode == 0 and os.path.isfile(coord_file):
+                        first, second = read_coordinates(coord_file)
+                        # bpy timers run on Blender's main thread. The old background
+                        # thread wrote RNA preferences and refreshed UI unsafely.
+                        addon_prefs.XYZ_1 = first
+                        addon_prefs.XYZ_2 = second
+                        reloadwindow()
+                        push_log("地图选择坐标已更新", "INFO")
+                    elif process.returncode != 0:
+                        with open(log_path, "rb") as log:
+                            log.seek(0, os.SEEK_END)
+                            log.seek(max(0, log.tell() - 8192))
+                            detail = log.read().decode("utf-8", errors="replace")
+                        push_log("地图选择器失败: " + detail, "ERROR")
+                except Exception as error:
+                    push_log("地图坐标回传失败: " + str(error), "ERROR")
+                finally:
+                    shutil.rmtree(temp_dir, ignore_errors=True)
+                return None
+
+            bpy.app.timers.register(poll_selector, first_interval=0.25)
+
             return {'FINISHED'}
             
         except Exception as e:
+            shutil.rmtree(temp_dir, ignore_errors=True)
             self.report({'ERROR'}, f"启动地图选择器失败: {str(e)}")
             return {'CANCELLED'}
 

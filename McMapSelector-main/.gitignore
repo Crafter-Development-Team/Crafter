@@ -1,0 +1,36 @@
+# === 构建产物 ===
+target/
+dependency-reduced-pom.xml
+
+# === 备份/拷贝 ===
+backup/
+src copy/
+
+# === 缓存与临时文件 ===
+block_colors.json
+extracted_colors.properties
+*.class
+.DS_Store
+*.log
+
+# === 文档类 MD（保留 README.md） ===
+3D_*.md
+PERFORMANCE_OPTIMIZATION_SUMMARY.md
+PROJECT_SUMMARY.md
+QUICK_REFERENCE.md
+QUICK_START_3D.md
+VIEW_STABILITY_FIX.md
+how2use.md
+test_dual_slider.md
+
+# === 测试杂项 ===
+Java8Test.java
+Java8Test.class
+test_java8_compatibility.sh
+test_mods_colors.java
+test_mods_colors.class
+
+# === IDE ===
+.idea/
+*.iml
+.vscode/
