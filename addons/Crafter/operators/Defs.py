@@ -1080,6 +1080,84 @@ def find_CI_group(classification_list,real_block_name,group_CI):
         name_node = "CI-"
     group_CI.node_tree = bpy.data.node_groups[name_node]
 
+# ========== CI- 组输出接口 → 剔除开关 ==========
+# CI- 组声明了某个名字就打开对应的剔除；换名字只改这两行。
+CI_CULL_OUTPUT_RENDER = "BackfaceCull"        # 声明 → 渲染侧背面剔除（背面看不见）
+CI_CULL_OUTPUT_SHADOW = "ShadowBackfaceCull"  # 声明 → 阴影侧剔除
+
+_ci_cull_stats = {"render": 0, "shadow": 0, "scanned": 0}
+
+def reset_CI_cull_stats():
+    _ci_cull_stats["render"] = 0
+    _ci_cull_stats["shadow"] = 0
+    _ci_cull_stats["scanned"] = 0
+
+def get_CI_cull_stats():
+    '''最近一次同步的结果（用于日志）'''
+    return dict(_ci_cull_stats)
+
+def query_CI_outputs(group_CI):
+    '''
+    列出 CI- 组节点声明了哪些输出接口名。
+    group_CI: 材质里的 CI 组节点，可为 None
+    return: set[str]（节点组缺失时为空集）
+    '''
+    if group_CI is None or getattr(group_CI, "node_tree", None) is None:
+        return set()
+    try:
+        return {output.name for output in group_CI.outputs}
+    except Exception:
+        return set()
+
+def _material_CI_cull_flags(material):
+    '''
+    扫描材质里所有 CI- 组节点，返回 (是否声明渲染侧接口, 是否声明阴影侧接口)。
+    叠加层帧里的 CI 节点也算，任一命中即视为声明。
+    '''
+    node_tree = getattr(material, "node_tree", None)
+    if node_tree is None:
+        return (False, False)
+    render_on = shadow_on = False
+    for node in node_tree.nodes:
+        if node.type != "GROUP" or getattr(node, "node_tree", None) is None:
+            continue
+        if not node.node_tree.name.startswith("CI-"):
+            continue
+        names = query_CI_outputs(node)
+        if CI_CULL_OUTPUT_RENDER in names:
+            render_on = True
+        if CI_CULL_OUTPUT_SHADOW in names:
+            shadow_on = True
+        if render_on and shadow_on:
+            break
+    return (render_on, shadow_on)
+
+def sync_CI_culling(material, count=False):
+    '''
+    按 CI- 组的输出接口名决定一个材质的剔除开关（纯两向判断，无全局兜底）：
+      - 任一 CI- 组声明了 CI_CULL_OUTPUT_RENDER → 打开渲染侧背面剔除，否则关闭
+      - 任一 CI- 组声明了 CI_CULL_OUTPUT_SHADOW → 打开阴影侧剔除，否则关闭
+    只在值不同时写入，避免无谓的属性写入。
+    material: 目标材质
+    count: 是否累加到 get_CI_cull_stats() 的统计里
+    return: (渲染侧最终是否开启, 阴影侧最终是否开启)
+    '''
+    if material is None or getattr(material, "library", None) is not None:
+        return (False, False)   # 链接库材质只读，跳过
+    desired_render, desired_shadow = _material_CI_cull_flags(material)
+    if getattr(material, "use_backface_culling", None) != desired_render:
+        material.use_backface_culling = desired_render
+    if (hasattr(material, "use_backface_culling_shadow") and
+            material.use_backface_culling_shadow != desired_shadow):
+        material.use_backface_culling_shadow = desired_shadow
+    if count:
+        _ci_cull_stats["scanned"] += 1
+        if desired_render:
+            _ci_cull_stats["render"] += 1
+        if desired_shadow:
+            _ci_cull_stats["shadow"] += 1
+    return (desired_render, desired_shadow)
+
 def link_CI_output(group_CI, node_output_EEVEE, node_output_Cycles, links):
     '''
     group_CI: 材质组节点

@@ -180,6 +180,8 @@ def process_single_material(material, context, classification_list, imported_by_
                          node_output_EEVEE.location.y)
     find_CI_group(group_CI=group_CI, real_block_name=real_block_name, classification_list=classification_list)
     link_CI_output(group_CI=group_CI, node_output_EEVEE=node_output_EEVEE, node_output_Cycles=node_output_Cycles, links=links)
+    # 按 CI- 组的输出接口名决定这个材质的剔除（见 Defs.CI_CULL_OUTPUT_*）：有 → 开，没有 → 关
+    sync_CI_culling(material, count=True)
     tint = get_material_tint(material)
     try:
         apply_tint(group_CI=group_CI, nodes=nodes, links=links, tint=tint)
@@ -399,6 +401,7 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):
 
         push_log('[unknown] 加载材质', 'INFO')
         addon_prefs = context.preferences.addons[__addon_name__].preferences
+        reset_CI_cull_stats()
 
         bpy.ops.crafter.reload_all()
         if not (-1 < addon_prefs.Materials_List_index and addon_prefs.Materials_List_index < len(addon_prefs.Materials_List)):
@@ -471,6 +474,12 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):
                     add_Crafter_time(obj=obj)
                 
         bpy.ops.crafter.set_pbr_parser()
+
+        # 逐材质在加载时就同步过了，这里只汇总日志（不再全量扫描）
+        cull_stats = get_CI_cull_stats()
+        push_log(f'[接口驱动剔除] 本次处理 {cull_stats["scanned"]} 个材质: '
+                 f'{CI_CULL_OUTPUT_RENDER} → {cull_stats["render"]} 个开背面剔除, '
+                 f'{CI_CULL_OUTPUT_SHADOW} → {cull_stats["shadow"]} 个开阴影剔除', 'INFO')
 
         return {'FINISHED'}
 

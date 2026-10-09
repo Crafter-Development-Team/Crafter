@@ -98,12 +98,25 @@ class CrafterAddonPreferences(AddonPreferences):
                                    max=1.0)# type: ignore
     allowDoubleFace: BoolProperty(name="Allow Double Face",
                                   default=False,)# type: ignore
+    doubleSidedGeometry: BoolProperty(name="Double-Sided Geometry",
+                                      description="Let the importer keep both windings of zero-thickness planes (leaves, fronds, grass) exactly like the game defines them. Turn it off to keep only one face of each coincident pair (older behaviour): that halves those faces, but a single-sided plane then disappears when seen from behind. This switch only affects the importer's output geometry",
+                                      default=True,)# type: ignore
+    doubleSidedFaceOffset: FloatProperty(name="Double-Sided Offset",
+                                         description="Outward offset of the reverse face of a zero-thickness plane, in metres (1 block = 1 m); keeps the two coincident faces from z-fighting when backface culling is off. It must stay above the float precision at your coordinates: 0.0001 is only safe within roughly 1000 blocks of the origin, 0.0005 within about 4000, 0.003 anywhere. 0 keeps the faces exactly coincident",
+                                         default=0.0005,
+                                         min=0.0,
+                                         max=0.05,
+                                         precision=6,
+                                         step=0.01)# type: ignore
     overlayLayerStep: FloatProperty(name="Overlay Offset",
                                     description="Per-layer outward offset for coincident overlay faces (grass side / CTM overlay). Increase it if z-fighting persists in EEVEE",
                                     default=0.003,
                                     min=0.0002,
                                     max=0.05,
                                     precision=4)# type: ignore
+    mergeModTextures: BoolProperty(name="Merge Mod Textures",
+                                   description="Let mod blocks reuse the material already created for the same texture instead of creating one material per block (vanilla blocks are never merged with each other). Materials with tint or overlay are excluded. This greatly reduces the material count and speeds up material processing; turn it off to get one material per block again",
+                                   default=True)# type: ignore
     notexportFullModel: BoolProperty(name="As Chunk",
                                   default=False,)# type: ignore
     autoPartitionSettings: BoolProperty(name="Auto Chunk Settings",

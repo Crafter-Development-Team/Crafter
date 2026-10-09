@@ -72,6 +72,8 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         col_1_setting = row_cols.column()
         col_1_setting.prop(addon_prefs, "strictDeduplication")
         col_1_setting.prop(addon_prefs, "allowDoubleFace")
+        col_1_setting.prop(addon_prefs, "doubleSidedGeometry")
+        col_1_setting.prop(addon_prefs, "doubleSidedFaceOffset")
         col_1_setting.prop(addon_prefs, "Auto_Load_Material")
         col_1_setting.prop(addon_prefs, "useRandomBlockModels")
         col_1_setting.prop(addon_prefs, "exportLightBlock")
@@ -79,6 +81,7 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         col_2_setting = row_cols.column()
         col_2_setting.prop(addon_prefs, "useChunkPrecision")
         col_2_setting.prop(addon_prefs, "overlayLayerStep")
+        col_2_setting.prop(addon_prefs, "mergeModTextures")
         col_2_setting.prop(addon_prefs, "keepBoundary")
         col_2_setting.prop(addon_prefs, "cullCave")
         col_2_setting.prop(addon_prefs, "useGreedyMesh")
@@ -469,7 +472,10 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             "exportLightBlockOnly":addon_prefs.exportLightBlockOnly,
             "lightBlockSize":addon_prefs.lightBlockSize,
             "allowDoubleFace":addon_prefs.allowDoubleFace,
+            "doubleSidedGeometry":addon_prefs.doubleSidedGeometry,
+            "doubleSidedFaceOffset":addon_prefs.doubleSidedFaceOffset,
             "overlayLayerStep":addon_prefs.overlayLayerStep,
+            "mergeModTextures":addon_prefs.mergeModTextures,
             "exportFullModel":not effective_as_chunk,
             "autoPartitionSettings":addon_prefs.autoPartitionSettings,
             "partitionSize":effective_partition_size,
