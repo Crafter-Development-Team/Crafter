@@ -146,8 +146,12 @@ class CrafterAddonPreferences(AddonPreferences):
                                    default=False,)# type: ignore
     useGreedyMesh: BoolProperty(name="Greedy Mesh",
                                 default=True,)# type: ignore
-    useRandomBlockModels: BoolProperty(name="Random Models",
-                                      default=True,)#type: ignore
+    variantSeedMode: EnumProperty(name="Variant Seed Mode",
+                                  description="How weighted block model variants are picked",
+                                  items=[("game","Same as Game","Pick by block position seed exactly like Minecraft (reproducible across imports)"),
+                                         ("first","First Variant","Always use the first variant of every block"),
+                                         ("random","Random","Pick a random variant on every import (not reproducible)")],
+                                  default="game",)#type: ignore
     isLODAutoCenter: BoolProperty(name="LOD Auto Center",
                                   default=True,)# type: ignore
     LODCenterX: IntProperty(name="LOD Center X",
