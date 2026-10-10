@@ -8,7 +8,7 @@
         {"block": ["minecraft:grass_block"], "key": ["top", "overlay"]}
     ],
 
-    "tran_move": [
+    "plant_move": [
         {"block": [
             "minecraft:acacia_sapling", "minecraft:allium", "minecraft:azure_bluet",
             "minecraft:beetroots", "minecraft:birch_sapling", "minecraft:blue_orchid",
@@ -51,7 +51,7 @@
         {"block": ["minecraft:potted_mangrove_propagule"], "key": ["sapling"]}
     ],
 
-    "grass_tran_move": [
+    "grass_plant_move": [
         {"block": [
             "minecraft:attached_melon_stem", "minecraft:attached_pumpkin_stem",
             "minecraft:bush", "minecraft:fern", "minecraft:grass", "minecraft:large_fern",
@@ -61,11 +61,11 @@
         {"block": ["minecraft:potted_fern"], "key": ["plant"]}
     ],
 
-    "dryfoliage_tran": [
+    "dryfoliage_plant": [
         {"block": ["minecraft:leaf_litter"]}
     ],
 
-    "sss_tran_move": [
+    "leaves_move": [
         {"block": [
             "minecraft:azalea_leaves", "minecraft:cherry_leaves",
             "minecraft:flowering_azalea_leaves", "minecraft:pale_oak_leaves",
@@ -101,7 +101,7 @@
         {"block": ["minecraft:birch_leaves"]}
     ],
 
-    "sss_tran": [
+    "leaves": [
         {"block": ["minecraft:bamboo"], "key": ["all"]},
         {"block": ["minecraft:potted_bamboo"], "key": ["bamboo"]},
         {"block": ["minecraft:cactus"], "key": ["side", "top"]},
@@ -109,7 +109,7 @@
         {"block": ["minecraft:cocoa"]}
     ],
 
-    "tran": [
+    "plant": [
         {"block": ["minecraft:sugar_cane"]}
     ],
 
