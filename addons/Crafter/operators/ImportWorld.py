@@ -74,6 +74,10 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         col_1_setting.prop(addon_prefs, "allowDoubleFace")
         col_1_setting.prop(addon_prefs, "doubleSidedGeometry")
         col_1_setting.prop(addon_prefs, "doubleSidedFaceOffset")
+        # 背面剔除依赖双面几何：几何双面关掉后没有可剔除的对象，直接禁用以避免误解
+        row_ds_cull = col_1_setting.row()
+        row_ds_cull.enabled = addon_prefs.doubleSidedGeometry
+        row_ds_cull.prop(addon_prefs, "doubleSidedBackfaceCull")
         col_1_setting.prop(addon_prefs, "Auto_Load_Material")
         col_1_setting.prop(addon_prefs, "variantSeedMode")
         col_1_setting.prop(addon_prefs, "exportLightBlock")
@@ -544,19 +548,14 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
                     removed_obj += 1
                 except:
                     pass
-        # 旧的 tint/overlay 元数据一并清理，避免和本次导出的 objs 不匹配
-        try:
-            dir_old_tint = os.path.join(dir_importer, "tint.json")
-            if os.path.exists(dir_old_tint):
-                os.remove(dir_old_tint)
-        except:
-            pass
-        try:
-            dir_old_overlay = os.path.join(dir_importer, "overlay.json")
-            if os.path.exists(dir_old_overlay):
-                os.remove(dir_old_overlay)
-        except:
-            pass
+        # 旧的 tint/overlay/doubleSided 元数据一并清理，避免和本次导出的 objs 不匹配
+        for _old_meta in ("tint.json", "overlay.json", double_sided_json_name):
+            try:
+                _old_meta_path = os.path.join(dir_importer, _old_meta)
+                if os.path.exists(_old_meta_path):
+                    os.remove(_old_meta_path)
+            except:
+                pass
         log_step(f"删除 {removed_obj} 个旧 obj 文件")
         log_stage_end("清理旧导出")
             

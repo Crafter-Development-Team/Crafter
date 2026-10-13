@@ -101,6 +101,9 @@ class CrafterAddonPreferences(AddonPreferences):
     doubleSidedGeometry: BoolProperty(name="Double-Sided Geometry",
                                       description="Let the importer keep both windings of zero-thickness planes (leaves, fronds, grass) exactly like the game defines them. Turn it off to keep only one face of each coincident pair (older behaviour): that halves those faces, but a single-sided plane then disappears when seen from behind. This switch only affects the importer's output geometry",
                                       default=True,)# type: ignore
+    doubleSidedBackfaceCull: BoolProperty(name="Double-Sided Backface Cull",
+                                          description="On material load, look up doubleSided.json (written by the exporter) and enable backface culling for the materials that use double-sided geometry: EEVEE render + shadow culling, and set the CI node's Cycles backface-cull input to 1. Solid geometry of other materials keeps rendering both sides, so no light leaks. Requires Double-Sided Geometry to be on",
+                                          default=True,)# type: ignore
     doubleSidedFaceOffset: FloatProperty(name="Double-Sided Offset",
                                          description="Outward offset of the reverse face of a zero-thickness plane, in metres (1 block = 1 m); keeps the two coincident faces from z-fighting when backface culling is off. It must stay above the float precision at your coordinates: 0.0001 is only safe within roughly 1000 blocks of the origin, 0.0005 within about 4000, 0.003 anywhere. 0 keeps the faces exactly coincident",
                                          default=0.0005,

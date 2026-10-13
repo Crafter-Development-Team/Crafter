@@ -1158,6 +1158,99 @@ def sync_CI_culling(material, count=False):
             _ci_cull_stats["shadow"] += 1
     return (desired_render, desired_shadow)
 
+# ========== 双面几何（doubleSided.json）==========
+# 导出器把"零厚度贴片被分离出正反两面"的材质基础全名写成 doubleSided.json（纯数组，
+# 已剥掉 @tint 后缀）。这些材质在 Blender 里是双面几何，需要关闭背面剔除才不会漏光；
+# 其余材质（实心几何）保持双面可见。
+# CI- 组若声明了这个输入接口，就把 Cycles 侧的背面剔除打开（写 1）。
+CI_BACKCULL_INPUT = "cycles 背面剔除/back cull"
+double_sided_json_name = "doubleSided.json"
+# doubleSided.json 的按 mtime 失效的读盘缓存：{"stamp": float|None, "names": set[str]}
+_double_sided_cache = {"stamp": None, "names": set()}
+
+def load_double_sided_materials(dir_importer):
+    '''
+    读取 doubleSided.json：使用了双面几何的材质基础全名集合。
+    查表口径与 Defs.material_base_name() 一致（导出器已剥 @ 后缀）。
+    dir_importer: WorldImporter 输出目录
+    return: set[str]（文件不存在或格式异常时为空集）
+    '''
+    path = os.path.join(dir_importer, double_sided_json_name)
+    if not os.path.exists(path):
+        return set()
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+    except Exception as ex:
+        warn_log(f"doubleSided.json 读取失败: {ex}")
+        return set()
+    if isinstance(raw, dict):
+        raw = raw.get("materials", [])   # 兼容将来带元信息的对象格式
+    if not isinstance(raw, list):
+        warn_log("doubleSided.json 格式异常（应为数组），已忽略")
+        return set()
+    return {str(name) for name in raw if name}
+
+def _write_socket_default(group_node, socket_name, value):
+    '''
+    给节点组里名为 socket_name 的输入接口写常量值。
+    接口不存在、或已被连接时返回 False（default_value 对已连接的接口无效）。
+    group_node:  材质里的 CI- 组节点
+    socket_name: 接口名（约定见 CI_BACKCULL_INPUT）
+    value:       要写入的常量值
+    '''
+    if group_node is None or getattr(group_node, "node_tree", None) is None:
+        return False
+    if socket_name not in group_node.inputs:
+        return False
+    socket = group_node.inputs[socket_name]
+    if getattr(socket, "is_linked", False):
+        return False
+    socket.default_value = value
+    return True
+
+def apply_double_sided_backface_cull(material, dir_importer):
+    '''
+    双面几何材质的背面剔除：材质名命中 doubleSided.json 时
+      - EEVEE：打开渲染侧 + 阴影侧背面剔除（对应 use_backface_culling / _shadow）；
+      - Cycles：把 CI- 组里名为 CI_BACKCULL_INPUT 的输入接口写成 1。Cycles 没有
+        EEVEE 那种材质开关，背面剔除只能靠材质节点实现，所以由 CI 组自己提供输入。
+    其余材质不动，保持 sync_CI_culling 按 CI 输出接口名算出的结果。
+    material:     目标材质
+    dir_importer: WorldImporter 输出目录（doubleSided.json 所在处）
+    return:       是否按双面几何处理了该材质
+    '''
+    if material is None or getattr(material, "library", None) is not None:
+        return False   # 链接库材质只读，跳过
+    # 每次导入只读一次清单（按文件 mtime 失效），避免逐材质重复读盘
+    path = os.path.join(dir_importer, double_sided_json_name)
+    try:
+        stamp = os.path.getmtime(path)
+    except OSError:
+        return False
+    global _double_sided_cache
+    if _double_sided_cache.get("stamp") != stamp:
+        _double_sided_cache["stamp"] = stamp
+        _double_sided_cache["names"] = load_double_sided_materials(dir_importer)
+    if material_base_name(material.name) not in _double_sided_cache["names"]:
+        return False
+
+    # EEVEE：渲染侧 + 阴影侧（与 sync_CI_culling 的写法一致）
+    if getattr(material, "use_backface_culling", None) is not None:
+        material.use_backface_culling = True
+    if hasattr(material, "use_backface_culling_shadow"):
+        material.use_backface_culling_shadow = True
+
+    # Cycles：CI- 组提供输入接口时写 1（叠加层帧里的 CI 节点同样处理）
+    node_tree = getattr(material, "node_tree", None)
+    if node_tree is not None:
+        for node in node_tree.nodes:
+            if node.type != "GROUP" or getattr(node, "node_tree", None) is None:
+                continue
+            if node.node_tree.name.startswith("CI-"):
+                _write_socket_default(node, CI_BACKCULL_INPUT, 1.0)
+    return True
+
 def link_CI_output(group_CI, node_output_EEVEE, node_output_Cycles, links):
     '''
     group_CI: 材质组节点

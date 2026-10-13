@@ -12,7 +12,22 @@ from .Defs import *
 lang = bpy.context.preferences.view.language
 is_chinese = lang in ("zh_HANS", "zh_HANT")
 
+# WorldImporter 输出目录（tint.json / overlay.json / doubleSided.json 都落在这里）
+dir_importer = os.path.join(dir_init_main, "importer")
+
 # ==================== 加载材质 ====================
+
+def get_double_sided_cull_setting(context):
+    '''
+    双面几何背面剔除的开关与目录。
+    开关关闭时返回 (False, "")，调用方据此跳过 doubleSided.json 的读取。
+    return: (是否启用, WorldImporter 输出目录)
+    '''
+    try:
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
+    except Exception:
+        return (False, "")
+    return (bool(getattr(addon_prefs, "doubleSidedBackfaceCull", True)), dir_importer)
 
 # ========== 提取的分类数据加载函数 ==========
 def load_classification_data(addon_prefs):
@@ -59,6 +74,20 @@ def process_single_material(material, context, classification_list, imported_by_
     if bpy.app.version >= (4, 2, 0):
         material.volume_intersection_method = 'ACCURATE'
         material.displacement_method = "BOTH"
+
+    # 双面几何背面剔除：开启时按 doubleSided.json 判定该材质是否使用双面几何，
+    # 命中则打开 EEVEE 剔除（渲染 + 阴影）并把 CI 组的 Cycles 背面剔除输入写 1。
+    # 注意：必须等下面的 CI- 组建好之后再调用（由 _apply_ds_cull 在两个 return 前触发）。
+    _ds_enabled, _ds_dir = get_double_sided_cull_setting(context)
+
+    def _apply_ds_cull():
+        '''CI- 组建好后按 doubleSided.json 应用背面剔除（两条分支各自触发）'''
+        if not _ds_enabled:
+            return
+        try:
+            apply_double_sided_backface_cull(material, _ds_dir)
+        except Exception as ex:
+            warn_log(f"双面几何背面剔除失败 [{material.name}]: {ex}")
 
     node_tex_base = None
     if material.name.startswith("color#"):
@@ -107,6 +136,7 @@ def process_single_material(material, context, classification_list, imported_by_
         except Exception as ex:
             warn_log(f"apply_tint 失败 [{material.name}]: {ex}")
         add_node_parser(group_CI=group_CI, nodes=nodes, links=links)
+        _apply_ds_cull()
         return
 
     nodes_wait_remove = []
@@ -199,6 +229,9 @@ def process_single_material(material, context, classification_list, imported_by_
                                node_output_EEVEE, node_output_Cycles, classification_list)
     except Exception as ex:
         warn_log(f"overlay 处理失败 [{material.name}]: {ex}")
+
+    # 最后一步：CI- 组与 overlay 帧里的 CI 节点都已就位，再按双面几何清单应用剔除
+    _apply_ds_cull()
 
 # ========== overlay 图层加载 ==========
 
