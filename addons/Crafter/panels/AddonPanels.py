@@ -60,17 +60,12 @@ class VIEW3D_PT_CrafterImportWorld(bpy.types.Panel):
         row_map_selector_main.operator("crafter.map_selector", text="Area Selector")
         row_map_selector_main.operator("crafter.java_settings", text="", icon="PREFERENCES")
 
-        # row_setting.prop(addon_prefs, "Point_Cloud_Mode")
-        # row_setting.operator("crafter.use_history_worlds",icon="TIME",text="")
-
         row_ImportWorld = box.row()
         row_ImportWorld.label(icon="MOD_BUILD")
         row_ImportWorld_main = row_ImportWorld.row(align=True)
         row_ImportWorld_main.operator("crafter.import_surface_world",text="Import World")
         row_ImportWorld_main.operator("crafter.reimport_surface_world",text="",icon="FILE_REFRESH")
         row_ImportWorld.operator("crafter.open_worldimporter_folder",text="",icon="FILE_FOLDER")
-        if addon_prefs.Point_Cloud_Mode:
-            row_ImportWorld.operator("crafter.import_solid_area",text="Import Editable Area")
     @classmethod
     def poll(cls, context: bpy.types.Context):
             return True

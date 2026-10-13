@@ -66,34 +66,51 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
                 elif not os.path.isdir(addon_prefs.Custom_mods_Path):
                     col_custom.label(icon="ERROR",text="It's not a folder!")
 
-        box_main_settings = layout.box()
-        row_cols = box_main_settings.row()
+        box_surface = layout.box()
+        box_surface.label(text=i18n("Surface Pruning"), icon="MESH_DATA")
+        row_surface = box_surface.row()
+        col_surface_1 = row_surface.column(align=True)
+        col_surface_1.prop(addon_prefs, "strictDeduplication")
+        col_surface_1.prop(addon_prefs, "allowDoubleFace")
+        col_surface_1.prop(addon_prefs, "keepBoundary")
+        col_surface_2 = row_surface.column(align=True)
+        col_surface_2.prop(addon_prefs, "doubleSidedGeometry")
+        col_surface_2.prop(addon_prefs, "useChunkPrecision")
+        col_surface_2.prop(addon_prefs, "cullCave")
 
-        col_1_setting = row_cols.column()
-        col_1_setting.prop(addon_prefs, "strictDeduplication")
-        col_1_setting.prop(addon_prefs, "allowDoubleFace")
-        col_1_setting.prop(addon_prefs, "doubleSidedGeometry")
-        col_1_setting.prop(addon_prefs, "doubleSidedFaceOffset")
-        # 背面剔除依赖双面几何：几何双面关掉后没有可剔除的对象，直接禁用以避免误解
-        row_ds_cull = col_1_setting.row()
-        row_ds_cull.enabled = addon_prefs.doubleSidedGeometry
+        box_material = layout.box()
+        box_material.label(text=i18n("Material and Texture"), icon="TEXTURE")
+        row_material = box_material.row()
+        col_material_1 = row_material.column(align=True)
+        col_material_1.prop(addon_prefs, "Auto_Load_Material")
+        col_material_1.prop(addon_prefs, "mergeModTextures")
+        col_material_2 = row_material.column(align=True)
+        # 背面剔除是加载材质时做的事，同时依赖双面几何：任一条件不满足都置灰
+        row_ds_cull = col_material_2.row()
+        row_ds_cull.enabled = addon_prefs.doubleSidedGeometry and addon_prefs.Auto_Load_Material
         row_ds_cull.prop(addon_prefs, "doubleSidedBackfaceCull")
-        col_1_setting.prop(addon_prefs, "Auto_Load_Material")
-        col_1_setting.prop(addon_prefs, "variantSeedMode")
-        col_1_setting.prop(addon_prefs, "exportLightBlock")
 
-        col_2_setting = row_cols.column()
-        col_2_setting.prop(addon_prefs, "useChunkPrecision")
-        col_2_setting.prop(addon_prefs, "overlayLayerStep")
-        col_2_setting.prop(addon_prefs, "mergeModTextures")
-        col_2_setting.prop(addon_prefs, "keepBoundary")
-        col_2_setting.prop(addon_prefs, "cullCave")
-        col_2_setting.prop(addon_prefs, "useGreedyMesh")
+        box_output = layout.box()
+        box_output.label(text=i18n("Output"), icon="EXPORT")
+        row_output = box_output.row()
+        col_output_1 = row_output.column(align=True)
+        col_output_1.prop(addon_prefs, "useGreedyMesh")
+        # 光源方块的两个细项常驻显示，导出关掉时置灰（不再隐藏，避免布局跳动）
+        row_Light_Block = col_output_1.row()
+        row_Light_Block.enabled = addon_prefs.exportLightBlock
+        row_Light_Block.prop(addon_prefs, "exportLightBlockOnly")
+        col_output_2 = row_output.column(align=True)
+        col_output_2.prop(addon_prefs, "exportLightBlock")
+        row_Light_Block_size = col_output_2.row()
+        row_Light_Block_size.enabled = addon_prefs.exportLightBlock
+        row_Light_Block_size.prop(addon_prefs, "lightBlockSize")
 
-        if addon_prefs.exportLightBlock:
-            row_Light_Block = box_main_settings.row()
-            row_Light_Block.prop(addon_prefs, "exportLightBlockOnly")
-            row_Light_Block.prop(addon_prefs, "lightBlockSize")
+        # 详细参数：枚举/数值型，各占整行，避免标签被省略
+        box_values = layout.box()
+        box_values.label(text=i18n("Detailed Parameters"), icon="OPTIONS")
+        box_values.prop(addon_prefs, "variantSeedMode")
+        box_values.prop(addon_prefs, "doubleSidedFaceOffset")
+        box_values.prop(addon_prefs, "overlayLayerStep")
 
         box_aschunk = layout.box()
         row_aschunk = box_aschunk.row()
@@ -120,15 +137,17 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
                 col_2_aschunk.label(text="Auto chunk calculation unavailable", icon="ERROR")
         else:
             col_2_aschunk.prop(addon_prefs, "maxTasksPerBatch")
-            if addon_prefs.notexportFullModel:
-                col_2_aschunk.prop(addon_prefs, "partitionSize")
+            # 与光源方块同理：分块边长常驻显示，只在"不分块"时置灰，避免忽隐忽现
+            row_partition_size = col_2_aschunk.row()
+            row_partition_size.enabled = addon_prefs.notexportFullModel
+            row_partition_size.prop(addon_prefs, "partitionSize")
 
         box_lod = layout.box()
         box_lod.prop(addon_prefs, "Max_LOD_Level")
         if int(addon_prefs.Max_LOD_Level) > 0:
-            split_lod = box_lod.split(factor=0.5)
-
-            col_1_lod = split_lod.column()
+            # 与主设置同样用"一行 + 两列"，避免 split() 造成的行间空档
+            row_lod = box_lod.row()
+            col_1_lod = row_lod.column(align=True)
             col_1_lod.prop(addon_prefs, "LOD0renderDistance")
             if int(addon_prefs.Max_LOD_Level) > 1:
                 col_1_lod.prop(addon_prefs, "LOD1renderDistance")
@@ -137,25 +156,19 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
                     if int(addon_prefs.Max_LOD_Level) > 3:
                         col_1_lod.prop(addon_prefs, "LOD3renderDistance")
             # ===================================================
-            col_2_lod = split_lod.column()
+            col_2_lod = row_lod.column(align=True)
             col_2_lod.prop(addon_prefs, "useBiomeColors")
             col_2_lod.prop(addon_prefs, "useUnderwaterLOD")
-            if addon_prefs.isLODAutoCenter:
-                col_2_lod.prop(addon_prefs, "isLODAutoCenter")
-            else:
-                box_lodcenter = col_2_lod.box()
-                col_lodcenter = box_lodcenter.column()
-                col_lodcenter.prop(addon_prefs, "isLODAutoCenter")
-                col_lodcenter.prop(addon_prefs, "LODCenterX")
-                col_lodcenter.prop(addon_prefs, "LODCenterZ")
+            col_2_lod.prop(addon_prefs, "isLODAutoCenter")
+            # 中心坐标常驻显示，自动中心时置灰，避免忽隐忽现
+            row_lodcenter = col_2_lod.row()
+            row_lodcenter.enabled = not addon_prefs.isLODAutoCenter
+            row_lodcenter.prop(addon_prefs, "LODCenterX")
+            row_lodcenter.prop(addon_prefs, "LODCenterZ")
 
+            col_2_lod.prop(addon_prefs, "no_lod_blocks")
             if addon_prefs.no_lod_blocks:
-                box_nolod = col_2_lod.box()
-                col_nolod = box_nolod.column()
-                col_nolod.prop(addon_prefs, "no_lod_blocks")
-                col_nolod.operator("crafter.open_no_lod_blocks_folder",icon="FILE_FOLDER")
-            else:
-                col_2_lod.prop(addon_prefs, "no_lod_blocks")
+                col_2_lod.operator("crafter.open_no_lod_blocks_folder",icon="FILE_FOLDER")
 
         #无版本隔离选择
         if self.version == "":
@@ -428,11 +441,8 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         log_stage_end("加载无LOD方块表")
 
         #写入conifg.json
-        point_cloud_mode = addon_prefs.Point_Cloud_Mode
-        if point_cloud_mode:
-            status = 2
-        else:
-            status = 1
+        # status=1 表示导出区域内所有方块模型（点云模式已废弃，导出器只在 1 下工作）
+        status = 1
 
         if addon_prefs.autoPartitionSettings:
             auto_chunk_info = calculate_auto_chunk_settings()
@@ -504,7 +514,6 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             "LOD1renderDistance":addon_prefs.LOD1renderDistance,
             "LOD2renderDistance":addon_prefs.LOD2renderDistance,
             "LOD3renderDistance":addon_prefs.LOD3renderDistance,
-            "solid": 0,
         }
 
         # 根据平台选择配置目录和可执行文件
@@ -1045,22 +1054,6 @@ class VIEW3D_OT_CrafterReimportSurfaceWorld(bpy.types.Operator):# 重导入表�
             return {"CANCELLED"}
         return {"FINISHED"}
 
-
-class VIEW3D_OT_CrafterImportSolidArea(bpy.types.Operator):#导入可编辑区域 ==========未完善==========
-    bl_label = "Import Solid Area"
-    bl_idname = "crafter.import_solid_area"
-    bl_description = "Import the solid area"
-    bl_options = {'REGISTER', 'UNDO'}
-    
-    @classmethod
-    def poll(cls, context: bpy.types.Context):
-        return False#完善后开启
-
-    def execute(self, context: bpy.types.Context):
-        addon_prefs = context.preferences.addons[__addon_name__].preferences
-        #这里应该还要删除物体在坐标内的顶点，但时间紧任务重，稍后再写
-        addon_prefs.solid = 1
-        return {'FINISHED'}
 
 # ==================== 使用历史世界 ====================
 

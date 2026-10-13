@@ -34,8 +34,6 @@ class CrafterAddonPreferences(AddonPreferences):
                                                     type=HistoryWorldVersion)#type: ignore
     Dimensions_List_index: IntProperty(name="Dimensions",
                                                    default=0)# type: ignore
-    Point_Cloud_Mode: BoolProperty(name="Point Cloud Mode",
-                                   default=False,)# type: ignore
     Advanced_Switch_Mode: BoolProperty(name="Advanced Switch Mode",
                                        description="Enable mix factor to blend On and Off",
                                        default=False,)# type: ignore
@@ -78,8 +76,6 @@ class CrafterAddonPreferences(AddonPreferences):
                                                   type=Resource)# type: ignore
     Game_unuse_Resources_List_index: IntProperty(name="Resource",
                                       default=0,)# type: ignore
-    solid: IntProperty(name="Solid",
-                       default=0,)# type: ignore
     useChunkPrecision: BoolProperty(name="Chunk Precision",
                                     default=False,)# type: ignore
     keepBoundary: BoolProperty(name="Keep Boundary",
