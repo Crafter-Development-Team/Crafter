@@ -1,6 +1,8 @@
 package com.minecraft.selector.gui;
 
 import javax.swing.*;
+import com.minecraft.selector.core.RenderedMap;
+import java.util.function.Consumer;
 import java.awt.*;
 import java.awt.event.*;
 import java.awt.image.BufferedImage;
@@ -15,6 +17,29 @@ public class MapCanvas extends JPanel {
     // 缩放限制常量
     private static final double MIN_SCALE = 0.1;
     private static final double MAX_SCALE = 10.0;
+
+    private Point hoverPoint;
+    private Consumer<String> hoverListener;
+
+    public void setHoverListener(Consumer<String> listener) { hoverListener = listener; }
+
+    public String getHoverText(Point point) {
+        if (image == null || point == null) return "X: —  Y: —  Z: —";
+        Point pixel = screenToImageCoordinates(point);
+        if (pixel.x < 0 || pixel.y < 0 || pixel.x >= image.getWidth() || pixel.y >= image.getHeight())
+            return "X: —  Y: —  Z: —";
+        int x = worldMinX + (int) Math.floor(pixel.x / pixelsPerBlock);
+        int z = worldMinZ + (int) Math.floor(pixel.y / pixelsPerBlock);
+        int y = RenderedMap.heightAt(image, pixel.x, pixel.y);
+        return String.format("X: %d  Y: %s  Z: %d", x,
+            y == RenderedMap.NO_HEIGHT ? "—" : Integer.toString(y), z);
+    }
+
+    private void refreshHover() {
+        String text = getHoverText(hoverPoint);
+        setToolTipText(hoverPoint == null ? null : text);
+        if (hoverListener != null) hoverListener.accept(text);
+    }
 
     private BufferedImage image;
     private double scale = 1.0;
@@ -109,6 +134,7 @@ public class MapCanvas extends JPanel {
 
             @Override
             public void mouseDragged(MouseEvent e) {
+                hoverPoint = e.getPoint();
                 if (resizeHandle != HANDLE_NONE && hasValidSelection) {
                     // 拖拽调整选区边界
                     Point world = screenToWorldCoordinates(e.getPoint());
@@ -124,6 +150,7 @@ public class MapCanvas extends JPanel {
                             case HANDLE_SE: currentMaxX = world.x; currentMaxZ = world.y; break;
                             default: break;
                         }
+                        refreshHover();
                         repaint();
                     }
                     return;
@@ -150,6 +177,7 @@ public class MapCanvas extends JPanel {
                         if (selectionCallback != null) {
                             selectionCallback.onSelectionComplete(currentMinX, currentMinZ, currentMaxX, currentMaxZ);
                         }
+                        refreshHover();
                         repaint();
                         return;
                     }
@@ -160,6 +188,9 @@ public class MapCanvas extends JPanel {
                 }
             }
             
+            @Override
+            public void mouseExited(MouseEvent e) { updateMouseCoordinates(null); }
+
             @Override
             public void mouseMoved(MouseEvent e) {
                 // 更新鼠标坐标显示
@@ -239,6 +270,7 @@ public class MapCanvas extends JPanel {
                 imageOffset.x, imageOffset.y, scale);
         }
 
+        refreshHover();
         repaint();
     }
 
@@ -259,6 +291,7 @@ public class MapCanvas extends JPanel {
             this.image = newImage;
             setWorldCoordinateMapping(newWorldMinX, newWorldMinZ, 1.0);
             centerImage();
+            refreshHover();
             repaint();
             return;
         }
@@ -330,6 +363,7 @@ public class MapCanvas extends JPanel {
                 newImage.getWidth(), newImage.getHeight());
         }
 
+        refreshHover();
         repaint();
     }
 
@@ -349,6 +383,7 @@ public class MapCanvas extends JPanel {
             // 重置视图
             resetView();
         }
+        refreshHover();
         repaint();
     }
     
@@ -357,6 +392,7 @@ public class MapCanvas extends JPanel {
      */
     public void setScale(double scale) {
         this.scale = Math.max(0.1, Math.min(10.0, scale));
+        refreshHover();
         repaint();
     }
     
@@ -374,6 +410,7 @@ public class MapCanvas extends JPanel {
         scale = 1.0;
         centerImage();
         selectionRect = null;
+        refreshHover();
         repaint();
     }
 
@@ -406,6 +443,7 @@ public class MapCanvas extends JPanel {
             
             imageOffset.translate(dx, dy);
             lastMousePos = new Point(point);
+            refreshHover();
             repaint();
         }
     }
@@ -416,19 +454,10 @@ public class MapCanvas extends JPanel {
      * 更新鼠标坐标显示
      */
     private void updateMouseCoordinates(Point point) {
-        if (image != null) {
-            // 将屏幕坐标转换为图像坐标
-            Point imagePoint = screenToImageCoordinates(point);
-            
-            // 这里可以触发坐标更新事件
-            // 暂时打印到控制台
-            if (imagePoint.x >= 0 && imagePoint.x < image.getWidth() && 
-                imagePoint.y >= 0 && imagePoint.y < image.getHeight()) {
-                // System.out.println("Image coords: " + imagePoint);
-            }
-        }
+        hoverPoint = point;
+        refreshHover();
     }
-    
+
     /**
      * 处理鼠标滚轮事件
      */
@@ -471,6 +500,7 @@ public class MapCanvas extends JPanel {
                 zoomEndTimer.setRepeats(false);
                 zoomEndTimer.start();
 
+                refreshHover();
                 repaint();
             }
         }
@@ -484,8 +514,8 @@ public class MapCanvas extends JPanel {
             return new Point(0, 0);
         }
         
-        int imageX = (int) ((screenPoint.x - imageOffset.x) / scale);
-        int imageY = (int) ((screenPoint.y - imageOffset.y) / scale);
+        int imageX = (int) Math.floor((screenPoint.x - imageOffset.x) / scale);
+        int imageY = (int) Math.floor((screenPoint.y - imageOffset.y) / scale);
         
         return new Point(imageX, imageY);
     }
@@ -594,6 +624,7 @@ public class MapCanvas extends JPanel {
         this.pixelsPerBlock = pixelsPerBlock;
         System.out.printf("Set world coordinate mapping: origin(%d, %d), px/block=%.2f\n",
             worldMinX, worldMinZ, pixelsPerBlock);
+        refreshHover();
     }
 
     /**
@@ -618,6 +649,7 @@ public class MapCanvas extends JPanel {
 
         // 确保偏移量在合理范围内
         clampImageOffset();
+        refreshHover();
         repaint();
     }
 
@@ -672,6 +704,7 @@ public class MapCanvas extends JPanel {
             clampImageOffset();
         }
 
+        refreshHover();
         repaint();
     }
 
@@ -802,6 +835,7 @@ public class MapCanvas extends JPanel {
         selectionEnd = new Point(point);
         selecting = true;
         selectionRect = new Rectangle();
+        refreshHover();
         repaint();
     }
 
@@ -819,6 +853,7 @@ public class MapCanvas extends JPanel {
             int height = Math.abs(selectionEnd.y - selectionStart.y);
 
             selectionRect = new Rectangle(x, y, width, height);
+            refreshHover();
             repaint();
         }
     }
@@ -860,6 +895,7 @@ public class MapCanvas extends JPanel {
         selecting = false;
         selectionStart = null;
         selectionEnd = null;
+        refreshHover();
         repaint();
     }
 
@@ -967,6 +1003,7 @@ public class MapCanvas extends JPanel {
         selecting = false;
         hasValidSelection = false;
         resizeHandle = HANDLE_NONE;
+        refreshHover();
         repaint();
     }
 
@@ -1028,6 +1065,7 @@ public class MapCanvas extends JPanel {
             imageOffset.y += dy;
 
             lastMousePos = new Point(point);
+            refreshHover();
             repaint();
         }
     }

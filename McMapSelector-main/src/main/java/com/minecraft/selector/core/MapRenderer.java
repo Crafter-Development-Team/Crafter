@@ -24,10 +24,15 @@ public class MapRenderer {
     public static class BlockInfo {
         private final String blockId;
         private final int height;
+        private final Map<String,String> properties;
+        private final Color surfaceColor;
 
         public BlockInfo(String blockId, int height) {
-            this.blockId = blockId;
-            this.height = height;
+            this(blockId,height,Collections.emptyMap(),null);
+        }
+        public BlockInfo(String blockId,int height,Map<String,String> properties,Color surfaceColor) {
+            this.blockId=blockId;this.height=height;
+            this.properties=Collections.unmodifiableMap(new HashMap<>(properties));this.surfaceColor=surfaceColor;
         }
 
         public String getBlockId() {
@@ -38,12 +43,28 @@ public class MapRenderer {
             return height;
         }
 
+        public Map<String,String> getProperties() {return properties;}
+        public Color getSurfaceColor() {return surfaceColor;}
+
         @Override
         public String toString() {
             return blockId + "@" + height;
         }
     }
     
+    public enum SurfaceMode { AUTO, TOP, NETHER_INTERIOR }
+    public static final BlockInfo EMPTY = new BlockInfo("air", RenderedMap.NO_HEIGHT);
+    private final SurfaceMode surfaceMode;
+    private final BlockColors.Palette scanPalette;
+    private final Integer clipY;
+
+    public static boolean isNetherRegion(String path) {
+        for (File part = new File(path).getAbsoluteFile(); part != null; part = part.getParentFile()) {
+            if ("DIM-1".equals(part.getName()) || "the_nether".equals(part.getName())) return true;
+        }
+        return false;
+    }
+
     private final ExecutorService executorService;
     private final int maxWorkers;
     private final ProgressCallback progressCallback;
@@ -68,63 +89,33 @@ public class MapRenderer {
     }
     
     public MapRenderer(int maxWorkers, ProgressCallback progressCallback) {
+        this(maxWorkers, progressCallback, SurfaceMode.AUTO);
+    }
+
+    public MapRenderer(int maxWorkers, ProgressCallback progressCallback, SurfaceMode surfaceMode) {
+        this(maxWorkers,progressCallback,surfaceMode,null);
+    }
+    public MapRenderer(int maxWorkers,ProgressCallback progressCallback,SurfaceMode surfaceMode,Integer clipY) {
+        this(maxWorkers,progressCallback,surfaceMode,clipY,BlockColors.snapshot());
+    }
+    public MapRenderer(int maxWorkers,ProgressCallback progressCallback,SurfaceMode surfaceMode,Integer clipY,BlockColors.Palette palette) {
+        this.clipY=clipY;this.scanPalette=Objects.requireNonNull(palette);
+        if (maxWorkers < 1) throw new IllegalArgumentException("maxWorkers must be positive");
+        this.surfaceMode = Objects.requireNonNull(surfaceMode);
         this.maxWorkers = maxWorkers;
         this.progressCallback = progressCallback;
         this.executorService = Executors.newFixedThreadPool(maxWorkers);
     }
 
     /**
-     * 静态方法：渲染指定区域
-     */
-    public static BufferedImage renderRegion(String regionPath, int minX, int maxX, int minZ, int maxZ, int lodLevel) {
-        try {
-            // 创建简单的进度回调
-            ProgressCallback callback = new ProgressCallback() {
-                @Override
-                public void onProgress(int processed, int total, double speed, Set<String> foundBlocks) {
-                    System.out.printf("渲染进度: %d/%d (%.1f%%) - 速度: %.1f区块/秒\n",
-                        processed, total, (processed * 100.0 / total), speed);
-                }
-                
-                @Override
-                public void onProgressiveRender(BufferedImage partialImage, int completedChunks, int totalChunks) {
-                    // 静态方法中不需要渐进式渲染回调
-                }
-            };
-
-            // 创建渲染器
-            MapRenderer renderer = new MapRenderer(4, callback);
-
-            // 计算区域大小
-            int width = maxX - minX;
-            int height = maxZ - minZ;
-
-            // 渲染区域 - 这里需要处理多个MCA文件
-            // 简化版本：假设只有一个MCA文件
-            File regionDir = new File(regionPath);
-            File[] mcaFiles = regionDir.listFiles((dir, name) -> name.endsWith(".mca"));
-
-            if (mcaFiles != null && mcaFiles.length > 0) {
-                // 使用第一个MCA文件进行渲染
-                String mcaPath = mcaFiles[0].getAbsolutePath();
-                BlockInfo[][] topBlocks = renderer.getTopBlocks(mcaPath, Math.max(width/16, height/16), lodLevel);
-                if (topBlocks != null) {
-                    return renderer.renderToPng(topBlocks, lodLevel);
-                }
-            }
-
-        } catch (Exception e) {
-            System.err.println("渲染区域失败: " + e.getMessage());
-            e.printStackTrace();
-        }
-
-        return null;
-    }
-    
-    /**
      * 渲染区域文件为顶部方块数据
      */
     public BlockInfo[][] getTopBlocks(String mcaFilePath, int regionSize, int sampleInterval) throws IOException {
+        if (regionSize < 1 || regionSize > 32 || sampleInterval < 1 || sampleInterval > 16)
+            throw new IllegalArgumentException("regionSize must be 1..32 and sampleInterval 1..16");
+        final boolean hideRoof = clipY==null && (surfaceMode == SurfaceMode.NETHER_INTERIOR ||
+            (surfaceMode == SurfaceMode.AUTO && isNetherRegion(mcaFilePath)));
+        com.minecraft.selector.utils.LogManager.getInstance().info("Scanning region: "+new File(mcaFilePath).getName(),"MapRenderer");
         System.out.println("正在处理区域文件: " + mcaFilePath);
         System.out.println("区域大小: " + regionSize + "x" + regionSize + " 区块");
         System.out.println("采样间隔: " + sampleInterval);
@@ -161,7 +152,7 @@ public class MapRenderer {
 
         // BlockInfo is immutable: share the empty sentinel instead of allocating
         // 262,144 identical objects for every rendered region.
-        BlockInfo empty = new BlockInfo("none", -64);
+        BlockInfo empty = EMPTY;
         for (BlockInfo[] row : topBlocks) Arrays.fill(row, empty);
         
         // 分批处理区块
@@ -183,7 +174,7 @@ public class MapRenderer {
             final List<int[]> batch = batches.get(i);
 
             Future<Map<String, BlockInfo[][]>> future = executorService.submit(() ->
-                processChunkBatch(region, batch, batchIndex, sampleInterval)
+                processChunkBatch(region, batch, batchIndex, sampleInterval, hideRoof)
             );
             futures.add(future);
         }
@@ -222,8 +213,8 @@ public class MapRenderer {
                 Thread.currentThread().interrupt();
                 throw new IOException("Region rendering cancelled", interrupted);
             } catch (Exception e) {
-                System.err.println("处理批次结果时出错: " + e.getMessage());
-                e.printStackTrace();
+                for (Future<?> pending : futures) pending.cancel(true);
+                throw new IOException("Cannot render region " + mcaFilePath, e);
             }
         }
         
@@ -242,7 +233,7 @@ public class MapRenderer {
      * 处理一批区块
      */
     private Map<String, BlockInfo[][]> processChunkBatch(Region region, List<int[]> chunkCoords,
-                                                     int threadId, int sampleInterval) {
+                                                     int threadId, int sampleInterval, boolean hideRoof) {
         Map<String, BlockInfo[][]> results = new HashMap<>();
         Set<String> localFoundBlocks = new HashSet<>();
 
@@ -254,7 +245,7 @@ public class MapRenderer {
             try {
                 Chunk chunk = region.getChunk(chunkX, chunkZ);
                 if (chunk != null) {
-                    BlockInfo[][] chunkBlocks = processChunk(chunk, localFoundBlocks, sampleInterval);
+                    BlockInfo[][] chunkBlocks = processChunk(chunk, localFoundBlocks, sampleInterval, hideRoof);
                     results.put(chunkX + "," + chunkZ, chunkBlocks);
                 } else {
                     results.put(chunkX + "," + chunkZ, null);
@@ -268,7 +259,7 @@ public class MapRenderer {
 
             } catch (Exception e) {
                 System.err.println("处理区块 (" + chunkX + ", " + chunkZ + ") 时出错: " + e.getMessage());
-                results.put(chunkX + "," + chunkZ, null);
+                throw new IllegalStateException("Cannot read chunk " + chunkX + "," + chunkZ, e);
             }
         }
 
@@ -281,134 +272,106 @@ public class MapRenderer {
     /**
      * 处理单个区块，提取顶部方块 - 优化版
      */
-    private BlockInfo[][] processChunk(Chunk chunk, Set<String> localFoundBlocks, int sampleInterval) {
-        BlockInfo[][] chunkBlocks = new BlockInfo[16][16];
-
-        // 初始化为空气
-        BlockInfo airInfo = new BlockInfo("air", -64);
-        for (int i = 0; i < 16; i++) {
-            for (int j = 0; j < 16; j++) {
-                chunkBlocks[i][j] = airInfo;
+    private BlockInfo[][] processChunk(Chunk chunk, Set<String> localFoundBlocks,
+                                       int sampleInterval, boolean hideRoof) {
+        BlockInfo[][] columns = new BlockInfo[16][16];
+        for (BlockInfo[] row : columns) Arrays.fill(row, EMPTY);
+        List<Chunk.Section> sections = chunk.getSections();
+        sections.sort(Comparator.comparingInt(Chunk.Section::getY).reversed());
+        Set<Chunk.Section> airSections = new HashSet<>();
+        boolean hasRoofCandidate = false;
+        for (Chunk.Section section : sections) {
+            List<Block> palette = section.getPalette();
+            if (palette.isEmpty() || palette.stream().allMatch(block -> BlockColors.isAirBlock(block.getId())))
+                airSections.add(section);
+            if (section.getY() >= 2 && palette.stream().anyMatch(block -> "bedrock".equals(block.getId())))
+                hasRoofCandidate = true;
+        }
+        for (int z = 0; z < 16; z += sampleInterval) {
+            for (int x = 0; x < 16; x += sampleInterval) {
+                BlockInfo top = findSurface(chunk, sections, airSections, x, z, hideRoof && hasRoofCandidate);
+                if (top != EMPTY) localFoundBlocks.add(top.getBlockId());
+                // Color and Y always refer to the same sample (GUI uses interval 1).
+                for (int dz = z; dz < Math.min(16, z + sampleInterval); dz++)
+                    for (int dx = x; dx < Math.min(16, x + sampleInterval); dx++) columns[dz][dx] = top;
             }
         }
-        
-        if (!chunk.hasSections()) return chunkBlocks;
-        
-        boolean[][] foundBlocks = new boolean[16][16];
-
-        // 优化：建立区段索引，避免重复查找
-        // Minecraft Y范围通常是 -64 到 319 (Section -4 到 19)
-        // 使用数组作为快速查找表，偏移量为5 (处理 -5 到 20+ 的范围)
-        Chunk.Section[] sectionMap = new Chunk.Section[32]; 
-        int sectionOffset = 5;
-        int maxSectionY = -100;
-        int minSectionY = 100;
-
-        for (Chunk.Section section : chunk.getSections()) {
-            int y = section.getY();
-            if (y + sectionOffset >= 0 && y + sectionOffset < sectionMap.length) {
-                sectionMap[y + sectionOffset] = section;
-                if (y > maxSectionY) maxSectionY = y;
-                if (y < minSectionY) minSectionY = y;
-            }
-        }
-        
-        if (maxSectionY == -100) return chunkBlocks; // 没有有效区段
-
-        // 预计算哪些区段是全空气的，避免无效查找
-        boolean[] isAirSection = new boolean[32];
-        for (int sy = minSectionY; sy <= maxSectionY; sy++) {
-            int idx = sy + sectionOffset;
-            Chunk.Section s = sectionMap[idx];
-            // 如果区段存在且调色板只有空气，标记为全空气
-            if (s != null) {
-                List<Block> palette = s.getPalette();
-                if (palette.size() == 1 && BlockColors.isAirBlock(palette.get(0).getId())) {
-                    isAirSection[idx] = true;
-                }
-            }
-        }
-
-        // 遍历每个采样点
-        for (int localZ = 0; localZ < 16; localZ++) {
-            for (int localX = 0; localX < 16; localX++) {
-                // 应用采样间隔
-                if (sampleInterval > 1 && (localX % sampleInterval != 0 || localZ % sampleInterval != 0)) {
-                    continue;
-                }
-
-                // 从顶部区段向下查找
-                for (int sy = maxSectionY; sy >= minSectionY; sy--) {
-                    int arrayIndex = sy + sectionOffset;
-                    Chunk.Section section = sectionMap[arrayIndex];
-                    
-                    // 跳过空区段或全空气区段
-                    if (section == null || isAirSection[arrayIndex]) continue;
-
-                    // 在区段内从上向下查找
-                    for (int y = 15; y >= 0; y--) {
-                        Block block = section.getBlock(localX, y, localZ);
-                        String blockId = block.getId();
-                        
-                        if (!BlockColors.isAirBlock(blockId)) {
-                            // 找到非空气方块
-                            if (blockId.startsWith("minecraft:")) {
-                                blockId = blockId.substring(10);
-                            }
-                            
-                            int worldY = (sy << 4) + y;
-                            chunkBlocks[localZ][localX] = new BlockInfo(blockId, worldY);
-                            localFoundBlocks.add(blockId);
-                            foundBlocks[localZ][localX] = true;
-                            
-                            // 找到最高方块后，跳出Y循环和Section循环
-                            sy = minSectionY - 1; // 强制结束外层循环
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-            
-        // 如果使用了采样间隔 > 1，填充未采样的方块
-        if (sampleInterval > 1) {
-            fillUnsampledBlocks(chunkBlocks, foundBlocks, sampleInterval);
-        }
-        
-        return chunkBlocks;
+        return columns;
     }
-    
-    /**
-     * 填充未采样的方块
-     */
-    private void fillUnsampledBlocks(BlockInfo[][] chunkBlocks, boolean[][] foundBlocks, int sampleInterval) {
-        for (int localZ = 0; localZ < 16; localZ++) {
-            for (int localX = 0; localX < 16; localX++) {
-                if (!foundBlocks[localZ][localX]) {
-                    // 找到最近的采样点
-                    int sampleX = (localX / sampleInterval) * sampleInterval;
-                    int sampleZ = (localZ / sampleInterval) * sampleInterval;
 
-                    // 确保采样点在范围内
-                    if (sampleX >= 16) {
-                        sampleX = 16 - sampleInterval;
+    private BlockInfo findSurface(Chunk chunk,List<Chunk.Section> sections,Set<Chunk.Section> airSections,
+                                  int x,int z,boolean hideRoof) {
+        // Discover the Nether ceiling/cavity first in the same descending pass. Keep the
+        // ordinary surface as fallback for columns without ceiling bedrock.
+        List<Layer> ordinary=new ArrayList<>(), interior=new ArrayList<>();
+        boolean roofFound=false,cavityFound=false;
+        double ordinaryAlpha=0,interiorAlpha=0;
+        long previousBottom=Long.MAX_VALUE;
+        for(Chunk.Section section:sections) {
+            long bottom=(long)section.getY()*16,top=bottom+15;
+            if(bottom<=Integer.MIN_VALUE || top>Integer.MAX_VALUE) throw new IllegalArgumentException("Section Y outside supported world coordinates");
+            if(roofFound && top<previousBottom-1) cavityFound=true;
+            previousBottom=bottom;
+            if(airSections.contains(section)) {if(roofFound) cavityFound=true;continue;}
+            for(int y=15;y>=0;y--) {
+                Block block=section.getBlock(x,y,z);String id=block.getId();int worldY=(int)bottom+y;
+                if(clipY!=null && worldY>clipY) continue;
+                if(BlockColors.isAirBlock(id)) {if(roofFound) cavityFound=true;continue;}
+                if(hideRoof && !roofFound && worldY>=32 && "bedrock".equals(id)) roofFound=true;
+                if(!roofFound && ordinaryAlpha<0.995) {
+                    Layer layer=layer(chunk,block,x,worldY,z);if(layer.color.getAlpha()>0) {
+                        ordinary.add(layer);ordinaryAlpha+=(1-ordinaryAlpha)*layer.color.getAlpha()/255.0;
+                        if(!hideRoof && ordinaryAlpha>=0.995) return composite(ordinary);
                     }
-                    if (sampleZ >= 16) {
-                        sampleZ = 16 - sampleInterval;
-                    }
-
-                    // 如果该采样点有方块数据，使用它
-                    if (foundBlocks[sampleZ][sampleX]) {
-                        chunkBlocks[localZ][localX] = chunkBlocks[sampleZ][sampleX];
-                    } else {
-                        // 如果没有找到最近的采样点，使用默认值
-                        chunkBlocks[localZ][localX] = new BlockInfo("air", -64);
+                } else if(roofFound && cavityFound) {
+                    Layer layer=layer(chunk,block,x,worldY,z);if(layer.color.getAlpha()>0) {
+                        interior.add(layer);interiorAlpha+=(1-interiorAlpha)*layer.color.getAlpha()/255.0;
+                        if(interiorAlpha>=0.995) return composite(interior);
                     }
                 }
             }
         }
+        return composite(roofFound?interior:ordinary);
     }
-    
+    private static final class Layer {
+        final Block block;final int y;final Color color;
+        Layer(Block block,int y,Color color) {this.block=block;this.y=y;this.color=color;}
+    }
+    private Layer layer(Chunk chunk,Block block,int x,int y,int z) {
+        Color associated=BlockEntityColors.resolve(block.getId(),chunk.getBlockEntity(x,y,z),scanPalette);
+        Color color=associated==null?surfaceColor(block.getId(),block.getProperties(),scanPalette):associated;
+        if(associated!=null) scanPalette.recordAssociated(block.getId());
+        return new Layer(block,y,color);
+    }
+    /** Projection opacity describes horizontal coverage, not occupied volume. */
+    public static Color surfaceColor(String id,Map<String,String> props,BlockColors.Palette palette) {
+        BlockColors.Appearance appearance=palette.appearance(id,props);
+        Color color=appearance.color;
+        boolean projected=appearance.source.equals("model");
+        String name=id.replace("minecraft:","");
+        double alpha=color.getAlpha()/255.0;
+        if(name.equals("snow")) {
+            int layers=1;try {layers=Integer.parseInt(props.getOrDefault("layers","1"));} catch(NumberFormatException ignored) {}
+            alpha=0.70+0.30*(Math.max(1,Math.min(8,layers))-1)/7.0;
+        } else if(!projected && name.endsWith("_trapdoor") && "true".equals(props.get("open"))) alpha=Math.min(alpha,3.0/16);
+        else if(!projected && name.endsWith("_pressure_plate")) alpha=Math.min(alpha,196.0/256);
+        else if(name.endsWith("glass") || name.endsWith("glass_pane")) alpha=Math.min(alpha,0.38);
+        return new Color(color.getRed(),color.getGreen(),color.getBlue(),(int)Math.round(alpha*255));
+    }
+    public static Color over(Color top,Color below) {
+        double a=top.getAlpha()/255.0,b=below.getAlpha()/255.0,out=a+(1-a)*b;
+        if(out==0) return new Color(0,0,0,0);
+        return new Color((int)Math.round((top.getRed()*a+below.getRed()*b*(1-a))/out),
+            (int)Math.round((top.getGreen()*a+below.getGreen()*b*(1-a))/out),
+            (int)Math.round((top.getBlue()*a+below.getBlue()*b*(1-a))/out),(int)Math.round(out*255));
+    }
+    private static BlockInfo composite(List<Layer> layers) {
+        if(layers.isEmpty()) return EMPTY;
+        Color color=new Color(0,0,0,0);
+        for(int i=layers.size()-1;i>=0;i--) color=over(layers.get(i).color,color);
+        Layer top=layers.get(0);return new BlockInfo(top.block.getId(),top.y,top.block.getProperties(),color);
+    }
+
     /**
      * 更新进度
      */
@@ -432,11 +395,12 @@ public class MapRenderer {
             return null;
         }
 
+        com.minecraft.selector.utils.LogManager.getInstance().info("Rendering surface colors and cached heights...","MapRenderer");
         System.out.println("正在渲染PNG图像...");
         long startTime = System.currentTimeMillis();
 
         int height = topBlocks.length;
-        int width = topBlocks[0].length;
+        int width = height == 0 ? 0 : topBlocks[0].length;
 
         if (height <= 0 || width <= 0) {
             System.err.println("无效的数组大小: " + width + "x" + height);
@@ -444,11 +408,10 @@ public class MapRenderer {
         }
 
         // 预处理所有方块ID及其颜色，避免在循环中重复查找
-        Map<String, Color> blockColorCache = new ConcurrentHashMap<>();
-        final BlockColors.Palette renderPalette = BlockColors.snapshot();
+        final BlockColors.Palette renderPalette = scanPalette;
         
         // 创建RGBA图像
-        BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+        RenderedMap image = new RenderedMap(width, height);
         int[] pixels = new int[width * height];
 
         // 高度差阈值和最大值
@@ -464,26 +427,19 @@ public class MapRenderer {
                 try {
                     BlockInfo currentBlock = topBlocks[i][j];
                     String blockId = currentBlock != null ? currentBlock.getBlockId() : null;
-                    int currentHeight = currentBlock != null ? currentBlock.getHeight() : -64;
+                    int currentHeight = currentBlock != null && !BlockColors.isAirBlock(blockId)
+                        ? currentBlock.getHeight() : RenderedMap.NO_HEIGHT;
+                    image.setHeightAt(j, i, currentHeight);
 
                     Color baseColor;
-                    if (currentBlock == null) {
+                    if (currentHeight == RenderedMap.NO_HEIGHT) {
                         baseColor = new Color(0, 0, 0, 0);
                     } else if (blockId == null) {
                         baseColor = ERROR_COLOR;
                         errorCount.incrementAndGet();
                     } else {
-                        // 使用 computeIfAbsent 线程安全地获取或计算颜色
-                        baseColor = blockColorCache.computeIfAbsent(blockId, 
-                            id -> {
-                                Color c = renderPalette.getBlockColor(id);
-                                return c != null ? c : ERROR_COLOR;
-                            });
-                        
-                        if (baseColor == ERROR_COLOR && !blockColorCache.containsKey(blockId)) {
-                            // 只有在真正找不到颜色时才计数错误
-                            errorCount.incrementAndGet();
-                        }
+                        baseColor=currentBlock.getSurfaceColor()!=null?currentBlock.getSurfaceColor():
+                            surfaceColor(blockId,currentBlock.getProperties(),renderPalette);
                     }
 
                     // 检查相邻像素的高度差
@@ -496,9 +452,12 @@ public class MapRenderer {
 
                         if (ni >= 0 && ni < height && nj >= 0 && nj < width) {
                             BlockInfo neighborBlock = topBlocks[ni][nj];
-                            int neighborHeight = neighborBlock != null ? neighborBlock.getHeight() : -64;
+                            if (currentHeight == RenderedMap.NO_HEIGHT || neighborBlock == null ||
+                                BlockColors.isAirBlock(neighborBlock.getBlockId()) ||
+                                neighborBlock.getHeight() == RenderedMap.NO_HEIGHT) continue;
+                            int neighborHeight = neighborBlock.getHeight();
 
-                            int heightDiff = Math.abs(currentHeight - neighborHeight);
+                            int heightDiff = (int) Math.min(Integer.MAX_VALUE, Math.abs((long) currentHeight - neighborHeight));
                             if (heightDiff > HEIGHT_DIFF_THRESHOLD) {
                                 shouldDrawEdge = true;
                                 maxHeightDiff = Math.max(maxHeightDiff, heightDiff);
@@ -534,6 +493,7 @@ public class MapRenderer {
         }
 
         long totalTime = System.currentTimeMillis() - startTime;
+        com.minecraft.selector.utils.LogManager.getInstance().info("Rendered "+width+"x"+height+" surface map","MapRenderer");
         System.out.println("渲染完成，耗时: " + (totalTime / 1000.0) + "秒");
         
         return image;

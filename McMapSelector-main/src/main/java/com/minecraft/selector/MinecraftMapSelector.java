@@ -1,8 +1,10 @@
 package com.minecraft.selector;
 
 import com.minecraft.selector.core.MapRenderer;
+import com.minecraft.selector.core.BlockColors;
+import com.minecraft.selector.core.ResourceOptions;
+import com.minecraft.selector.core.RenderedMap;
 import com.minecraft.selector.gui.MinecraftMapGUI;
-import com.minecraft.selector.gui.UIThemeManager;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
@@ -20,14 +22,14 @@ import java.util.stream.Collectors;
 public class MinecraftMapSelector {
     
     public static void main(String[] args) {
-        // 初始化UI主题系统
-        UIThemeManager.getInstance().initializeTheme();
-
         System.out.println("Minecraft地图选择器 - Java版本");
         System.out.println("接收到的参数数量: " + args.length);
         for (int i = 0; i < args.length; i++) {
             System.out.println("参数[" + i + "]: " + args[i]);
         }
+
+        ResourceOptions.setLaunch(ResourceOptions.parse(args));
+        args=ResourceOptions.withoutResourceFlags(args);
 
         // 检查是否是Blender集成模式
         final String worldPath;
@@ -109,6 +111,10 @@ public class MinecraftMapSelector {
         }
     }
     
+    private static MapRenderer.SurfaceMode parseSurfaceMode(String[] args, int index) {
+        return args.length > index ? MapRenderer.SurfaceMode.valueOf(args[index].toUpperCase(Locale.ROOT)) : MapRenderer.SurfaceMode.AUTO;
+    }
+
     /**
      * 运行命令行模式
      */
@@ -116,6 +122,7 @@ public class MinecraftMapSelector {
         long overallStartTime = System.currentTimeMillis();
 
         String mcaFilePath = args[0];
+        BlockColors.initializeColorsFromSavePath(mcaFilePath,ResourceOptions.launch());
 
         // 检查是否为存档目录
         File inputFile = new File(mcaFilePath);
@@ -174,7 +181,7 @@ public class MinecraftMapSelector {
         };
         
         // 创建地图渲染器
-        MapRenderer renderer = new MapRenderer(maxWorkers, progressCallback);
+        MapRenderer renderer = new MapRenderer(maxWorkers, progressCallback, parseSurfaceMode(args, 6),ResourceOptions.launch().renderY);
         
         try {
             // 读取区域文件
@@ -190,6 +197,7 @@ public class MinecraftMapSelector {
                 BufferedImage image = renderer.renderToPng(topBlocks, sampleInterval);
                 if (image != null) {
                     saveImageToPng(image, imageOutput);
+                    saveColorReport(imageOutput);
                 }
                 
                 // 输出总体统计信息
@@ -256,7 +264,7 @@ public class MinecraftMapSelector {
         // 默认输出文件名前缀
         String defaultBaseName = worldDir.getName() + "_map_" + System.currentTimeMillis();
 
-        MapRenderer renderer = new MapRenderer(maxWorkers, createProgressCallback());
+        MapRenderer renderer = new MapRenderer(maxWorkers, createProgressCallback(), parseSurfaceMode(args, 5),ResourceOptions.launch().renderY);
         int clusterIndex = 0;
         for (List<RegionFile> cluster : clusters) {
             clusterIndex++;
@@ -299,7 +307,7 @@ public class MinecraftMapSelector {
         System.out.println("输出图像大小: " + width + "x" + height + " 像素");
 
         // 初始化整图数组为 air
-        MapRenderer.BlockInfo air = new MapRenderer.BlockInfo("air", -64);
+        MapRenderer.BlockInfo air = MapRenderer.EMPTY;
         MapRenderer.BlockInfo[][] merged = new MapRenderer.BlockInfo[height][width];
         for (MapRenderer.BlockInfo[] row : merged) {
             Arrays.fill(row, air);
@@ -332,6 +340,7 @@ public class MinecraftMapSelector {
         BufferedImage image = renderer.renderToPng(merged, sampleInterval);
         if (image != null) {
             saveImageToPng(image, imageOutput);
+            saveColorReport(imageOutput);
         }
     }
 
@@ -358,13 +367,14 @@ public class MinecraftMapSelector {
                         heights[i][j] = blockInfo.getHeight();
                     } else {
                         blockIds[i][j] = "air";
-                        heights[i][j] = -64;
+                        heights[i][j] = RenderedMap.NO_HEIGHT;
                     }
                 }
             }
 
             data.put("blocks", blockIds);
             data.put("heights", heights);
+            data.put("noHeight", RenderedMap.NO_HEIGHT);
             data.put("width", topBlocks[0].length);
             data.put("height", topBlocks.length);
             data.put("originX", originX);   // 左上角世界 X 坐标
@@ -490,13 +500,14 @@ public class MinecraftMapSelector {
                         heights[i][j] = blockInfo.getHeight();
                     } else {
                         blockIds[i][j] = "air";
-                        heights[i][j] = -64;
+                        heights[i][j] = RenderedMap.NO_HEIGHT;
                     }
                 }
             }
 
             data.put("blocks", blockIds);
             data.put("heights", heights);
+            data.put("noHeight", RenderedMap.NO_HEIGHT);
             data.put("width", topBlocks[0].length);
             data.put("height", topBlocks.length);
 
@@ -513,6 +524,12 @@ public class MinecraftMapSelector {
         }
     }
     
+    private static void saveColorReport(String imagePath) {
+        BlockColors.snapshot().logSummary();
+        try {new ObjectMapper().writerWithDefaultPrettyPrinter().writeValue(new File(imagePath+".colors.json"),BlockColors.snapshot().usageReport());}
+        catch(IOException e) {throw new IllegalStateException("Cannot write color report",e);}
+    }
+
     /**
      * 保存图像为PNG文件
      */
@@ -578,12 +595,17 @@ public class MinecraftMapSelector {
         System.out.println("  java -jar minecraft-map-selector.jar                                    # 启动GUI");
         System.out.println("  java -jar minecraft-map-selector.jar <mca文件路径> [选项...]              # 命令行模式");
         System.out.println();
+        System.out.println("资源选项（CLI / GUI / Blender 通用，可重复；后面的资源包覆盖前面的）:");
+        System.out.println("  --jar-path <jar> --mods-dir <dir> --mod-jar <jar> --resource-pack <zip>");
+        System.out.println("  --render-y <Y> 以指定 Y 为顶层向下渲染；默认 AUTO");
+        System.out.println("  --no-auto-resources 禁用资源自动发现；每张图另存 .png.colors.json 命中统计");
         System.out.println("命令行选项:");
         System.out.println("  <mca文件路径>        必需，.mca区域文件路径");
         System.out.println("  [输出JSON文件路径]   可选，默认为<区域名>_map_<时间戳>.json");
         System.out.println("  [输出图像文件路径]   可选，默认为<区域名>_map_<时间戳>.png");
         System.out.println("  [线程数]            可选，默认为CPU核心数或8（取较小值）");
         System.out.println("  [区域大小]          可选，以区块为单位，默认32（即32x32区块）");
+        System.out.println("  [表面模式]          最后可选参数 AUTO / TOP / NETHER_INTERIOR，默认 AUTO（下界去顶床）");
         System.out.println("  [采样间隔]          可选，每隔多少个方块采样一次，默认1（全采样）");
         System.out.println();
         System.out.println("示例:");

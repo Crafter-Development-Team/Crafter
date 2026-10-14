@@ -34,6 +34,8 @@ public class DynamicRegionManager {
     private Set<Point> desiredRegions = Collections.emptySet();
     private long generation = 0;
     private volatile boolean closed;
+    private volatile long progressRevision;
+    public long getProgressRevision() {return progressRevision;}
     private static final int MAX_REQUIRED_REGIONS = 64;
 
     interface TileRenderer { BufferedImage render(Point coordinate) throws Exception; }
@@ -42,7 +44,7 @@ public class DynamicRegionManager {
     // 配置参数
     // private static final int MAX_LOADED_REGIONS = 25; // 移除最大加载限制
     private static final int REGION_SIZE = 512; // 每个区域的像素大小
-    private static final int PRELOAD_RADIUS = 1; // 预加载半径
+    private static final int PRELOAD_RADIUS = 0; // 预加载半径
     
     // 监听器
     private final List<RegionLoadListener> listeners = new CopyOnWriteArrayList<>();
@@ -68,6 +70,9 @@ public class DynamicRegionManager {
             lastAccessTime = System.currentTimeMillis();
             return image; 
         }
+        public int getHeightAt(int x, int z) {
+            return RenderedMap.heightAt(image, x, z);
+        }
         public long getLoadTime() { return loadTime; }
         public long getLastAccessTime() { return lastAccessTime; }
     }
@@ -80,6 +85,9 @@ public class DynamicRegionManager {
         void onRegionUnloaded(Point regionCoord);
         void onLoadingStarted(Point regionCoord);
         void onLoadingFailed(Point regionCoord, Exception error);
+        /** Settled includes failures; failed files must not leave the progress UI hanging. */
+        default void onViewportProgress(int settled,int total,int failed) {}
+        default void onViewportProgress(long revision,int settled,int total,int failed) {onViewportProgress(settled,total,failed);}
     }
     
     public DynamicRegionManager(String savePath) {
@@ -88,17 +96,25 @@ public class DynamicRegionManager {
 
     /** Create a manager for an explicitly selected dimension. */
     public DynamicRegionManager(String savePath, File regionDir) {
+        this(savePath, regionDir, MapRenderer.SurfaceMode.AUTO);
+    }
+
+    public DynamicRegionManager(String savePath, File regionDir, MapRenderer.SurfaceMode mode) {
+        this(savePath,regionDir,mode,null);
+    }
+    public DynamicRegionManager(String savePath,File regionDir,MapRenderer.SurfaceMode mode,Integer clipY) {
         this.savePath = savePath;
         this.regionDir = regionDir;
         this.logManager = LogManager.getInstance();
         this.loadingExecutor = (ThreadPoolExecutor) Executors.newFixedThreadPool(3, r -> {
             Thread t = new Thread(r, "map-region-loader"); t.setDaemon(true); return t;
         });
+        final BlockColors.Palette tilePalette=BlockColors.snapshot();
         this.tileRenderer = coordinate -> {
             File file = new File(regionDir, String.format("r.%d.%d.mca", coordinate.x, coordinate.y));
             // Independent progress counters per render: a shared MapRenderer was
             // concurrently resetting counters and scheduling blocking waiter tasks.
-            MapRenderer local = new MapRenderer(2, null);
+            MapRenderer local = new MapRenderer(2, null, mode,clipY,tilePalette);
             try { return local.renderToPng(local.getTopBlocks(file.getAbsolutePath(),32,1),1); }
             finally { local.shutdown(); }
         };
@@ -178,6 +194,7 @@ public class DynamicRegionManager {
             desiredRegions = new HashSet<>(candidates);
             unloadUnneededRegions(desiredRegions);
             for (Point point : candidates) startLoadingRegion(point);
+            notifyViewportProgress();
         }
     }
 
@@ -298,12 +315,15 @@ public class DynamicRegionManager {
                             // Keep current view + a bounded warm cache when browsing.
                             while (loadedRegions.size() > 96) unloadLeastRecentlyUsed();
                             notifyRegionLoaded(regionCoord, tile);
-                        } else if (tile == null) failedUntil.put(regionCoord, System.currentTimeMillis()+5000);
+                        } else if (tile == null) {
+                            failedUntil.put(regionCoord, System.currentTimeMillis()+5000);
+                            notifyLoadingFailed(regionCoord,new IllegalStateException("Region renderer returned no image"));
+                        }
                     } catch (CancellationException ignored) {
                     } catch (Exception error) {
                         failedUntil.put(regionCoord, System.currentTimeMillis()+5000);
                         notifyLoadingFailed(regionCoord,error);
-                    } finally { loadingRegions.remove(regionCoord, this); }
+                    } finally { loadingRegions.remove(regionCoord, this);notifyViewportProgress(); }
                 }
             }
         };
@@ -362,6 +382,19 @@ public class DynamicRegionManager {
         listeners.remove(listener);
     }
     
+    private void notifyViewportProgress() {
+        long revision=++progressRevision;
+        int settled=0,failed=0;
+        for(Point point:desiredRegions) {
+            if(loadedRegions.containsKey(point)) settled++;
+            else if(!loadingRegions.containsKey(point) && failedUntil.containsKey(point)) {settled++;failed++;}
+        }
+        for(RegionLoadListener listener:listeners) {
+            try {listener.onViewportProgress(revision,settled,desiredRegions.size(),failed);}
+            catch(Exception e) {logManager.error("Viewport progress listener failed","DynamicRegionManager",e);}
+        }
+    }
+
     // 通知方法
     private void notifyRegionLoaded(Point regionCoord, RegionTile tile) {
         for (RegionLoadListener listener : listeners) {
@@ -416,6 +449,7 @@ public class DynamicRegionManager {
             for (Point coordinate : loadedRegions.keySet()) notifyRegionUnloaded(coordinate);
             loadedRegions.clear();
             failedUntil.clear();
+            notifyViewportProgress();
         }
     }
 
