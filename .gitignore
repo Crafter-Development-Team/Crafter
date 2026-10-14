@@ -162,6 +162,5 @@ cython_debug/
 .idea/
 config.ini
 
-# Non-Crafter subprojects
-McMapSelector-main/
+# Other subprojects (McMapSelector source is tracked; its own .gitignore excludes builds)
 WorldImporter/

@@ -5,6 +5,8 @@ import com.minecraft.selector.core.DynamicRegionManager.RegionTile;
 import com.minecraft.selector.utils.LogManager;
 
 import javax.swing.*;
+import com.minecraft.selector.core.RenderedMap;
+import java.util.function.Consumer;
 import java.awt.*;
 import java.awt.event.*;
 import java.awt.image.BufferedImage;
@@ -17,6 +19,27 @@ import java.util.List;
  * 支持动态加载和显示地图区域
  */
 public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.RegionLoadListener {
+    private Point hoverPoint;
+    private Consumer<String> hoverListener;
+
+    public void setHoverListener(Consumer<String> listener) { hoverListener = listener; }
+
+    public String getHoverText(Point point) {
+        if (point == null || regionManager == null) return "X: —  Y: —  Z: —";
+        Point world = screenToWorldCoordinates(point);
+        RegionTile tile = regionManager.getLoadedRegion(new Point(Math.floorDiv(world.x, 512), Math.floorDiv(world.y, 512)));
+        int y = tile == null ? RenderedMap.NO_HEIGHT :
+            tile.getHeightAt(Math.floorMod(world.x, 512), Math.floorMod(world.y, 512));
+        return String.format("X: %d  Y: %s  Z: %d", world.x,
+            y == RenderedMap.NO_HEIGHT ? "—" : Integer.toString(y), world.y);
+    }
+
+    private void refreshHover() {
+        String text = getHoverText(hoverPoint);
+        setToolTipText(hoverPoint == null ? null : text);
+        if (hoverListener != null) hoverListener.accept(text);
+    }
+
     private final LogManager logManager;
     private DynamicRegionManager regionManager;
     
@@ -79,6 +102,9 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
         setBackground(Color.BLACK);
         setPreferredSize(new Dimension(800, 600));
         
+        addComponentListener(new java.awt.event.ComponentAdapter() {
+            @Override public void componentResized(java.awt.event.ComponentEvent event) {requestViewportUpdate();}
+        });
         setupMouseListeners();
         setupKeyListeners();
         
@@ -97,7 +123,8 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
     /**
      * 设置区域管理器
      */
-    public void setRegionManager(DynamicRegionManager regionManager) {
+    public void setRegionManager(DynamicRegionManager regionManager) {setRegionManager(regionManager,true);}
+    public void setRegionManager(DynamicRegionManager regionManager,boolean loadImmediately) {
         if (this.regionManager != null) {
             this.regionManager.removeRegionLoadListener(this);
         }
@@ -108,9 +135,10 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
         
         if (regionManager != null) {
             regionManager.addRegionLoadListener(this);
-            updateViewportIfNeeded();
+            if(loadImmediately) updateViewportIfNeeded();
         }
         
+        refreshHover();
         repaint();
     }
     
@@ -119,6 +147,12 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
      */
     private void setupMouseListeners() {
         addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseExited(MouseEvent e) {
+                hoverPoint = null;
+                refreshHover();
+            }
+
             @Override
             public void mousePressed(MouseEvent e) {
                 if (SwingUtilities.isLeftMouseButton(e)) {
@@ -150,6 +184,7 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
                         if (selectionCallback != null) {
                             selectionCallback.onSelectionComplete(currentMinX, currentMinZ, currentMaxX, currentMaxZ);
                         }
+                        refreshHover();
                         repaint();
                         return;
                     }
@@ -165,6 +200,7 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
         addMouseMotionListener(new MouseMotionAdapter() {
             @Override
             public void mouseDragged(MouseEvent e) {
+                hoverPoint = e.getPoint();
                 if (resizeHandle != HANDLE_NONE && hasValidSelection) {
                     // 拖拽调整选区边界
                     Point world = screenToWorldCoordinates(e.getPoint());
@@ -179,6 +215,7 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
                         case HANDLE_SE: currentMaxX = world.x; currentMaxZ = world.y; break;
                         default: break;
                     }
+                    refreshHover();
                     repaint();
                     return;
                 }
@@ -192,6 +229,7 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
                     viewOffset.y += deltaY;
                     
                     lastMousePos = currentPos;
+                    refreshHover();
                     repaint();
                     requestViewportUpdate(); // 使用防抖更新
                 } else if (SwingUtilities.isRightMouseButton(e) && selecting) {
@@ -202,6 +240,8 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
             
             @Override
             public void mouseMoved(MouseEvent e) {
+                hoverPoint = e.getPoint();
+                refreshHover();
                 // 鼠标悬停在线框/角点上时显示调整光标
                 if (hasValidSelection && resizeHandle == HANDLE_NONE) {
                     int handle = hitTestResizeHandle(e.getPoint());
@@ -238,6 +278,7 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
             viewOffset.x = (int) (mousePos.x - worldX * scale);
             viewOffset.y = (int) (mousePos.y - worldY * scale);
             
+            refreshHover();
             repaint();
             requestViewportUpdate(); // 使用防抖更新
         });
@@ -280,6 +321,7 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
                         resetView();
                         break;
                 }
+                refreshHover();
                 repaint();
                 requestViewportUpdate(); // 使用防抖更新
             }
@@ -292,6 +334,7 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
     public void resetView() {
         scale = 1.0;
         viewOffset = new Point(getWidth() / 2, getHeight() / 2);
+        refreshHover();
         repaint();
     }
     
@@ -300,6 +343,27 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
      * 为避免极远孤立区域(如异常坐标的region)导致地图缩放过小，
      * 使用"main cluster"(与大多数区域相邻的连续区域)来计算边界。
      */
+    public void showInitialViewport(double[] player) {
+        if(regionManager==null) return;
+        Set<Point> regions=regionManager.getAvailableRegions();
+        if(regions.isEmpty()) {
+            regionManager.updateViewport(new Rectangle(0,0,1,1));return;
+        }
+        Point anchor=regions.stream().min(java.util.Comparator.comparingDouble(p -> {
+            double x=player==null?0:player[0],z=player==null?0:player[2];
+            return Math.pow(p.x*512.0+256-x,2)+Math.pow(p.y*512.0+256-z,2);
+        })).get();
+        double x=player==null?anchor.x*512.0+256:player[0];
+        double z=player==null?anchor.y*512.0+256:player[2];
+        if(!regions.contains(new Point((int)Math.floor(x/512),(int)Math.floor(z/512)))) {
+            x=anchor.x*512.0+256;z=anchor.y*512.0+256;
+        }
+        scale=1.0;
+        viewOffset.x=getWidth()/2-(int)x;viewOffset.y=getHeight()/2-(int)z;
+        lastViewport=new Rectangle();viewportUpdateTimer.stop();
+        updateViewportIfNeeded();repaint();
+    }
+
     public void fitToWindow() {
         if (regionManager == null) return;
         
@@ -363,6 +427,7 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
         viewOffset.x = getWidth() / 2 - (int) (centerWorldX * scale);
         viewOffset.y = getHeight() / 2 - (int) (centerWorldZ * scale);
         
+        refreshHover();
         repaint();
         requestViewportUpdate();
     }
@@ -419,6 +484,7 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
         viewOffset.x = getWidth() / 2 - (int) (worldCoord.x * scale);
         viewOffset.y = getHeight() / 2 - (int) (worldCoord.y * scale);
 
+        refreshHover();
         repaint();
 
         // 立即更新视口（不等防抖），让目标区域的加载尽快开始
@@ -443,7 +509,7 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
      * 检查是否需要更新视口
      */
     private void updateViewportIfNeeded() {
-        if (regionManager == null) return;
+        if (regionManager == null || getWidth()<=0 || getHeight()<=0) return;
         
         Rectangle currentViewport = calculateWorldViewport();
         
@@ -460,6 +526,11 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
      */
     private boolean hasSignificantViewportChange(Rectangle current, Rectangle last) {
         if (last.isEmpty()) return true;
+        // Crossing a region edge matters even for small moves now that loading is viewport-only.
+        if(Math.floorDiv(current.x,512)!=Math.floorDiv(last.x,512) ||
+           Math.floorDiv(current.y,512)!=Math.floorDiv(last.y,512) ||
+           Math.floorDiv((long)current.x+current.width-1,512)!=Math.floorDiv((long)last.x+last.width-1,512) ||
+           Math.floorDiv((long)current.y+current.height-1,512)!=Math.floorDiv((long)last.y+last.height-1,512)) return true;
         
         // 计算变化阈值（区域大小的1/4）
         int threshold = REGION_SIZE / 4;
@@ -677,22 +748,22 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
     // RegionLoadListener 实现
     @Override
     public void onRegionLoaded(Point regionCoord, RegionTile tile) {
-        SwingUtilities.invokeLater(this::repaint);
+        SwingUtilities.invokeLater(() -> { refreshHover(); repaint(); });
     }
     
     @Override
     public void onRegionUnloaded(Point regionCoord) {
-        SwingUtilities.invokeLater(this::repaint);
+        SwingUtilities.invokeLater(() -> { refreshHover(); repaint(); });
     }
     
     @Override
     public void onLoadingStarted(Point regionCoord) {
-        SwingUtilities.invokeLater(this::repaint);
+        SwingUtilities.invokeLater(() -> { refreshHover(); repaint(); });
     }
     
     @Override
     public void onLoadingFailed(Point regionCoord, Exception error) {
-        SwingUtilities.invokeLater(this::repaint);
+        SwingUtilities.invokeLater(() -> { refreshHover(); repaint(); });
         logManager.error("Region load failed: r." + regionCoord.x + "." + regionCoord.y + ".mca", "DynamicMapCanvas", error);
     }
     
@@ -711,6 +782,7 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
         selectionEnd = new Point(point);
         selecting = true;
         selectionRect = new Rectangle();
+        refreshHover();
         repaint();
     }
     
@@ -728,6 +800,7 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
             int height = Math.abs(selectionEnd.y - selectionStart.y);
             
             selectionRect = new Rectangle(x, y, width, height);
+            refreshHover();
             repaint();
         }
     }
@@ -766,6 +839,7 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
         }
         
         selecting = false;
+        refreshHover();
         repaint();
     }
     
@@ -897,6 +971,7 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
         selectionWorldEnd = null;
         selectionRect = new Rectangle();
         resizeHandle = HANDLE_NONE;
+        refreshHover();
         repaint();
     }
     

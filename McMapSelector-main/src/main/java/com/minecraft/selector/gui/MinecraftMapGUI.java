@@ -1,8 +1,10 @@
 package com.minecraft.selector.gui;
 
 import com.minecraft.selector.core.MapRenderer;
+import com.minecraft.selector.core.RenderedMap;
 import com.minecraft.selector.core.MinecraftResourceExtractor;
 import com.minecraft.selector.core.BlockColors;
+import com.minecraft.selector.core.ResourceOptions;
 import com.minecraft.selector.nbt.NBTReader;
 import com.minecraft.selector.utils.FileUtils;
 import com.minecraft.selector.utils.LogManager;
@@ -57,6 +59,32 @@ public class MinecraftMapGUI extends JFrame {
     private WorldPathResolver.DimensionInfo currentDimension;
     private boolean updatingDimensionDropdown = false;
     private JCheckBox autoLoadCheckbox;
+    private JCheckBoxMenuItem hideNetherRoofCheckbox;
+    private volatile MapRenderer.SurfaceMode surfaceMode = MapRenderer.SurfaceMode.AUTO;
+    private volatile long viewGeneration;
+    private volatile long colorGeneration;
+
+    private void resetSurfaceView() {
+        surfaceMode = hideNetherRoofCheckbox.isSelected() ? MapRenderer.SurfaceMode.AUTO : MapRenderer.SurfaceMode.TOP;
+        // Height choices made during preparation apply when the first viewport is created.
+        // In particular --render-y's debounce must not invalidate the world loading worker.
+        if(loadingPanel.getPhase()==LoadingPhasePanel.Phase.PREPARING) return;
+        ++viewGeneration;
+        coordDisplayLabel.setText("X: —  Y: —  Z: —");
+        dynamicMapManager.clear();
+        mapCanvas.setImage(null);
+        mapImage = null;
+        if (isDynamicMode && dynamicRegionManager != null) {
+            dynamicRegionManager.shutdown();
+            dynamicRegionManager = createDynamicRegionManager();
+            dynamicMapCanvas.setRegionManager(dynamicRegionManager);
+        } else if (lastMcaPath != null) {
+            renderMap(lastMcaPath);
+        } else if (savePath != null) {
+            renderAroundPlayer();
+        }
+    }
+
     private DynamicMapManager dynamicMapManager;
     // private JButton renderButton; // 已删除
 
@@ -67,7 +95,6 @@ public class MinecraftMapGUI extends JFrame {
     private JButton jumpButton;
     private JButton confirmSelectionButton;
     private JButton reRenderButton;
-    private JButton view3DButton;
     private MapCanvas mapCanvas;
     private JProgressBar progressBar;
     private JLabel progressLabel;
@@ -77,13 +104,18 @@ public class MinecraftMapGUI extends JFrame {
     private double[] playerPos;
     private Rectangle selectedRegion;
     private BufferedImage mapImage;
-    private MapRenderer.BlockInfo[][] lastRenderedBlockData; // 保存最后渲染的方块数据
 
     private double customScale = 1.0;
     private Point currentRegion;
     private String currentOutputFile;
     private String currentJsonFile;
     private MinecraftResourceExtractor resourceExtractor;
+    private final ResourceOptions colorResources=ResourceOptions.launch();
+    private String lastMcaPath;
+    private String singleResourcePath;
+    private RenderHeightPanel renderHeightPanel;
+    private LoadingPhasePanel loadingPanel;
+    private javax.swing.Timer heightDebounce;
     private String programDir;
     
     // 日志相关
@@ -143,6 +175,7 @@ public class MinecraftMapGUI extends JFrame {
         // 设置Blender模式
         this.outputFilePath = outputFile;
         this.jarFilePath = jarPath;
+        if(jarPath!=null && colorResources.jars.isEmpty()) colorResources.jars.add(jarPath);
         this.isBlenderMode = (outputFile != null);
         this.blenderMinY = minY;
         this.blenderMaxY = maxY;
@@ -151,16 +184,17 @@ public class MinecraftMapGUI extends JFrame {
         initializeThreadPools();
 
         initializeGUI();
+        if(isBlenderMode) showLoadingState("Parsing world and discovering resources...");
 
         // 尝试加载已保存的颜色文件
         // World loading initializes its own colors before rendering. Avoid a
         // competing startup extraction (and unscoped colors from another world).
-        if (!isBlenderMode || worldPath == null) {
+        if (worldPath == null) {
             loadSavedColors();
         }
 
         // 如果是Blender模式，显示模式信息
-        if (isBlenderMode) {
+        if (worldPath != null || isBlenderMode) {
             SwingUtilities.invokeLater(() -> {
                 progressLabel.setText("Blender integration mode started");
 
@@ -176,7 +210,7 @@ public class MinecraftMapGUI extends JFrame {
                     if (new File(worldPath).exists()) {
                         loadWorldFromPath(worldPath);
                     } else {
-                        progressLabel.setText("Blender mode: world path does not exist - " + worldPath);
+                        showErrorState("World path does not exist - " + worldPath);
                         System.err.println("Blender mode: world path does not exist: " + worldPath);
                     }
                 }
@@ -188,31 +222,9 @@ public class MinecraftMapGUI extends JFrame {
      * 加载已保存的颜色文件
      */
     private void loadSavedColors() {
-        // 如果提供了JAR路径，优先从JAR文件提取颜色
-        if (jarFilePath != null && new File(jarFilePath).exists()) {
-            System.out.println("Extracting colors from provided JAR path: " + jarFilePath);
-            extractColorsFromJar(jarFilePath);
-            return;
-        }
-
-        // 优先尝试加载JSON格式
-        String jsonColorFile = new File(programDir, "block_colors.json").getAbsolutePath();
-        if (new File(jsonColorFile).exists()) {
-            if (resourceExtractor.loadExtractedColorsFromJson(jsonColorFile)) {
-                BlockColors.setResourceExtractor(resourceExtractor);
-                System.out.println("Loaded saved block colors (JSON)");
-                return;
-            }
-        }
-
-        // 如果JSON不存在，尝试加载Properties格式
-        String propsColorFile = new File(programDir, "extracted_colors.properties").getAbsolutePath();
-        if (new File(propsColorFile).exists()) {
-            if (resourceExtractor.loadExtractedColors(propsColorFile)) {
-                BlockColors.setResourceExtractor(resourceExtractor);
-                System.out.println("Loaded saved block colors (Properties)");
-            }
-        }
+        // Unscoped historical exports lack model coverage and resource fingerprints.
+        // Actual assets are initialized on the worker before world/MCA rendering.
+        BlockColors.setResourceExtractor(null);
     }
 
     /**
@@ -243,6 +255,7 @@ public class MinecraftMapGUI extends JFrame {
      * 清理线程池资源
      */
     private void shutdownThreadPools() {
+        if(heightDebounce!=null) heightDebounce.stop();
         // Window close runs on Swing EDT; waiting here can freeze it for 10s.
         if (renderingExecutor != null) renderingExecutor.shutdownNow();
         if (backgroundExecutor != null) backgroundExecutor.shutdownNow();
@@ -294,18 +307,18 @@ public class MinecraftMapGUI extends JFrame {
     
     private void createComponents() {
         // 控制面板组件 - 使用样式化标签
-        saveInfoLabel = StyledComponents.createInfoLabel("No save selected");
-        playerPosLabel = StyledComponents.createInfoLabel("Player position: unknown");
-        regionLabel = StyledComponents.createInfoLabel("Selection: none");
-        coordDisplayLabel = StyledComponents.createInfoLabel("X: 0, Z: 0");
-        fileInfoLabel = StyledComponents.createInfoLabel("");
+        saveInfoLabel = new JLabel("No save selected");
+        playerPosLabel = new JLabel("Player position: unknown");
+        regionLabel = new JLabel("Selection: none");
+        coordDisplayLabel = new JLabel("X: —  Y: —  Z: —");
+        fileInfoLabel = new JLabel("");
 
 
         // 输入框 - 使用样式化输入框
-        minYEntry = StyledComponents.createStyledTextField("-64", 6);
-        maxYEntry = StyledComponents.createStyledTextField("320", 6);
-        xCoordEntry = StyledComponents.createStyledTextField("", 8);
-        zCoordEntry = StyledComponents.createStyledTextField("", 8);
+        minYEntry = new JTextField("-64", 6);
+        maxYEntry = new JTextField("320", 6);
+        xCoordEntry = new JTextField("", 8);
+        zCoordEntry = new JTextField("", 8);
 
         // 创建高度范围双滑块
         heightRangeSlider = new StyledComponents.DualRangeSlider(-64, 365, -64, 365);
@@ -325,11 +338,11 @@ public class MinecraftMapGUI extends JFrame {
             "4 (1/4)",
             "8 (1/8)"
         };
-        lodDropdown = StyledComponents.createStyledComboBox(lodOptions);
+        lodDropdown = new JComboBox<>(lodOptions);
         lodDropdown.setSelectedIndex(0);
 
         // MCA文件范围下拉框
-        mcaRangeDropdown = StyledComponents.createStyledComboBox(new String[]{"1x1 (1 file)", "3x3 (9 files)", "5x5 (25 files)", "7x7 (49 files)"});
+        mcaRangeDropdown = new JComboBox<>(new String[]{"1x1 (1 file)", "3x3 (9 files)", "5x5 (25 files)", "7x7 (49 files)"});
         mcaRangeDropdown.setSelectedItem("1x1 (1 file)");
 
         // Dimension selector is populated after a save is loaded.
@@ -341,7 +354,11 @@ public class MinecraftMapGUI extends JFrame {
         });
 
         // 自动加载复选框 - 使用样式化复选框
-        autoLoadCheckbox = StyledComponents.createStyledCheckBox("Enable auto-load", true);
+        autoLoadCheckbox = new JCheckBox("Enable auto-load", true);
+
+        hideNetherRoofCheckbox = new JCheckBoxMenuItem("Hide Nether roof", true);
+        hideNetherRoofCheckbox.setToolTipText("Show the surface below a bedrock ceiling; uncheck to see the roof and builds above it");
+        hideNetherRoofCheckbox.addActionListener(e -> resetSurfaceView());
 
         // 按钮 - 使用新的图标和样式
         // renderButton 已删除
@@ -352,11 +369,10 @@ public class MinecraftMapGUI extends JFrame {
         confirmSelectionButton.setEnabled(false);
         reRenderButton = createStyledButton("Re-render", IconManager.getRefreshIcon(IconManager.SMALL_ICON_SIZE));
         reRenderButton.setEnabled(false);
-        view3DButton = createStyledButton("3D View", null);
-        view3DButton.setEnabled(false);
         
         // 地图画布
         mapCanvas = new MapCanvas();
+        mapCanvas.setHoverListener(coordDisplayLabel::setText);
 
         // 初始化动态地图管理器
         dynamicMapManager = new DynamicMapManager();
@@ -428,8 +444,10 @@ public class MinecraftMapGUI extends JFrame {
         });
         
         // 进度条 - 使用样式化进度条
-        progressBar = StyledComponents.createStyledProgressBar();
-        progressLabel = StyledComponents.createInfoLabel("Ready");
+        loadingPanel = new LoadingPhasePanel();
+        progressBar = loadingPanel.getMapProgress();
+        progressLabel = new JLabel("Ready");
+        progressBar.setStringPainted(true);
 
         // 状态指示器
         statusIndicator = new LoadingAnimationPanel.StatusIndicator();
@@ -440,40 +458,7 @@ public class MinecraftMapGUI extends JFrame {
      * 创建样式化按钮
      */
     private JButton createStyledButton(String text, Icon icon) {
-        JButton button = new JButton(text, icon);
-
-        // 设置按钮样式 - 更紧凑的设计
-        button.setFocusPainted(false);
-        button.setFont(button.getFont().deriveFont(Font.BOLD, 11f));  // 稍微减小字体
-        button.setIconTextGap(6);  // 减少图标和文字间距
-        button.setMargin(new Insets(4, 8, 4, 8));  // 减少按钮内边距
-
-        // 设置按钮颜色
-        button.setBackground(UIThemeManager.ThemeColors.PRIMARY_BLUE);
-        button.setForeground(Color.WHITE);
-
-        // 设置按钮的最大尺寸，防止超出面板边界
-        button.setMaximumSize(new Dimension(280, 32));  // 限制宽度和高度
-        button.setPreferredSize(new Dimension(280, 32));
-
-        // 添加悬停效果
-        button.addMouseListener(new MouseAdapter() {
-            @Override
-            public void mouseEntered(MouseEvent e) {
-                if (button.isEnabled()) {
-                    button.setBackground(UIThemeManager.ThemeColors.PRIMARY_BLUE.brighter());
-                }
-            }
-
-            @Override
-            public void mouseExited(MouseEvent e) {
-                if (button.isEnabled()) {
-                    button.setBackground(UIThemeManager.ThemeColors.PRIMARY_BLUE);
-                }
-            }
-        });
-
-        return button;
+        return new JButton(text);
     }
 
     /**
@@ -511,42 +496,96 @@ public class MinecraftMapGUI extends JFrame {
     /**
      * 显示加载状态
      */
-    private void showLoadingState(String message) {
-        SwingUtilities.invokeLater(() -> {
+    private static void onEdt(Runnable action) {
+        if(SwingUtilities.isEventDispatchThread()) action.run();else SwingUtilities.invokeLater(action);
+    }
+    private void showLoadingState(String message) {showLoadingState(viewGeneration,message);}
+    private void showLoadingState(long request,String message) {
+        onEdt(() -> {
+            if(request!=viewGeneration) return;
             statusIndicator.setStatus(LoadingAnimationPanel.StatusIndicator.StatusType.WORKING);
-            progressLabel.setText(message);
+            loadingPanel.beginPreparation(request,message);loadingPanel.appendLog("Preparation: "+message);progressLabel.setText(message);
+            logManager.info(message,"MinecraftMapGUI");
         });
     }
-
-    /**
-     * 隐藏加载状态
-     */
+    private MinecraftResourceExtractor.ProgressListener resourceProgress(long request) {
+        return (completed,total,message) -> onEdt(() -> {
+            if(request==viewGeneration) {
+                loadingPanel.preparationProgress(request,completed,total,message);
+                loadingPanel.appendLog("Resources: "+message);
+            }
+        });
+    }
+    private void showMapLoading(long request,String message) {
+        onEdt(() -> {
+            if(request!=viewGeneration) return;
+            statusIndicator.setStatus(LoadingAnimationPanel.StatusIndicator.StatusType.WORKING);
+            loadingPanel.beginMap(request,message);progressLabel.setText(message);
+        });
+    }
     private void hideLoadingState() {
-        SwingUtilities.invokeLater(() -> {
+        final long request=viewGeneration;
+        onEdt(() -> {
+            if(request!=viewGeneration) return;
+            loadingPanel.finish(request);
             statusIndicator.setStatus(LoadingAnimationPanel.StatusIndicator.StatusType.IDLE);
         });
     }
-
-    /**
-     * 显示成功状态
-     */
     private void showSuccessState(String message) {
-        SwingUtilities.invokeLater(() -> {
+        final long request=viewGeneration;
+        onEdt(() -> {
+            if(request!=viewGeneration) return;
+            loadingPanel.finish(request);
             statusIndicator.setStatus(LoadingAnimationPanel.StatusIndicator.StatusType.SUCCESS);
             progressLabel.setText(message);
         });
     }
-
-    /**
-     * 显示错误状态
-     */
     private void showErrorState(String message) {
-        SwingUtilities.invokeLater(() -> {
+        final long request=viewGeneration;
+        onEdt(() -> {
+            if(request!=viewGeneration) return;
+            loadingPanel.finish(request);
             statusIndicator.setStatus(LoadingAnimationPanel.StatusIndicator.StatusType.ERROR);
-            progressLabel.setText(message);
+            progressLabel.setText(message);logManager.error(message,"MinecraftMapGUI");
         });
     }
-    
+    private DynamicRegionManager createDynamicRegionManager() {
+        final long request=viewGeneration;
+        final DynamicRegionManager manager=new DynamicRegionManager(savePath,getCurrentRegionDir(),surfaceMode,renderHeightPanel.getClipY());
+        showMapLoading(request,"Loading visible map regions...");
+        manager.addRegionLoadListener(new DynamicRegionManager.RegionLoadListener() {
+            public void onRegionLoaded(Point point,DynamicRegionManager.RegionTile tile) {}
+            public void onRegionUnloaded(Point point) {}
+            public void onLoadingStarted(Point point) {}
+            public void onLoadingFailed(Point point,Exception error) {}
+            public void onViewportProgress(long revision,int settled,int total,int failed) {
+                onEdt(() -> {
+                    if(request!=viewGeneration || dynamicRegionManager!=manager || revision!=manager.getProgressRevision()) return;
+                    if(settled>=total) {
+                        loadingPanel.finish(request);
+                        statusIndicator.setStatus(failed==0?LoadingAnimationPanel.StatusIndicator.StatusType.IDLE:LoadingAnimationPanel.StatusIndicator.StatusType.ERROR);
+                        progressLabel.setText(total==0?"No map regions in this viewport":
+                            "Map regions loaded: "+settled+"/"+total+(failed==0?"":" (failed: "+failed+")"));
+                    } else {
+                        if(loadingPanel.getPhase()!=LoadingPhasePanel.Phase.MAP_LOADING) showMapLoading(request,"Loading visible map regions...");
+                        loadingPanel.mapProgress(request,settled,total,"Map regions: "+settled+"/"+total+(failed==0?"":" (failed: "+failed+")"));
+                    }
+                });
+            }
+        });
+        return manager;
+    }
+    private void openPreparedWorld() {
+        renderAroundPlayerButton.setEnabled(true);reRenderButton.setEnabled(true);
+        // No preliminary static render; the dynamic viewport is the first and only startup render.
+        autoLoadCheckbox.setSelected(true);mapCanvas.enableAutoViewportManagement(false);
+        if(isDynamicMode && dynamicMapCanvas!=null) {
+            dynamicRegionManager=createDynamicRegionManager();
+            dynamicMapCanvas.setRegionManager(dynamicRegionManager,false);
+            SwingUtilities.invokeLater(() -> dynamicMapCanvas.showInitialViewport(playerPos));
+        } else enableDynamicMode();
+    }
+
     private void layoutComponents() {
         setLayout(new BorderLayout());
 
@@ -558,17 +597,11 @@ public class MinecraftMapGUI extends JFrame {
 
         // 右侧地图显示区域 - 使用现代化边框
         JPanel mapPanel = new JPanel(new BorderLayout());
-        mapPanel.setBorder(BorderFactory.createCompoundBorder(
-            BorderFactory.createTitledBorder(
-                BorderFactory.createLineBorder(UIThemeManager.ThemeColors.MINECRAFT_STONE, 2, true),
-                "Map Preview",
-                TitledBorder.CENTER,
-                TitledBorder.TOP,
-                new Font(Font.SANS_SERIF, Font.BOLD, 14),
-                UIThemeManager.ThemeColors.MINECRAFT_STONE
-            ),
-            BorderFactory.createEmptyBorder(5, 5, 5, 5)
-        ));
+        mapPanel.setBorder(BorderFactory.createTitledBorder("Map Preview"));
+        heightDebounce=new javax.swing.Timer(250,e -> resetSurfaceView());heightDebounce.setRepeats(false);
+        renderHeightPanel=new RenderHeightPanel(y -> heightDebounce.restart());
+        if(colorResources.renderY!=null) renderHeightPanel.setClipY(colorResources.renderY);
+        mapPanel.add(renderHeightPanel,BorderLayout.EAST);
 
         JScrollPane mapScrollPane = new JScrollPane(mapCanvas);
         mapScrollPane.setMinimumSize(new Dimension(400, 300));
@@ -578,7 +611,7 @@ public class MinecraftMapGUI extends JFrame {
         mapPanel.add(mapScrollPane, BorderLayout.CENTER);
         mapPanel.setMinimumSize(new Dimension(400, 300));
 
-        add(mapPanel, BorderLayout.CENTER);
+        add(new LoadingOverlayPane(mapPanel,loadingPanel), BorderLayout.CENTER);
 
         // 底部状态栏
         JPanel statusPanel = new JPanel(new BorderLayout());
@@ -589,7 +622,6 @@ public class MinecraftMapGUI extends JFrame {
         statusPanel.add(coordDisplayLabel, BorderLayout.EAST);
 
         JPanel bottomPanel = new JPanel(new BorderLayout());
-        bottomPanel.add(progressBar, BorderLayout.NORTH);
         bottomPanel.add(statusPanel, BorderLayout.SOUTH);
         add(bottomPanel, BorderLayout.SOUTH);
     }
@@ -604,6 +636,8 @@ public class MinecraftMapGUI extends JFrame {
         addMenuItem(fileMenu, "Select Save", e -> selectSave(), null, "Select Minecraft Save Folder");
         addMenuItem(fileMenu, "Select MCA File", e -> selectMcaFile(), null, "Select an MCA region file manually");
         addMenuItem(fileMenu, "Select MC Client", e -> selectMinecraftJar(), null, "Select Minecraft client JAR file");
+        addMenuItem(fileMenu, "Select Mods Folder", e -> selectColorResources(true), null, "Load actual mod textures");
+        addMenuItem(fileMenu, "Select Resource Packs", e -> selectColorResources(false), null, "Select ZIP packs in override order");
         fileMenu.addSeparator();
         addMenuItem(fileMenu, "Clear Cache", e -> clearPngCache(), null, "Delete PNG map cache files");
         fileMenu.addSeparator();
@@ -611,6 +645,9 @@ public class MinecraftMapGUI extends JFrame {
         fileMenu.addSeparator();
         addMenuItem(fileMenu, "Exit", e -> System.exit(0), null, null);
         menuBar.add(fileMenu);
+        JMenu viewMenu = new JMenu("View");
+        viewMenu.add(hideNetherRoofCheckbox);
+        menuBar.add(viewMenu);
 
         return menuBar;
     }
@@ -642,15 +679,14 @@ public class MinecraftMapGUI extends JFrame {
 
         // ── 操作按钮 ──
         confirmSelectionButton.addActionListener(e -> confirmSelection());
-        confirmSelectionButton.setBackground(new Color(40, 167, 69));
         bar.add(confirmSelectionButton);
 
         bar.add(new JSeparator(SwingConstants.VERTICAL));
 
         // ── 高度设置 ──
-        bar.add(new JLabel("Height:"));
+        bar.add(new JLabel("Import Y:"));
         heightRangeSlider.setPreferredSize(new Dimension(120, 22));
-        bar.add(heightRangeSlider);
+        // Import range retains its model; the visible controls are standard text fields.
         bar.add(new JLabel("Min Y:"));
         bar.add(minYEntry);
         bar.add(new JLabel("Max Y:"));
@@ -698,67 +734,6 @@ public class MinecraftMapGUI extends JFrame {
     }
 
     // renderSelectedRegion() 方法已删除，因为地图范围选择输入框已被移除
-
-    /**
-     * 渲染指定区域
-     */
-    private void renderRegion(int minX, int maxX, int minZ, int maxZ) {
-        showLoadingState("Rendering map area...");
-        // renderButton 已删除
-        renderAroundPlayerButton.setEnabled(false);
-
-        SwingWorker<Void, Void> worker = new SwingWorker<Void, Void>() {
-            @Override
-            protected Void doInBackground() throws Exception {
-                try {
-                    // 获取LOD设置
-                    int lodLevel = getLodLevel();
-
-                    // 渲染地图
-                    String regionPath = WorldPathResolver.getOverworldRegionDir(savePath).getAbsolutePath();
-                    BufferedImage image = MapRenderer.renderRegion(regionPath, minX, maxX, minZ, maxZ, lodLevel);
-
-                    if (image != null) {
-                        SwingUtilities.invokeLater(() -> {
-                            mapImage = image;
-                            mapCanvas.setImage(image); // 手动渲染时不重置视图
-
-                            // 设置世界坐标映射
-                            double pixelsPerBlock = (double) image.getWidth() / (maxX - minX);
-                            mapCanvas.setWorldCoordinateMapping(minX, minZ, pixelsPerBlock);
-
-                            mapCanvas.repaint();
-
-                            // 保存图像和数据
-                            saveRenderedData(image, minX, maxX, minZ, maxZ);
-
-                            showSuccessState(String.format("Render complete - area: (%d,%d) to (%d,%d)", minX, minZ, maxX, maxZ));
-                        });
-                    } else {
-                        SwingUtilities.invokeLater(() -> {
-                            showErrorState("Render failed");
-                        });
-                    }
-                } catch (Exception e) {
-                    SwingUtilities.invokeLater(() -> {
-                        showErrorState("Render error: " + e.getMessage());
-                        JOptionPane.showMessageDialog(MinecraftMapGUI.this, "Render failed: " + e.getMessage(),
-                                                    "Error", JOptionPane.ERROR_MESSAGE);
-                    });
-                }
-                return null;
-            }
-
-            @Override
-            protected void done() {
-                // renderButton 已删除
-                renderAroundPlayerButton.setEnabled(true);
-                hideLoadingState();
-            }
-        };
-
-        worker.execute();
-    }
 
     /**
      * 获取LOD级别
@@ -815,7 +790,11 @@ public class MinecraftMapGUI extends JFrame {
         if (currentDimension != null && dim.getId().equals(currentDimension.getId())) return;
         if (savePath == null) return;
 
-        currentDimension = dim;
+        currentDimension = dim;lastMcaPath=null;
+        ++viewGeneration;
+        dynamicMapManager.clear();
+        mapCanvas.setImage(null);
+        mapImage = null;
         logManager.info("Switch dimension: " + dim.getId() + " -> " + dim.getRegionDir().getAbsolutePath(), "MinecraftMapGUI");
 
         // 如果当前处于动态模式，重建动态区域管理器并清空旧缓存
@@ -823,10 +802,10 @@ public class MinecraftMapGUI extends JFrame {
             try {
                 dynamicMapCanvas.cleanup();
                 dynamicRegionManager.shutdown(); // stop old dimension jobs; do not retain its pool/cache
-                dynamicRegionManager = new DynamicRegionManager(savePath, getCurrentRegionDir());
+                dynamicRegionManager = createDynamicRegionManager();
                 dynamicMapCanvas.setRegionManager(dynamicRegionManager);
                 SwingUtilities.invokeLater(() -> {
-                    dynamicMapCanvas.fitToWindow();
+                    dynamicMapCanvas.showInitialViewport(playerPos);
                     dynamicMapCanvas.requestFocus();
                     progressLabel.setText("Dimension switched: " + dim.getDisplayName());
                 });
@@ -857,37 +836,32 @@ public class MinecraftMapGUI extends JFrame {
         int result = fileChooser.showOpenDialog(this);
         if (result == JFileChooser.APPROVE_OPTION) {
             File selectedDir = fileChooser.getSelectedFile();
+            ++viewGeneration;
+            dynamicMapManager.clear();
+            mapCanvas.setImage(null);
+            mapImage = null;
+            if (dynamicRegionManager != null) {
+                dynamicRegionManager.shutdown();
+                dynamicRegionManager = null;
+            }
+            if (dynamicMapCanvas != null) dynamicMapCanvas.setRegionManager(null);
+            ++colorGeneration;
+            lastMcaPath=null;singleResourcePath=null;
             savePath = selectedDir.getAbsolutePath();
             saveInfoLabel.setText("Current save: " + selectedDir.getName());
             
+            dimensionDropdown.setEnabled(false);
             showLoadingState("Reading save info...");
             
             // 在后台线程中读取存档信息
-            SwingWorker<Void, Void> worker = new SwingWorker<Void, Void>() {
-                @Override
-                protected Void doInBackground() throws Exception {
-                    loadSaveData();
-                    return null;
-                }
-                
-                @Override
+            final long request=viewGeneration;
+            final String requestedWorld=savePath;final ResourceOptions requestedResources=colorResources.copy();
+            SwingWorker<PreparedWorld, Void> worker = new SwingWorker<PreparedWorld, Void>() {
+                protected PreparedWorld doInBackground() {return loadSaveData(request,requestedWorld,requestedResources);}
                 protected void done() {
-                    showSuccessState("Save loaded");
-                    // 启用渲染按钮
-                    // renderButton 已删除
-                    renderAroundPlayerButton.setEnabled(true);
-                    reRenderButton.setEnabled(true);
-                    view3DButton.setEnabled(true);
-
-                    // 默认启用自动加载
-                    toggleAutoLoad();
-                    
-                    // 自动启用动态模式
-                    SwingUtilities.invokeLater(() -> {
-                        if (!isDynamicMode) {
-                            enableDynamicMode();
-                        }
-                    });
+                    if(request!=viewGeneration) return;
+                    try {applyPreparedWorld(get());}
+                    catch(Exception error) {showErrorState("World loading failed: "+error.getMessage());}
                 }
             };
             worker.execute();
@@ -931,66 +905,33 @@ public class MinecraftMapGUI extends JFrame {
     /**
      * 加载存档数据
      */
-    private void loadSaveData() {
-        try {
-            // Discover vanilla and mod dimensions before rendering.
-            availableDimensions = WorldPathResolver.discoverDimensions(savePath);
-            if (!availableDimensions.isEmpty()) {
-                currentDimension = availableDimensions.get(0); // resolver keeps Overworld first
-            } else {
-                currentDimension = new WorldPathResolver.DimensionInfo(
-                    "minecraft:overworld", "Overworld", WorldPathResolver.getOverworldRegionDir(savePath));
-                availableDimensions.add(currentDimension);
-            }
-            SwingUtilities.invokeLater(this::refreshDimensionDropdown);
-
-            // 先完成颜色提取，再开始渲染（提取是同步的，避免渲染与换色竞态）
-            autoExtractColorsFromSavePath();
-
-            // 读取level.dat获取玩家位置
-            File levelDat = new File(savePath, "level.dat");
-            logManager.info("Checking level.dat: " + levelDat.getAbsolutePath(), "MinecraftMapGUI");
-            logManager.info("level.dat exists: " + levelDat.exists(), "MinecraftMapGUI");
-            
-            if (levelDat.exists()) {
-                playerPos = readPlayerPos(levelDat.getAbsolutePath());
-                logManager.info("Player position read: " + (playerPos != null ? 
-                    String.format("X=%.1f, Y=%.1f, Z=%.1f", playerPos[0], playerPos[1], playerPos[2]) : "null"), "MinecraftMapGUI");
-                
-                if (playerPos != null) {
-                    SwingUtilities.invokeLater(() -> {
-                        playerPosLabel.setText(String.format("Player: X:%.1f, Y:%.1f, Z:%.1f",
-                                                           playerPos[0], playerPos[1], playerPos[2]));
-                    });
-
-                    // 渲染玩家周围的区域
-                    renderAroundPlayer();
-                } else {
-                    logManager.warn("Cannot read player position, skipping render", "MinecraftMapGUI");
-                }
-            } else {
-                logManager.warn("level.dat not found, cannot get player position", "MinecraftMapGUI");
-            }
-
-        } catch (Exception e) {
-            SwingUtilities.invokeLater(() -> {
-                JOptionPane.showMessageDialog(this, "Error loading save: " + e.getMessage(),
-                                            "Error", JOptionPane.ERROR_MESSAGE);
-                progressLabel.setText("Failed to load save");
-            });
+    private static final class PreparedWorld {
+        final List<WorldPathResolver.DimensionInfo> dimensions;
+        final BlockColors.Palette palette;
+        final double[] player;
+        PreparedWorld(List<WorldPathResolver.DimensionInfo> dimensions,BlockColors.Palette palette,double[] player) {
+            this.dimensions=dimensions;this.palette=palette;this.player=player;
         }
     }
-
-    /**
-     * 从存档路径自动提取颜色（包括minecraft和mods）
-     */
-    private void autoExtractColorsFromSavePath() {
-        // loadSaveData already runs on a worker. Finish extraction before any
-        // player-area rendering or dynamic loading starts; do not launch a second worker.
-        boolean success = BlockColors.initializeColorsFromSavePath(savePath, jarFilePath);
-        SwingUtilities.invokeLater(() -> progressLabel.setText(success
-            ? "Loaded Minecraft and mod block colors"
-            : "No JAR or mods found, using default colors"));
+    private PreparedWorld loadSaveData(long request,String world,ResourceOptions resources) {
+        showLoadingState(request,"Parsing world dimensions...");
+        List<WorldPathResolver.DimensionInfo> dimensions=WorldPathResolver.discoverDimensions(world);
+        if(dimensions.isEmpty()) dimensions.add(new WorldPathResolver.DimensionInfo(
+            "minecraft:overworld","Overworld",WorldPathResolver.getOverworldRegionDir(world)));
+        showLoadingState(request,"Extracting vanilla / mod / resource-pack colors...");
+        BlockColors.Palette palette=BlockColors.loadPalette(world,resources,resourceProgress(request));
+        resourceProgress(request).onProgress(0,0,"Reading player data and preparing the initial viewport...");
+        File levelDat=new File(world,"level.dat");
+        double[] player=levelDat.isFile()?readPlayerPos(levelDat.getAbsolutePath()):null;
+        if(player==null) logManager.warn("No player position; opening nearest available map region","MinecraftMapGUI");
+        return new PreparedWorld(dimensions,palette,player);
+    }
+    private void applyPreparedWorld(PreparedWorld world) {
+        availableDimensions=world.dimensions;currentDimension=availableDimensions.get(0);
+        BlockColors.setPalette(world.palette);playerPos=world.player;
+        refreshDimensionDropdown();
+        playerPosLabel.setText(playerPos==null?"Player: —":String.format("Player: X:%.1f, Y:%.1f, Z:%.1f",playerPos[0],playerPos[1],playerPos[2]));
+        openPreparedWorld();
     }
 
     /**
@@ -1021,38 +962,55 @@ public class MinecraftMapGUI extends JFrame {
      * 从指定JAR文件提取颜色
      */
     private void extractColorsFromJar(String jarPath) {
-        progressLabel.setText("Extracting block colors from JAR...");
-
-        SwingWorker<Void, Void> worker = new SwingWorker<Void, Void>() {
-            @Override
-            protected Void doInBackground() throws Exception {
-                MinecraftResourceExtractor extractor = new MinecraftResourceExtractor();
-                if (extractor.extractColorsFromMinecraftJar(jarPath)) {
-                    resourceExtractor = extractor;
-                    BlockColors.setResourceExtractor(extractor);
-
-                    // 保存为JSON和Properties两种格式
-                    String jsonFile = new File(programDir, "block_colors.json").getAbsolutePath();
-                    String propsFile = new File(programDir, "extracted_colors.properties").getAbsolutePath();
-
-                    resourceExtractor.saveExtractedColorsAsJson(jsonFile);
-                    resourceExtractor.saveExtractedColors(propsFile);
-
-                    SwingUtilities.invokeLater(() -> {
-                        progressLabel.setText("Extracted " + resourceExtractor.getAllExtractedColors().size() + " block colors");
-                    });
-                } else {
-                    SwingUtilities.invokeLater(() -> {
-                        progressLabel.setText("JAR color extraction failed");
-                    });
-                }
-                return null;
-            }
-        };
-
-        worker.execute();
+        jarFilePath=jarPath;colorResources.jars.clear();colorResources.jars.add(jarPath);reloadColorResources();
     }
-    
+    private void selectColorResources(boolean mods) {
+        JFileChooser chooser=new JFileChooser();
+        chooser.setFileSelectionMode(mods?JFileChooser.DIRECTORIES_ONLY:JFileChooser.FILES_ONLY);
+        chooser.setMultiSelectionEnabled(!mods);
+        if(!mods) chooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter("Resource packs (*.zip)","zip"));
+        if(chooser.showOpenDialog(this)!=JFileChooser.APPROVE_OPTION) return;
+        if(mods) {
+            colorResources.mods.clear();
+            File[] files=chooser.getSelectedFile().listFiles((dir,name)->name.endsWith(".jar"));
+            if(files!=null) {java.util.Arrays.sort(files);for(File file:files) colorResources.mods.add(file.getAbsolutePath());}
+        } else {
+            colorResources.packs.clear();for(File file:chooser.getSelectedFiles()) colorResources.packs.add(file.getAbsolutePath());
+        }
+        reloadColorResources();
+    }
+    private void reloadColorResources() {
+        singleResourcePath=null;
+        ++viewGeneration;
+        final long generation=++colorGeneration;
+        final long request=viewGeneration;
+        final boolean dynamic=isDynamicMode;
+        if(dynamicRegionManager!=null) {dynamicRegionManager.shutdown();dynamicRegionManager=null;}
+        if(dynamicMapCanvas!=null) dynamicMapCanvas.setRegionManager(null);
+        mapImage=null;mapCanvas.setImage(null);
+        final String path=savePath!=null?savePath:lastMcaPath;
+        final ResourceOptions requested=colorResources.copy();
+        showLoadingState("Loading resource colors...");
+        new SwingWorker<BlockColors.Palette,Void>() {
+            protected BlockColors.Palette doInBackground() {
+                return BlockColors.loadPalette(path,requested,resourceProgress(request));
+            }
+            protected void done() {
+                if(generation!=colorGeneration) return;
+                try {
+                    BlockColors.setPalette(get());
+                    if(dynamic && savePath!=null) {
+                        dynamicRegionManager=createDynamicRegionManager();
+                        dynamicMapCanvas.setRegionManager(dynamicRegionManager);
+                    } else if(lastMcaPath!=null) renderMap(lastMcaPath);
+                    else if(savePath!=null && playerPos!=null) {
+                        showMapLoading(request,"Loading map regions...");renderAroundPlayer();
+                    } else showSuccessState("Resource colors loaded");
+                } catch(Exception e) {showErrorState("Resource colors failed: "+e.getMessage());}
+            }
+        }.execute();
+    }
+
     /**
      * 读取level.dat中的玩家位置
      */
@@ -1095,13 +1053,16 @@ public class MinecraftMapGUI extends JFrame {
      * 渲染玩家周围的区域
      */
     private void renderAroundPlayer() {
-        if (playerPos == null) {
+        if(loadingPanel.getPhase()==LoadingPhasePanel.Phase.PREPARING) return;
+        if (playerPos == null) {return;}
+        if(isDynamicMode && dynamicMapCanvas!=null && dynamicRegionManager!=null) {
+            dynamicMapCanvas.jumpToWorldCoordinate(new Point((int)Math.floor(playerPos[0]),(int)Math.floor(playerPos[2])));
             return;
         }
 
         // 计算玩家所在的区域文件
-        int centerRegionX = (int) (playerPos[0] / 512);
-        int centerRegionZ = (int) (playerPos[2] / 512);
+        int centerRegionX = (int) Math.floor(playerPos[0] / 512);
+        int centerRegionZ = (int) Math.floor(playerPos[2] / 512);
 
         // 获取MCA范围设置
         int mcaRange = getMcaRange();
@@ -1160,6 +1121,7 @@ public class MinecraftMapGUI extends JFrame {
         } else {
             SwingUtilities.invokeLater(() -> {
                 progressLabel.setText(String.format("No region files around player (center: r.%d.%d.mca)", centerRegionX, centerRegionZ));
+                hideLoadingState();
             });
         }
     }
@@ -1179,20 +1141,26 @@ public class MinecraftMapGUI extends JFrame {
      * 渲染多个MCA文件
      */
     private void renderMultipleMcaFiles(java.util.List<String> mcaFiles, int startRegionX, int startRegionZ, int gridSize) {
+        showMapLoading(viewGeneration,"Loading map regions...");
+        final long requestGeneration = viewGeneration;
+        final MapRenderer.SurfaceMode requestedMode = surfaceMode;
+        final Integer requestedTop=renderHeightPanel.getClipY();
         SwingWorker<BufferedImage, Void> worker = new SwingWorker<BufferedImage, Void>() {
             @Override
             protected BufferedImage doInBackground() throws Exception {
                 // 创建进度回调
+                final java.util.concurrent.atomic.AtomicInteger completedRegions=new java.util.concurrent.atomic.AtomicInteger();
                 MapRenderer.ProgressCallback progressCallback = new MapRenderer.ProgressCallback() {
                     @Override
                     public void onProgress(int processed, int total, double speed, Set<String> foundBlocks) {
-                        if (total == 0) return;
+                        if (total == 0 || requestGeneration!=viewGeneration) return;
 
-                        int percent = Math.min(100, processed * 100 / total);
+                        final int completed=completedRegions.get();
+                        final int units=completed*1000+(int)(1000L*processed/total);
                         SwingUtilities.invokeLater(() -> {
-                            progressBar.setValue(percent);
-                            progressBar.setString(String.format("%d%% (%d/%d) %.1f chunks/s",
-                                                               percent, processed, total, speed));
+                            if(requestGeneration!=viewGeneration) return;
+                            loadingPanel.mapProgress(requestGeneration,units,mcaFiles.size()*1000,
+                                String.format("Map regions: %d/%d; chunks: %d/%d (%.1f/s)",completed,mcaFiles.size(),processed,total,speed));
                         });
                     }
                     
@@ -1204,7 +1172,7 @@ public class MinecraftMapGUI extends JFrame {
 
                 // 创建地图渲染器
                 int maxWorkers = Math.min(Runtime.getRuntime().availableProcessors(), 4);
-                MapRenderer renderer = new MapRenderer(maxWorkers, progressCallback);
+                MapRenderer renderer = new MapRenderer(maxWorkers, progressCallback, requestedMode,requestedTop);
 
                 try {
                     // 计算区域范围
@@ -1239,7 +1207,7 @@ public class MinecraftMapGUI extends JFrame {
                         minRegionX, minRegionZ, maxRegionX, maxRegionZ, totalWidth, totalHeight);
 
                     // 创建大图像
-                    BufferedImage combinedImage = new BufferedImage(totalWidth, totalHeight, BufferedImage.TYPE_INT_RGB);
+                    RenderedMap combinedImage = new RenderedMap(totalWidth, totalHeight);
                     Graphics2D g2d = combinedImage.createGraphics();
 
                     // 设置高质量渲染
@@ -1273,9 +1241,11 @@ public class MinecraftMapGUI extends JFrame {
                                     System.out.printf("  -> placed at: (%d, %d)\n", offsetX, offsetY);
 
                                     g2d.drawImage(regionImage, offsetX, offsetY, null);
+                                    combinedImage.copyHeightsFrom(regionImage, offsetX, offsetY);
                                 }
                             }
                         }
+                        completedRegions.incrementAndGet();
                     }
 
                     g2d.dispose();
@@ -1293,6 +1263,7 @@ public class MinecraftMapGUI extends JFrame {
 
             @Override
             protected void done() {
+                if (requestGeneration != viewGeneration) return;
                 try {
                     BufferedImage image = get();
                     if (image != null) {
@@ -1312,6 +1283,7 @@ public class MinecraftMapGUI extends JFrame {
                                                           image.getWidth(), image.getHeight()));
                         progressBar.setValue(100);
                         progressBar.setString("Done");
+                        hideLoadingState();
 
                         // 保存图像
                         saveRenderedImage(image, String.format("multi_region_%dx%d", gridSize, gridSize));
@@ -1320,14 +1292,17 @@ public class MinecraftMapGUI extends JFrame {
                         progressLabel.setText("Multi-region render failed: cannot get block data");
                         progressBar.setValue(0);
                         progressBar.setString("Failed");
+                        hideLoadingState();
                     }
                 } catch (Exception e) {
+                    logManager.error("Map operation failed: "+e.getMessage(),"MinecraftMapGUI",e);
                     JOptionPane.showMessageDialog(MinecraftMapGUI.this,
                                                 "Error rendering multi-region map: " + e.getMessage(),
                                                 "Error", JOptionPane.ERROR_MESSAGE);
                     progressLabel.setText("Multi-region render failed");
                     progressBar.setValue(0);
                     progressBar.setString("Failed");
+                    hideLoadingState();
                 }
             }
         };
@@ -1339,6 +1314,14 @@ public class MinecraftMapGUI extends JFrame {
      * 渲染单个MCA文件
      */
     private void renderSingleMcaFile(String mcaFilePath) {
+        ++viewGeneration;++colorGeneration;
+        if(dynamicRegionManager!=null) {dynamicRegionManager.shutdown();dynamicRegionManager=null;}
+        if(isDynamicMode) disableDynamicMode();
+        savePath=null;lastMcaPath=mcaFilePath;
+        String[] regionParts=new File(mcaFilePath).getName().split("\\.");
+        if(regionParts.length==4) try {currentRegion=new Point(Integer.parseInt(regionParts[1]),Integer.parseInt(regionParts[2]));}
+        catch(NumberFormatException ignored) {currentRegion=null;}
+        showLoadingState("Preparing MCA resources...");
         SwingUtilities.invokeLater(() -> {
             progressLabel.setText("Rendering MCA file: " + new File(mcaFilePath).getName());
         });
@@ -1350,17 +1333,29 @@ public class MinecraftMapGUI extends JFrame {
      * 渲染地图
      */
     private void renderMap(String regionPath) {
+        final ResourceOptions requestedResources=colorResources.copy();
+        final boolean needsResources=regionPath.equals(lastMcaPath) && !regionPath.equals(singleResourcePath);
+        final BlockColors.Palette requestedPalette=BlockColors.snapshot();
+        final long requestGeneration = viewGeneration;
+        final MapRenderer.SurfaceMode requestedMode = surfaceMode;
+        final Integer requestedTop=renderHeightPanel.getClipY();
         SwingWorker<BufferedImage, Void> worker = new SwingWorker<BufferedImage, Void>() {
+            private BlockColors.Palette renderedPalette=requestedPalette;
             @Override
             protected BufferedImage doInBackground() throws Exception {
+                if(needsResources) renderedPalette=BlockColors.loadPalette(regionPath,requestedResources,resourceProgress(requestGeneration));
+                if(requestGeneration!=viewGeneration) return null;
+                showMapLoading(requestGeneration,"Loading map regions...");
                 // 创建进度回调
                 MapRenderer.ProgressCallback progressCallback = new MapRenderer.ProgressCallback() {
                     @Override
                     public void onProgress(int processed, int total, double speed, Set<String> foundBlocks) {
-                        if (total == 0) return;
+                        if (total == 0 || requestGeneration!=viewGeneration) return;
 
                         int percent = Math.min(100, processed * 100 / total);
                         SwingUtilities.invokeLater(() -> {
+                            if(requestGeneration!=viewGeneration || loadingPanel.getPhase()!=LoadingPhasePanel.Phase.MAP_LOADING) return;
+                            progressBar.setIndeterminate(false);
                             progressBar.setValue(percent);
                             progressBar.setString(String.format("%d%% (%d/%d) %.1f chunks/s",
                                                                percent, processed, total, speed));
@@ -1375,15 +1370,13 @@ public class MinecraftMapGUI extends JFrame {
 
                 // 创建地图渲染器
                 int maxWorkers = Math.min(Runtime.getRuntime().availableProcessors(), 4); // GUI模式使用较少线程
-                MapRenderer renderer = new MapRenderer(maxWorkers, progressCallback);
+                MapRenderer renderer = new MapRenderer(maxWorkers, progressCallback, requestedMode,requestedTop,renderedPalette);
 
                 try {
                     // 渲染区块
                     MapRenderer.BlockInfo[][] topBlocks = renderer.getTopBlocks(regionPath, 32, 1);
 
                     if (topBlocks != null) {
-                        // 保存方块数据供3D查看器使用
-                        lastRenderedBlockData = topBlocks;
                         
                         // 渲染图像
                         BufferedImage image = renderer.renderToPng(topBlocks, 1);
@@ -1404,9 +1397,14 @@ public class MinecraftMapGUI extends JFrame {
 
             @Override
             protected void done() {
+                if (requestGeneration != viewGeneration) return;
                 try {
                     BufferedImage image = get();
                     if (image != null) {
+                        if(needsResources) {BlockColors.setPalette(renderedPalette);singleResourcePath=regionPath;}
+                        if(!java.util.Objects.equals(requestedTop,renderHeightPanel.getClipY()) || requestedMode!=surfaceMode) {
+                            resetSurfaceView();return;
+                        }
                         mapImage = image;
                         mapCanvas.setImage(image); // 手动渲染时不重置视图
 
@@ -1424,18 +1422,22 @@ public class MinecraftMapGUI extends JFrame {
                                                           image.getWidth(), image.getHeight()));
                         progressBar.setValue(100);
                         progressBar.setString("Done");
+                        hideLoadingState();
                     } else {
                         progressLabel.setText("Map render failed: cannot get block data");
                         progressBar.setValue(0);
                         progressBar.setString("Failed");
+                        hideLoadingState();
                     }
                 } catch (Exception e) {
+                    logManager.error("Map operation failed: "+e.getMessage(),"MinecraftMapGUI",e);
                     JOptionPane.showMessageDialog(MinecraftMapGUI.this,
                                                 "Error rendering map: " + e.getMessage(),
                                                 "Error", JOptionPane.ERROR_MESSAGE);
                     progressLabel.setText("Map render failed");
                     progressBar.setValue(0);
                     progressBar.setString("Failed");
+                    hideLoadingState();
                 }
             }
         };
@@ -1573,7 +1575,7 @@ public class MinecraftMapGUI extends JFrame {
         boolean enabled = autoLoadCheckbox.isSelected();
 
         if (mapCanvas != null) {
-            mapCanvas.enableAutoViewportManagement(enabled);
+            mapCanvas.enableAutoViewportManagement(enabled && !isDynamicMode);
         }
 
         if (enabled) {
@@ -1587,12 +1589,16 @@ public class MinecraftMapGUI extends JFrame {
      * 在后台加载区域 - 优化版本 (Java 8兼容)
      */
     private void loadRegionInBackground(int regionX, int regionZ) {
-        if (!autoLoadCheckbox.isSelected()) return;
+        final long requestGeneration = viewGeneration;
+        final File requestedRegionDir = getCurrentRegionDir();
+        final MapRenderer.SurfaceMode requestedMode = surfaceMode;
+        final Integer requestedTop=renderHeightPanel.getClipY();
+        if (!autoLoadCheckbox.isSelected() || isDynamicMode || loadingPanel.getPhase()==LoadingPhasePanel.Phase.PREPARING) return;
 
         // 使用后台线程池异步加载
         Future<BufferedImage> future = backgroundExecutor.submit(() -> {
             String regionFile = String.format("r.%d.%d.mca", regionX, regionZ);
-            File regionPath = WorldPathResolver.getMcaFile(savePath, regionX, regionZ);
+            File regionPath = new File(requestedRegionDir, regionFile);
 
             if (!regionPath.exists()) {
                 System.out.printf("Region file not found: %s\n", regionFile);
@@ -1616,7 +1622,7 @@ public class MinecraftMapGUI extends JFrame {
             };
 
             // 创建地图渲染器，使用单线程避免影响主渲染
-            MapRenderer renderer = new MapRenderer(1, progressCallback);
+            MapRenderer renderer = new MapRenderer(1, progressCallback, requestedMode,requestedTop);
 
             try {
                 // 渲染整个区域 (32x32区块 = 512x512方块)
@@ -1643,11 +1649,9 @@ public class MinecraftMapGUI extends JFrame {
             try {
                 BufferedImage regionImage = future.get();
                 if (regionImage != null) {
-                    // 添加到动态地图管理器
-                    dynamicMapManager.addRegion(regionX, regionZ, regionImage);
-
-                    // 更新地图显示，保持用户当前视图
                     SwingUtilities.invokeLater(() -> {
+                        if (requestGeneration != viewGeneration) return;
+                        dynamicMapManager.addRegion(regionX, regionZ, regionImage);
                         BufferedImage combinedImage = dynamicMapManager.getCombinedImage();
                         if (combinedImage != null) {
                             // 使用新方法保持世界坐标中心点不变，避免视角跳动
@@ -1706,6 +1710,9 @@ public class MinecraftMapGUI extends JFrame {
      * 重新渲染当前视图
      */
     private void reRenderCurrentView() {
+        if(isDynamicMode && dynamicRegionManager!=null) {
+            resetSurfaceView();return;
+        }
         if (dynamicMapManager == null) return;
 
         // 清除当前所有区域
@@ -1730,48 +1737,22 @@ public class MinecraftMapGUI extends JFrame {
     }
 
     /**
-     * 打开 3D 查看器 - 使用动态区块加载
-     */
-    private void openViewer3D() {
-        if (savePath == null) {
-            JOptionPane.showMessageDialog(this, 
-                "Please select an MC save first", 
-                "Info", 
-                JOptionPane.WARNING_MESSAGE);
-            return;
-        }
-        
-        try {
-            System.out.println("Open dynamic 3D viewer");
-            System.out.println("Save path: " + savePath);
-            
-            // 创建动态3D查看器
-            Dynamic3DViewer viewer = new Dynamic3DViewer(savePath, 0, 0);
-            viewer.setVisible(true);
-            
-        } catch (Exception ex) {
-            System.err.println("Failed to open 3D viewer: " + ex.getMessage());
-            ex.printStackTrace();
-            JOptionPane.showMessageDialog(this, 
-                "Failed to open 3D viewer: " + ex.getMessage(), 
-                "Error", 
-                JOptionPane.ERROR_MESSAGE);
-        }
-    }
-
-    /**
      * 从指定路径加载世界（用于Blender集成）
      */
     private void loadWorldFromPath(String worldPath) {
         File worldDir = new File(worldPath);
         if (!worldDir.exists() || !worldDir.isDirectory()) {
-            System.err.println("Invalid world path: " + worldPath);
+            showErrorState("Invalid world path: " + worldPath);
             return;
         }
 
-        System.out.println("Blender mode: loading world " + worldPath);
+        ++viewGeneration;
+        dimensionDropdown.setEnabled(false);
+        showLoadingState("Parsing world: " + worldPath);
 
         // 设置存档路径
+        ++colorGeneration;
+        lastMcaPath=null;singleResourcePath=null;
         this.savePath = worldPath;
 
         // 更新GUI界面显示存档路径
@@ -1783,30 +1764,14 @@ public class MinecraftMapGUI extends JFrame {
         });
 
         // 在后台线程中加载存档数据，模拟用户选择存档的完整流程
-        SwingWorker<Void, Void> worker = new SwingWorker<Void, Void>() {
-            @Override
-            protected Void doInBackground() throws Exception {
-                // 调用loadSaveData方法，这会完整地加载存档数据
-                loadSaveData();
-                return null;
-            }
-
-            @Override
+        final long request=viewGeneration;
+        final ResourceOptions requestedResources=colorResources.copy();
+        SwingWorker<PreparedWorld, Void> worker = new SwingWorker<PreparedWorld, Void>() {
+            protected PreparedWorld doInBackground() {return loadSaveData(request,worldPath,requestedResources);}
             protected void done() {
-                SwingUtilities.invokeLater(() -> {
-                    progressLabel.setText("Blender mode: save loaded, auto-load enabled");
-
-                    // 启用自动加载
-                    autoLoadCheckbox.setSelected(true);
-                    toggleAutoLoad();
-                    
-                    // 自动启用动态模式（与正常模式保持一致）
-                    if (!isDynamicMode) {
-                        enableDynamicMode();
-                    }
-
-                    System.out.println("Blender mode: world loaded with auto-load and dynamic mode " + worldPath);
-                });
+                if(request!=viewGeneration) return;
+                try {applyPreparedWorld(get());}
+                catch(Exception error) {showErrorState("World loading failed: "+error.getMessage());}
             }
         };
         worker.execute();
@@ -1960,6 +1925,9 @@ public class MinecraftMapGUI extends JFrame {
      * 渲染所有可用的区域
      */
     private void renderAllAvailableRegions() {
+        final long requestGeneration = viewGeneration;
+        final MapRenderer.SurfaceMode requestedMode = surfaceMode;
+        final Integer requestedTop=renderHeightPanel.getClipY();
         if (savePath == null || savePath.isEmpty()) {
             JOptionPane.showMessageDialog(this, 
                 "Please select a Minecraft save first", 
@@ -2040,7 +2008,7 @@ public class MinecraftMapGUI extends JFrame {
                 });
                 
                 // 创建大图像
-                BufferedImage combinedImage = new BufferedImage(totalWidth, totalHeight, BufferedImage.TYPE_INT_RGB);
+                RenderedMap combinedImage = new RenderedMap(totalWidth, totalHeight);
                 Graphics2D g2d = combinedImage.createGraphics();
                 
                 // 设置高质量渲染
@@ -2051,14 +2019,18 @@ public class MinecraftMapGUI extends JFrame {
                 g2d.setColor(new Color(32, 32, 32));
                 g2d.fillRect(0, 0, totalWidth, totalHeight);
                 
+                showMapLoading(requestGeneration,"Loading map regions...");
                 // 创建进度回调
+                final java.util.concurrent.atomic.AtomicInteger completedRegions=new java.util.concurrent.atomic.AtomicInteger();
                 MapRenderer.ProgressCallback progressCallback = new MapRenderer.ProgressCallback() {
                     @Override
                     public void onProgress(int processed, int total, double speed, java.util.Set<String> foundBlocks) {
+                        final int completed=completedRegions.get();
+                        final int finished=completed*1000+(total<=0?0:(int)(1000L*processed/total));
                         SwingUtilities.invokeLater(() -> {
-                            int percent = total > 0 ? (processed * 100 / total) : 0;
-                            progressLabel.setText(String.format("Progress: %d%% (%d/%d) - %.1f chunks/s",
-                                percent, processed, total, speed));
+                            if(requestGeneration!=viewGeneration) return;
+                            loadingPanel.mapProgress(requestGeneration,finished,validMcaFiles.size()*1000,
+                                String.format("Map regions: %d/%d; chunks: %d/%d (%.1f/s)",completed,validMcaFiles.size(),processed,total,speed));
                         });
                     }
                     
@@ -2070,7 +2042,7 @@ public class MinecraftMapGUI extends JFrame {
                 
                 // 创建地图渲染器
                 int maxWorkers = Math.min(Runtime.getRuntime().availableProcessors(), 4);
-                MapRenderer renderer = new MapRenderer(maxWorkers, progressCallback);
+                MapRenderer renderer = new MapRenderer(maxWorkers, progressCallback, requestedMode,requestedTop);
                 
                 try {
                     // 渲染每个区域
@@ -2101,6 +2073,7 @@ public class MinecraftMapGUI extends JFrame {
                                     
                                     logManager.debug(String.format("Placing region image at: (%d, %d)", offsetX, offsetY), "MinecraftMapGUI");
                                     g2d.drawImage(regionImage, offsetX, offsetY, null);
+                                    combinedImage.copyHeightsFrom(regionImage, offsetX, offsetY);
                                 } else {
                                     logManager.warn("Region image render failed: r." + regionX + "." + regionZ + ".mca", "MinecraftMapGUI");
                                 }
@@ -2108,6 +2081,7 @@ public class MinecraftMapGUI extends JFrame {
                                 logManager.warn("Region data fetch failed: r." + regionX + "." + regionZ + ".mca", "MinecraftMapGUI");
                             }
                         }
+                        completedRegions.incrementAndGet();
                     }
                     
                     g2d.dispose();
@@ -2130,6 +2104,7 @@ public class MinecraftMapGUI extends JFrame {
             
             @Override
             protected void done() {
+                if (requestGeneration != viewGeneration) return;
                 try {
                     BufferedImage result = get();
                     if (result != null) {
@@ -2138,7 +2113,7 @@ public class MinecraftMapGUI extends JFrame {
                         SwingUtilities.invokeLater(() -> {
                             // 更新显示
                             mapCanvas.setImage(result);
-                            progressLabel.setText("Full-region render complete! All available regions rendered.");
+                            progressLabel.setText("Full-region render complete! All available regions rendered.");hideLoadingState();
                             
                             // 设置世界坐标映射
                             mapCanvas.setWorldCoordinateMapping(lastFullRenderMinWorldX, lastFullRenderMinWorldZ, 1.0);
@@ -2150,13 +2125,13 @@ public class MinecraftMapGUI extends JFrame {
                         logManager.info("Map display updated", "MinecraftMapGUI");
                     } else {
                         SwingUtilities.invokeLater(() -> {
-                            progressLabel.setText("Full-region rendering failed");
+                            progressLabel.setText("Full-region rendering failed");hideLoadingState();
                         });
                         logManager.error("Full-region rendering failed", "MinecraftMapGUI");
                     }
                 } catch (Exception e) {
                     SwingUtilities.invokeLater(() -> {
-                        progressLabel.setText("Render error: " + e.getMessage());
+                        progressLabel.setText("Render error: " + e.getMessage());hideLoadingState();
                         JOptionPane.showMessageDialog(MinecraftMapGUI.this,
                             "Error rendering all regions: " + e.getMessage(),
                             "Error", JOptionPane.ERROR_MESSAGE);
@@ -2173,6 +2148,7 @@ public class MinecraftMapGUI extends JFrame {
      * 切换动态模式
      */
     private void toggleDynamicMode() {
+        if(loadingPanel.getPhase()==LoadingPhasePanel.Phase.PREPARING) return;
         if (savePath == null || savePath.isEmpty()) {
             JOptionPane.showMessageDialog(this, 
                 "Please select a Minecraft save first", 
@@ -2197,12 +2173,14 @@ public class MinecraftMapGUI extends JFrame {
         try {
             logManager.info("Enable dynamic mode", "MinecraftMapGUI");
             
+            mapCanvas.enableAutoViewportManagement(false);
             // Create the manager for the currently selected dimension.
-            dynamicRegionManager = new DynamicRegionManager(savePath, getCurrentRegionDir());
+            dynamicRegionManager = createDynamicRegionManager();
             
             // 创建动态地图画布
             dynamicMapCanvas = new DynamicMapCanvas();
-            dynamicMapCanvas.setRegionManager(dynamicRegionManager);
+            dynamicMapCanvas.setHoverListener(coordDisplayLabel::setText);
+            dynamicMapCanvas.setRegionManager(dynamicRegionManager,false);
             
             // 设置选区回调
             dynamicMapCanvas.setSelectionCallback(new DynamicMapCanvas.SelectionCallback() {
@@ -2254,7 +2232,7 @@ public class MinecraftMapGUI extends JFrame {
             
             // 适应窗口
             SwingUtilities.invokeLater(() -> {
-                dynamicMapCanvas.fitToWindow();
+                dynamicMapCanvas.showInitialViewport(playerPos);
                 dynamicMapCanvas.requestFocus(); // 确保可以接收键盘事件
             });
             

@@ -1,6 +1,7 @@
 package com.minecraft.selector.gui;
 
 import java.awt.*;
+import com.minecraft.selector.core.RenderedMap;
 import java.awt.image.BufferedImage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.Map;
@@ -145,7 +146,7 @@ public class DynamicMapManager {
         int height = (stableMaxRegionZ - stableMinRegionZ + 1) * REGION_SIZE_PIXELS;
 
         // 创建新的合成图像，支持透明度
-        combinedImage = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+        combinedImage = new RenderedMap(width, height);
         Graphics2D g2d = combinedImage.createGraphics();
 
         // 设置像素完美渲染，禁用插值
@@ -180,6 +181,8 @@ public class DynamicMapManager {
                 // 直接绘制
                 g2d.drawImage(regionImage, pixelX, pixelY, null);
             }
+
+            ((RenderedMap) combinedImage).copyHeightsFrom(regionImage, pixelX, pixelY);
 
             // 可选：绘制区域边界（调试用）
             if (false) { // 设置为true可以看到区域边界

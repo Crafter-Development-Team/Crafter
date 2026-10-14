@@ -12,6 +12,7 @@ public class Chunk {
     private int x;
     private int z;
     private List<Section> sections;
+    private final Map<String,NBTReader.NBTCompound> blockEntities = new HashMap<>();
     
     public Chunk(NBTReader.NBTCompound nbtData) {
         this.nbtData = nbtData;
@@ -29,6 +30,15 @@ public class Chunk {
         this.z = chunkData.getInt("zPos");
         this.sections = new ArrayList<>();
         
+        String entityKey=chunkData.contains("block_entities")?"block_entities":"TileEntities";
+        if(chunkData.contains(entityKey)) {
+            NBTReader.NBTList entities=chunkData.getList(entityKey);
+            for(int i=0;i<entities.size();i++) if(entities.get(i) instanceof NBTReader.NBTCompound) {
+                NBTReader.NBTCompound e=(NBTReader.NBTCompound)entities.get(i);
+                if(e.contains("x") && e.contains("y") && e.contains("z"))
+                    blockEntities.put((e.getInt("x")&15)+","+e.getInt("y")+","+(e.getInt("z")&15),e);
+            }
+        }
         // 解析区段数据（1.18+ 用小写 sections，1.17- 用大写 Sections）
         NBTReader.NBTList sectionsList = null;
         if (chunkData.contains("sections")) {
@@ -44,6 +54,10 @@ public class Chunk {
         }
     }
     
+    public NBTReader.NBTCompound getBlockEntity(int x,int y,int z) {
+        return blockEntities.get(x+","+y+","+z);
+    }
+
     /**
      * 从区域文件创建区块
      */
@@ -127,7 +141,9 @@ public class Chunk {
         private int bitsPerBlock;
         
         public Section(NBTReader.NBTCompound sectionData) {
-            this.y = ((NBTReader.NBTByte) sectionData.get("Y")).getValue();
+            Object sectionY = sectionData.get("Y").getValue();
+            if (!(sectionY instanceof Number)) throw new IllegalArgumentException("Section Y must be numeric");
+            this.y = ((Number) sectionY).intValue();
             
             if (sectionData.contains("block_states")) {
                 NBTReader.NBTCompound blockStates = sectionData.getCompound("block_states");
