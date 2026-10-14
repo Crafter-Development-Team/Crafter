@@ -28,6 +28,121 @@ len_color_jin = 21
 name_library = "Crafter"
 names_Crafter_Moving_texture = ["Crafter-动态纹理_首", "Crafter-动态纹理_首_渐变", "Crafter-动态纹理_尾", "Crafter-UV缩放"]
 
+# ========== 贴图角色判定约定 ==========
+# 材质里一张贴图到底算基础色、法向还是 PBR，唯一判据是"有没有同名的无后缀贴图"：
+#   有名如 polaroids.png 与 polaroids_a.png 同时存在 → polaroids_a.png 是这套材质的 PBR；
+#   只有孤立的 polaroids_a.png                    → 它本身就是基础色。
+# 只按文件名后缀认类型会把资源包里名字自带 _a/_s/_n 的物品贴图（如 polaroids_a.png）
+# 误判成 PBR/法向，所以这套规则必须整份材质一起判，不能逐节点判。
+TEX_ROLE_BASE = "base"
+TEX_ROLE_NORMAL = "normal"
+TEX_ROLE_PBR = "pbr"
+# 后缀 -> 角色；同一个后缀既可能是法向也可能是 PBR（导出器两套命名都用 _n/_s/_a）
+TEX_SUFFIX_ROLES = (
+    ("_n.png", TEX_ROLE_NORMAL),
+    ("_s.png", TEX_ROLE_PBR),
+    ("_a.png", TEX_ROLE_PBR),
+)
+
+
+def fuq_bl_dot_number(name: str):
+    '''
+    去除blender中重复时烦人的.xxx
+    name: 待处理的字符串
+    return: 处理后的字符串
+    '''
+    last_dot_index = name.rfind('.')
+    if not last_dot_index == -1:
+        if all("0" <= i <= "9" for i in name[last_dot_index + 1:]):
+            name = name[:last_dot_index]
+    return name
+
+
+def texture_image_name(node):
+    '''
+    取贴图节点所用图像在节点体系里用的名字（去掉 Blender 的重名 .xxx 后缀）。
+    node: 贴图节点；没有图像时返回 None。
+    '''
+    if node is None or getattr(node, "type", None) != "TEX_IMAGE" or node.image is None:
+        return None
+    return fuq_bl_dot_number(node.image.name)
+
+
+def texture_block_name(name):
+    '''
+    取贴图的"贴图块名"：去掉 _n/_s/_a.png 后缀，同时去掉 .png 扩展名。
+    acacia_log.png / acacia_log_n.png / acacia_log_s.png 都得到 acacia_log。
+    拼同族文件名（<块名>_n.png 等）用它；判定同族关系也用它当配对键。
+    '''
+    if not name:
+        return None
+    for suffix, _role in TEX_SUFFIX_ROLES:
+        if name.endswith(suffix):
+            return name[:-len(suffix)]
+    if name.endswith(".png"):
+        return name[:-4]
+    return name
+
+
+def texture_base_name(name):
+    '''
+    兼容入口：取贴图块名（等价于 texture_block_name，见其说明）。
+    '''
+    return texture_block_name(name)
+
+
+def texture_node_role(node, base_names):
+    '''
+    按整份材质的贴图集合判定单个贴图节点的角色。
+    node:       贴图节点
+    base_names: 该材质里所有无后缀贴图的块名集合（见 texture_node_roles）
+    return:     TEX_ROLE_BASE / TEX_ROLE_NORMAL / TEX_ROLE_PBR；非贴图节点或没有图像时返回 None
+    '''
+    name = texture_image_name(node)
+    if name is None:
+        return None
+    for suffix, role in TEX_SUFFIX_ROLES:
+        if name.endswith(suffix):
+            # 块名命中同名无后缀贴图 -> 这张是它的法向/PBR；
+            # 没命中 -> 孤立的后缀贴图，本身就是基础色
+            return role if texture_block_name(name) in base_names else TEX_ROLE_BASE
+    return TEX_ROLE_BASE
+
+
+def texture_node_roles(texture_nodes):
+    '''
+    批量判定贴图节点角色（一次算好无后缀贴图的块名集合，避免逐节点各判一遍）。
+    return: {节点: 角色}
+    '''
+    nodes_list = [node for node in texture_nodes if node is not None]
+    # 第一遍：把"无后缀贴图"（基础色）的块名登记下来，作为同族 _n/_s/_a 的认亲依据
+    base_names = set()
+    for node in nodes_list:
+        name = texture_image_name(node)
+        if name is None or not name.endswith(".png"):
+            continue
+        if texture_block_name(name) == name[:-4]:   # 没有任何 _n/_s/_a 后缀
+            base_names.add(name[:-4])
+    # 第二遍：逐张判角色
+    result = {}
+    for node in nodes_list:
+        result[node] = texture_node_role(node, base_names)
+    return result
+
+
+def texture_node_by_role(texture_nodes, roles):
+    '''
+    在贴图节点里按角色取第一张；roles 是一个或多个角色（判断顺序即优先级）。
+    用于 overlay 帧内只有一两张贴图时的取用（帧内标准布局为 基础色 + 法向 + PBR）。
+    '''
+    roles = (roles,) if isinstance(roles, str) else tuple(roles)
+    node_roles = texture_node_roles(texture_nodes)
+    for role in roles:
+        for node, node_role in node_roles.items():
+            if node_role == role:
+                return node
+    return None
+
 # ========== tint 接口约定 ==========
 # tint.json 里的 kind 取值；与 Crafter-biomeTex 的输出名一致（waterFog 为大写 F）
 TINT_BIOME_KINDS = ("grass", "foliage", "dryfoliage", "water", "waterFog", "fog", "sky")
@@ -118,17 +233,12 @@ def in_overlay_frame(node):
 
 def overlay_frame_base_texture(nodes, frame):
     '''
-    取 overlay 帧内的基础色贴图节点（直接子节点中第一张非 _n/_s/_a 的 png）
+    取 overlay 帧内的基础色贴图节点（直接子节点里角色为基础色的第一张贴图）。
+    角色按整帧的贴图集合判定（见 texture_node_role）：帧内只有一张 _a.png 时它就是基础色。
     '''
-    for node in nodes:
-        if node.parent != frame:
-            continue
-        if node.type == "TEX_IMAGE" and node.image is not None:
-            name_image = fuq_bl_dot_number(node.image.name)
-            if name_image.endswith("_n.png") or name_image.endswith("_s.png") or name_image.endswith("_a.png"):
-                continue
-            return node
-    return None
+    texture_nodes = [node for node in nodes
+                     if node.parent == frame and node.type == "TEX_IMAGE" and node.image is not None]
+    return texture_node_by_role(texture_nodes, TEX_ROLE_BASE)
 
 
 def overlay_frame_ci(nodes, frame):
@@ -887,18 +997,6 @@ def add_node_moving_texture(node_tex, nodes, links, list_info_moving, parent=Non
             # 是基础色纹理
             return None
 
-def fuq_bl_dot_number(name: str):
-    '''
-    去除blender中重复时烦人的.xxx
-    name: 待处理的字符串
-    return: 处理后的字符串
-    '''
-    last_dot_index = name.rfind('.')
-    if not last_dot_index == -1:
-        if all("0" <= i <= "9" for i in name[last_dot_index + 1:]):
-            name = name[:last_dot_index]
-    return name
-
 def material_base_name(name: str):
     '''
     从材质名取分类用的完整名：去掉 blender 的 .xxx 后缀、去掉第一个 @ 之后的
@@ -1326,11 +1424,18 @@ def load_normal_and_PBR(node_tex_base, nodes, links, parent=None):
     node_tex_PBR = None
     if node_tex_base != None:
         name_image = fuq_bl_dot_number(node_tex_base.image.name)
-        name_block = name_image[:-4]
+        # 同族 PBR/法向文件与基础色共用块名：name_block = 去掉 _n/_s/_a 后缀与 .png 扩展名
+        # （acacia_log.png -> acacia_log，孤立当基础色的 polaroids_a.png 同样得到 polaroids）
+        name_block = texture_block_name(name_image)
         dir_image = os.path.dirname(node_tex_base.image.filepath)
         dir_n = os.path.join(dir_image,name_block + "_n.png")
         dir_s = os.path.join(dir_image,name_block + "_s.png")
         dir_a = os.path.join(dir_image,name_block + "_a.png")
+        # 基础色本身带 _s/_a 后缀时（它被判为基础色），拼出来的同族文件就是它自己：
+        # 不能把基础色再当 PBR 读一遍，否则同一张图会被当 PBR 用
+        if name_image in (name_block + "_s.png", name_block + "_a.png"):
+            dir_s = None
+            dir_a = None
         
         list_info_moving = []
         info_moving_tex = add_node_moving_texture(node_tex_base, nodes, links, list_info_moving, parent=parent)
@@ -1341,8 +1446,15 @@ def load_normal_and_PBR(node_tex_base, nodes, links, parent=None):
         location_base_tex = node_tex_base.location
 
         node_tex_normal = add_node_pbr(location_base_tex, 300, dir_n, nodes, links, list_info_moving, parent=parent)
-        node_tex_PBR = add_node_pbr(location_base_tex, 600, dir_s, nodes, links, list_info_moving, parent=parent)
-        node_tex_PBR = add_node_pbr(location_base_tex, 600, dir_a, nodes, links, list_info_moving, parent=parent)
+        # 有 _a 用 _a，否则用 _s：缺哪个都不能把已经建好的那张覆盖成 None
+        if dir_s is not None:
+            node_pbr_s = add_node_pbr(location_base_tex, 600, dir_s, nodes, links, list_info_moving, parent=parent)
+            if node_pbr_s is not None:
+                node_tex_PBR = node_pbr_s
+        if dir_a is not None:
+            node_pbr_a = add_node_pbr(location_base_tex, 600, dir_a, nodes, links, list_info_moving, parent=parent)
+            if node_pbr_a is not None:
+                node_tex_PBR = node_pbr_a
 
     return node_tex_normal, node_tex_PBR
 

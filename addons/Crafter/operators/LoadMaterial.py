@@ -145,26 +145,49 @@ def process_single_material(material, context, classification_list, imported_by_
     node_tex_PBR = None
     node_biomeTex = None
     node_output_EEVEE = None
+    # 先收齐本材质(不含 overlay 帧)的贴图候选，再整份一起判角色：
+    # 只有存在同名的无后缀贴图时，_n/_s/_a 才算 PBR/法向贴图；孤立的后缀贴图
+    # （如资源包里只有 polaroids_a.png）本身就是基础色，不能按后缀吃成 PBR。
+    texture_candidates = [node for node in nodes
+                          if node.type == "TEX_IMAGE" and node.image is not None
+                          and not in_overlay_frame(node)]
+    candidate_roles = texture_node_roles(texture_candidates)
     for node in nodes:
         # overlay 帧内的贴图/节点属于叠加层，不参与基础色扫描（也不能被删）
         if in_overlay_frame(node):
             continue
-        if node.type == "TEX_IMAGE" and node.image is not None:
-            name_image = fuq_bl_dot_number(node.image.name)
-            if name_image.endswith("_n.png") or name_image.endswith("_s.png") or name_image.endswith("_a.png"):
+        role_texture = candidate_roles.get(node)
+        if role_texture is not None:
+            if role_texture == TEX_ROLE_NORMAL:
                 if imported_by_crafter:
-                    if name_image.endswith("_n.png"):
-                        node_tex_normal = node
-                    if name_image.endswith("_s.png") or name_image.endswith("_a.png"):
+                    node_tex_normal = node
+                else:
+                    bpy.data.images.remove(node.image)
+                    nodes_wait_remove.append(node)
+            elif role_texture == TEX_ROLE_PBR:
+                if imported_by_crafter:
+                    # 有 _a 用 _a，否则用 _s（原实现 _a 覆盖 _s，这里按文件名择优，与扫描顺序无关）
+                    if node_tex_PBR is None:
+                        node_tex_PBR = node
+                    elif fuq_bl_dot_number(node.image.name).endswith("_a.png"):
                         node_tex_PBR = node
                 else:
                     bpy.data.images.remove(node.image)
                     nodes_wait_remove.append(node)
-            elif node_tex_base is not None:
-                nodes_wait_remove.append(node)
             else:
-                node.interpolation = "Closest"
-                node_tex_base = node
+                # 基础色：第一张当基础色并统一为最近邻采样，其余候选节点删掉
+                if node_tex_base is not None:
+                    nodes_wait_remove.append(node)
+                else:
+                    node.interpolation = "Closest"
+                    # 孤立后缀贴图当基础色时，它之前可能已按 PBR 被设成 Non-Color
+                    # （add_node_pbr 会改），这里纠正回 sRGB，否则基础色会发暗
+                    try:
+                        if node.image.colorspace_settings.name == "Non-Color":
+                            node.image.colorspace_settings.name = "sRGB"
+                    except Exception:
+                        pass
+                    node_tex_base = node
         if node.type == "OUTPUT_MATERIAL":
             if node.target == "EEVEE":
                 node_output_EEVEE = node
@@ -184,8 +207,7 @@ def process_single_material(material, context, classification_list, imported_by_
     if ":" in material.name:
         real_block_name = material_base_name(material.name)
     elif node_tex_base is not None:
-        block_name = fuq_bl_dot_number(node_tex_base.image.name)
-        real_block_name = block_name[:-4]
+        real_block_name = texture_base_name(fuq_bl_dot_number(node_tex_base.image.name))
     else:
         real_block_name = material_base_name(material.name)
     if real_block_name is None:
@@ -258,20 +280,13 @@ def _clear_overlay_generated_nodes(nodes, frame):
 
 def _overlay_frame_pbr_textures(nodes, frame):
     '''
-    取 overlay 帧内的法向/PBR 贴图节点（规则同基础层：_n 为法向，_s/_a 为 PBR）
+    取 overlay 帧内的法向/PBR 贴图节点（角色判定同基础层：整帧贴图一起判，
+    只有存在同名的无后缀贴图时 _n/_s/_a 才算 PBR/法向）
     '''
-    node_tex_normal = None
-    node_tex_PBR = None
-    for node in nodes:
-        if node.parent != frame:
-            continue
-        if node.type == "TEX_IMAGE" and node.image is not None:
-            name_image = fuq_bl_dot_number(node.image.name)
-            if name_image.endswith("_n.png"):
-                node_tex_normal = node
-            if name_image.endswith("_s.png") or name_image.endswith("_a.png"):
-                node_tex_PBR = node
-    return node_tex_normal, node_tex_PBR
+    texture_nodes = [node for node in nodes
+                     if node.parent == frame and node.type == "TEX_IMAGE" and node.image is not None]
+    return (texture_node_by_role(texture_nodes, TEX_ROLE_NORMAL),
+            texture_node_by_role(texture_nodes, TEX_ROLE_PBR))
 
 def _remove_overlay_mix_nodes(nodes):
     '''
@@ -589,22 +604,31 @@ class VIEW3D_OT_CrafterLoadParallax(bpy.types.Operator):
             node_output = None
             node_CI = None
             node_C_PBR_Parser = None
+            # 贴图角色：整份材质(不含 overlay 帧)一起判，只有存在同名的无后缀贴图时
+            # _n/_s/_a 才算 PBR/法向（孤立的后缀贴图是基础色）
+            texture_candidates = [tex_node for tex_node in nodes
+                                  if tex_node.type == "TEX_IMAGE" and tex_node.image is not None
+                                  and not in_overlay_frame(tex_node)]
+            candidate_roles = texture_node_roles(texture_candidates)
             for node in nodes:
                 # overlay 帧内的节点属于叠加层，不参与视差的基底/贴图查找
                 if in_overlay_frame(node):
                     continue
-                if node.type == "TEX_IMAGE" and node.image != None:
-                    name_image = fuq_bl_dot_number(node.image.name)
-                    if name_image.endswith("_n.png") or name_image.endswith("_s.png") or name_image.endswith("_a.png"):
-                        if name_image.endswith("_n.png"):
-                            node_tex_normal = node
-                        if name_image.endswith("_s.png") or name_image.endswith("_a.png"):
-                            node_tex_PBR = node
-                    elif node_tex_base != None:
+                role_texture = candidate_roles.get(node)
+                if role_texture == TEX_ROLE_NORMAL:
+                    node_tex_normal = node
+                elif role_texture == TEX_ROLE_PBR:
+                    # 有 _a 用 _a，否则用 _s（与扫描顺序无关）
+                    if node_tex_PBR is None:
+                        node_tex_PBR = node
+                    elif fuq_bl_dot_number(node.image.name).endswith("_a.png"):
+                        node_tex_PBR = node
+                elif role_texture == TEX_ROLE_BASE:
+                    if node_tex_base is not None:
                         nodes_wait_remove.append(node)
                     else:
                         node_tex_base = node
-                elif node.type == "GROUP":
+                if node.type == "GROUP":
                     if node.node_tree != None:
                         if node.node_tree.name.startswith("CI-"):
                             node_CI = node

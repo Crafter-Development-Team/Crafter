@@ -74,13 +74,16 @@ class VIEW3D_OT_CrafterReplaceResources(bpy.types.Operator):
             node_C_PBR_Parser = None
             base_texture_nodes = []   # 基础层 + overlay 帧内的所有基础色贴图
             nodes_wait_remove = []
+            # 先收齐贴图节点再整份判角色：只有存在同名的无后缀贴图时 _n/_s/_a 才算
+            # PBR/法向（孤立的后缀贴图是基础色，不能被当成 PBR 删掉）
+            image_roles = texture_node_roles([node for node in nodes if node.type == 'TEX_IMAGE'])
             for node in nodes:
                 if node.type == 'TEX_IMAGE':
                     if node.image == None:
                         nodes_wait_remove.append(node)
                     else:
                         name_image = fuq_bl_dot_number(node.image.name)
-                        if name_image.endswith("_n.png") or name_image.endswith("_s.png") or name_image.endswith("_a.png"):
+                        if image_roles.get(node) in (TEX_ROLE_NORMAL, TEX_ROLE_PBR):
                             # 移除pbr、法向材质节点（之后按新贴图逐层重建）
                             bpy.data.images.remove(node.image)
                             nodes_wait_remove.append(node)

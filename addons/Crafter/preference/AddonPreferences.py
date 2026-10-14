@@ -105,11 +105,11 @@ class CrafterAddonPreferences(AddonPreferences):
                                          default=0.0005,
                                          min=0.0,
                                          max=0.05,
-                                         precision=6,
+                                         precision=4,
                                          step=0.01)# type: ignore
-    overlayLayerStep: FloatProperty(name="Overlay Offset",
-                                    description="Per-layer outward offset for coincident overlay faces (grass side / CTM overlay). Increase it if z-fighting persists in EEVEE",
-                                    default=0.003,
+    overlayLayerStep: FloatProperty(name="Coincident Offset",
+                                    description="Outward offset in metres (1 block = 1 m) for coincident faces: per-layer offset for overlay faces (grass side / CTM overlay), and the outward push that separates a zero-thickness decal's edge face from the neighbouring block's contact face (thin decals like Cluttered mod polaroids z-fight otherwise). Keep it above the float precision at your coordinates: 0.0001 is only safe within roughly 1000 blocks of the origin, 0.0005 within about 4000, 0.001+ anywhere. Increase it if z-fighting persists in EEVEE",
+                                    default=0.0005,
                                     min=0.0002,
                                     max=0.05,
                                     precision=4)# type: ignore
