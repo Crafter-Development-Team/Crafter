@@ -5,6 +5,7 @@ import com.minecraft.selector.core.BlockColors;
 import com.minecraft.selector.core.ResourceOptions;
 import com.minecraft.selector.core.RenderedMap;
 import com.minecraft.selector.core.SelectionSeed;
+import com.minecraft.selector.core.ImportLod;
 import com.minecraft.selector.gui.SelectionMath;
 import com.minecraft.selector.gui.MinecraftMapGUI;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -39,6 +40,11 @@ public class MinecraftMapSelector {
         catch(IllegalArgumentException e) {System.err.println("Ignoring invalid selection seed: "+e.getMessage());}
         final SelectionMath.Bounds initialSelection=parsedSelection;
         args=SelectionSeed.withoutFlags(args);
+        ImportLod parsedImportLod=ImportLod.DEFAULT;
+        try {parsedImportLod=ImportLod.parse(args);}
+        catch(IllegalArgumentException e) {System.err.println("Ignoring invalid import LOD seed: "+e.getMessage());}
+        final ImportLod initialImportLod=parsedImportLod;
+        args=ImportLod.withoutFlags(args);
         ResourceOptions.setLaunch(ResourceOptions.parse(args));
         args=ResourceOptions.withoutResourceFlags(args);
 
@@ -89,7 +95,7 @@ public class MinecraftMapSelector {
             System.out.println("启动图形界面...");
             javax.swing.SwingUtilities.invokeLater(() -> {
                 try {
-                    MinecraftMapGUI gui=new MinecraftMapGUI();gui.setSelectionExportOptions(multiBox,includeWaypoints);gui.setInitialSelectionSeed(initialSelection);gui.setVisible(true);
+                    MinecraftMapGUI gui=new MinecraftMapGUI();gui.setSelectionExportOptions(multiBox,includeWaypoints);gui.setInitialSelectionSeed(initialSelection);gui.setInitialImportLod(initialImportLod);gui.setVisible(true);
                 } catch (Exception e) {
                     System.err.println("启动GUI失败: " + e.getMessage());
                     e.printStackTrace();
@@ -108,7 +114,7 @@ public class MinecraftMapSelector {
             javax.swing.SwingUtilities.invokeLater(() -> {
                 try {
                     MinecraftMapGUI gui = new MinecraftMapGUI(worldPath, outputFile, jarPath, minY, maxY);
-                    gui.setSelectionExportOptions(multiBox,includeWaypoints);gui.setInitialSelectionSeed(initialSelection);gui.setVisible(true);
+                    gui.setSelectionExportOptions(multiBox,includeWaypoints);gui.setInitialSelectionSeed(initialSelection);gui.setInitialImportLod(initialImportLod);gui.setVisible(true);
                 } catch (Exception e) {
                     System.err.println("启动Blender集成模式失败: " + e.getMessage());
                     e.printStackTrace();

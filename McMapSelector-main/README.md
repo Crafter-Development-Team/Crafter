@@ -35,7 +35,43 @@ java -Djava.awt.headless=true -jar target/minecraft-map-selector-1.0.0.jar /path
 
 表面模式为 `TOP`，保留 `AUTO` 作为兼容别名，两者在所有维度均取顶部可见表面。
 
-工具栏 Dimension 旁的 **LOD** 控制预览采样：Auto (by file count)、1 (full)、2 (1/2)、4 (1/4)、8 (1/8)。Auto 按文件数选择间隔：≤1 个为 1、≤9 个为 2、≤25 个为 4，更多为 8。静态单/多 MCA 按本次文件数计算；动态视口和自动平移加载按当前维度非空 region 文件总数固定采样，避免移动视口时画质跳变。切换 LOD 会重新预览，重新渲染也沿用当前选项。间隔表示 X/Z 每隔多少方块取样，图像仍保持每 region 512×512；GUI/CLI 在间隔 >1 时，像素、悬停高度与选择拟合信息均使用同一近邻样本，属于近似预览。粗 LOD 禁用逐列层缓存，Y 带变化回落到按当前间隔重新渲染；1 (full) 保留实时缓存换带。
+工具栏 Dimension 旁的 **Preview quality** 控制预览采样：Auto、1 (full)、2 (1/2)、4 (1/4)、8 (1/8)，与导入用的 Import LOD 独立。静态单/多 MCA 的 Auto 按本次实际渲染文件数计算：≤1 个为 1、≤9 个为 2、≤25 个为 4，更多为 8。动态视口和自动平移加载的 Auto 固定为 2，不再读取整个维度的 region 数量，因此大型下界不会仅因文件多而一直使用 8；固定值也避免视口加载/淘汰时反复重建管理器。手动选择 1/2/4/8 优先于 Auto。切换 Preview quality 会重新预览，重新渲染沿用当前选项。间隔表示 X/Z 每隔多少方块取样，图像仍保持每 region 512×512；GUI/CLI 在间隔 >1 时，像素、悬停高度与选择拟合信息均使用同一近邻样本，属于近似预览。粗采样禁用逐列层缓存，Y 带变化回落到按当前间隔重新渲染；1 (full) 保留实时缓存换带。
+
+### Import LOD 与 Blender 联动
+
+地图左侧 **Import LOD** 面板可折叠，设置 Max LOD level（Off / 1 / 2 / 3 / 4）、LOD0..LOD3 距离（非负整数，单位 **chunk**）、Auto center 和手动中心 X/Z（整数，单位 **block**）。Max=N 时启用前 N 个距离输入；例如 Max=2 使用 distance0 和 distance1，最外侧全部回退到 LOD2。关闭不会丢失其余距离设置。
+
+Auto center 默认开启。有选区时，先将 AABB 最小/最大方块坐标向下取整为区块坐标，再取区块中点，除法向零取整（与 WI `config.cpp` 一致，包含负坐标）；回传中心为该区块原点的方块坐标。没有选区时依次使用**当前维度**的 player、spawn，否则使用 (0,0)。手动模式原样保留方块中心坐标；实际预览与 Blender 一样按 `//16` 转成区块中心，面板的 Preview center 显示这个区块原点。
+
+**View → Import LOD rings** 控制圆环显示；从 Off 启用 Import LOD 时默认显示。两个画布均使用同一个叠加层，设置/选区变化即时更新。连续圆环的半径为累计距离 ×16 方块，右上角图例显示活动 LOD 与累计半径，最外侧标出最大 LOD。WI 按区块坐标的欧氏距离平方判断，边界 `dist² <= radius²` 属于内侧；逻辑 LOD0/1/2/3/4 对应 mesh lod 0/1/2/4/8。圆环仅用于说明范围，不改变地图采样质量。
+
+Blender 启动选择器时传入当前偏好：
+
+```sh
+java -jar target/minecraft-map-selector-1.0.0.jar --world-path /path/to/world --output-file coordinates.json \
+  --import-lod-max 2 --import-lod-d0 8 --import-lod-d1 8 --import-lod-d2 8 --import-lod-d3 8 \
+  --import-lod-auto-center false --import-lod-cx -17 --import-lod-cz 32
+```
+
+这些可选 CLI 参数支持部分提供（未提供字段取默认值），在 GUI/位置参数解析前剥离。重复、缺失、非整数、越界或非法布尔值会使本组 seed 整体回退到默认值并输出诊断，不会吞掉其他选项。
+
+Confirm 保留原有 min/max XYZ 字段，并且**总是**写出完整 `importLod`，包括 Off：
+
+```json
+"importLod": {
+  "maxLevel": 2, "autoCenter": false, "centerX": -17, "centerZ": 32,
+  "distance0": 8, "distance1": 8, "distance2": 8, "distance3": 8
+}
+```
+
+Python 的 `read_coordinates` 返回 `(first_xyz, second_xyz, import_lod_or_none)`。完整验证后才在 Blender 主线程写入 XYZ 和 LOD 偏好；maxLevel 转成枚举字符串，其余保持上述单位。旧文件没有 importLod 时保留现有 LOD；Off 明确写入 `Max_LOD_Level="0"`。存在 importLod 时要求八个已知字段完整，验证 bool/int、max 0..4、非负 int32 距离和有符号 int32 中心；忽略未知键，错误对象会拒绝整个结果，避免部分应用。
+
+无 Blender 依赖的 Python 测试：
+
+```sh
+python3 addons/Crafter/operators/test_map_selector_runtime.py
+```
+
 
 JSON 的 `blocks[z][x]` 和 `heights[z][x]` 与图片对应，`noHeight=-2147483648` 标识空列；世界目录输出包含 originX/originZ。该高度 JSON 与 Blender 的选区 coordinates.json 是不同输出。PNG 不持久化高度元数据，内部缓存随渲染会话存在。
 
@@ -77,7 +113,7 @@ java -Djava.awt.headless=true -jar minecraft-map-selector-1.0.0.jar \
 
 GUI 右侧保留云端 **Import Y** 竖向三滑块：绿色 = 最低 Y、橙色 = 最高 Y、紫色 = 兴趣带上沿。拖动时优先用 ColumnCache 实时重合成，缓存不可用时才回落到临时裁剪或防抖重渲。同一对值既决定回传 Blender 的 minY/maxY，也决定预览的 Y 带：带内从顶向下取可见表面，带里没有方块的列透明，所以把上 thumb 压到地面以下就能直接看地下结构。滑条坐标轴按传入的高度范围自动留边（不需要数字输入框，值画在 thumb 旁），不再有旧的固定 -64..365 截断。下界与其他维度一样按 Y 带取顶，鼠标高度来自当前图片的采样缓存。底部滚动日志显示世界解析、各资源包提取、region 扫描和渲染阶段；启动加载时进度条先用不定百分比，能计算区块百分比后切换实际进度。
 
-拖 Y 带时会走**逐列层缓存**：第一次拖动会先在后台把当前视图的每个 region 整列扫一遍（含每列的方块层栈，相邻同方块同色压成一段，约 5 段/列、31MB/region，缓存个数按堆内存自适应），之后两个方向换带都只做内存重合成 —— 实测 64 区块重合成+出图约 13ms（整 region 约 200ms），建立约 137ms（整 region 约 2.2s）。缓存没就绪或对不上的情况自动回落到防抖重渲；下界 DIM-1 / the_nether 与其他维度一样可以缓存。粗 LOD（间隔 >1）和显式洞穴预览不使用层缓存，换带后重新扫描。重合成用的是同一套出图代码，像素与全量渲染逐点一致（见 ColumnCacheTest）。
+拖 Y 带时会走**逐列层缓存**：第一次拖动会先在后台把当前视图的每个 region 整列扫一遍（含每列的方块层栈，相邻同方块同色压成一段，约 5 段/列、31MB/region，缓存个数按堆内存自适应），之后两个方向换带都只做内存重合成 —— 实测 64 区块重合成+出图约 13ms（整 region 约 200ms），建立约 137ms（整 region 约 2.2s）。缓存没就绪或对不上的情况自动回落到防抖重渲；下界 DIM-1 / the_nether 与其他维度一样可以缓存。粗预览采样（间隔 >1）和显式洞穴预览不使用层缓存，换带后重新扫描。重合成用的是同一套出图代码，像素与全量渲染逐点一致（见 ColumnCacheTest）。
 
 
 ### 选择功能 P0–P2（合入云端 UI）

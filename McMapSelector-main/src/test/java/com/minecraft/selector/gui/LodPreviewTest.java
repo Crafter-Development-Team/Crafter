@@ -11,6 +11,14 @@ class LodPreviewTest {
             assertEquals(intervals[i],MinecraftMapGUI.resolveLodLevel("Auto (by file count)",counts[i]));
     }
 
+    @Test void dynamicAutoIsStableAndExplicitQualityStillOverrides() {
+        assertEquals(2,MinecraftMapGUI.resolveDynamicPreviewQuality("Auto"));
+        assertEquals(1,MinecraftMapGUI.resolveDynamicPreviewQuality("1 (full)"));
+        assertEquals(2,MinecraftMapGUI.resolveDynamicPreviewQuality("2 (1/2)"));
+        assertEquals(4,MinecraftMapGUI.resolveDynamicPreviewQuality("4 (1/4)"));
+        assertEquals(8,MinecraftMapGUI.resolveDynamicPreviewQuality("8 (1/8)"));
+    }
+
     @Test void explicitLodOverridesFileCount() {
         String[] options={"1 (full)","2 (1/2)","4 (1/4)","8 (1/8)"};
         int[] intervals={1,2,4,8};
