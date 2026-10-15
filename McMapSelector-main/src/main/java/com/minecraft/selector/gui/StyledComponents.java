@@ -516,7 +516,8 @@ public class StyledComponents {
     }
 
     /**
-     * 竖向双滑块：世界 Y 向上增长，上 thumb = 上限（Top Y），下 thumb = 下限（Bottom Y）。
+     * 竖向三滑块：世界 Y 向上增长。绿 = 下限（Bottom Y），橙 = 上限（Top Y），
+     * 紫 = 兴趣带上沿（Highlight Y）：Top Y 与它之间若存在方块，画布会用 50% 紫棋盘标出来。
      * 拖动过程中只重绘，松手才发出 change 事件，由外部防抖决定何时整幅重渲。
      */
     public static class VerticalRangeSlider extends JPanel {
@@ -524,8 +525,10 @@ public class StyledComponents {
         private int maxValue;
         private int lowerValue;
         private int upperValue;
+        private int highlightValue;
         private boolean draggingLower;
         private boolean draggingUpper;
+        private boolean draggingHighlight;
         private boolean syncing;
         private boolean notifying;
         private final int THUMB_SIZE = 13;
@@ -538,9 +541,10 @@ public class StyledComponents {
             this.maxValue = Math.max(min + 1, max);
             this.lowerValue = Math.max(this.minValue, Math.min(Math.min(lower, upper), this.maxValue));
             this.upperValue = Math.max(this.lowerValue, Math.min(Math.max(lower, upper), this.maxValue));
+            this.highlightValue = Math.min(this.maxValue, this.upperValue + 16);   // 默认贴着上界上方一点：既能看到紫 thumb，带里通常又是空的
             setPreferredSize(new Dimension(104, 420));
             setOpaque(false);
-            setToolTipText("Upper handle = top Y, lower handle = bottom Y");
+            setToolTipText("Purple = highlight band top, orange = top Y, green = bottom Y");
 
             addMouseListener(new MouseAdapter() {
                 @Override
@@ -550,9 +554,10 @@ public class StyledComponents {
 
                 @Override
                 public void mouseReleased(MouseEvent e) {
-                    boolean moved = draggingLower || draggingUpper;
+                    boolean moved = draggingLower || draggingUpper || draggingHighlight;
                     draggingLower = false;
                     draggingUpper = false;
+                    draggingHighlight = false;
                     setCursor(Cursor.getDefaultCursor());
                     // 拖动中不通知外部：整幅重渲只在松手后触发一次
                     if (moved) fireChangeEvent();
@@ -624,23 +629,31 @@ public class StyledComponents {
             int y = e.getY();
             int lowerY = valueToY(lowerValue);
             int upperY = valueToY(upperValue);
+            int highlightY = valueToY(highlightValue);
             int hit = THUMB_SIZE / 2 + 3;
-            if (Math.abs(y - lowerY) <= hit && Math.abs(y - lowerY) <= Math.abs(y - upperY)) {
+            int dl = Math.abs(y - lowerY), du = Math.abs(y - upperY), dh = Math.abs(y - highlightY);
+            if (dl <= hit && dl <= du && dl <= dh) {
                 draggingLower = true;
-            } else if (Math.abs(y - upperY) <= hit) {
+            } else if (du <= hit && du <= dh) {
                 draggingUpper = true;
-            } else if (Math.abs(y - lowerY) <= Math.abs(y - upperY)) {
+            } else if (dh <= hit) {
+                draggingHighlight = true;
+            } else if (dl <= du && dl <= dh) {
                 draggingLower = true;
                 updateLower(y);
-            } else {
+            } else if (du <= dh) {
                 draggingUpper = true;
                 updateUpper(y);
+            } else {
+                draggingHighlight = true;
+                updateHighlight(y);
             }
         }
 
         private void handleMouseDragged(MouseEvent e) {
             if (draggingLower) updateLower(e.getY());
             else if (draggingUpper) updateUpper(e.getY());
+            else if (draggingHighlight) updateHighlight(e.getY());
         }
 
         private void updateLower(int y) {
@@ -653,9 +666,18 @@ public class StyledComponents {
         }
 
         private void updateUpper(int y) {
-            int value = Math.min(maxValue, Math.max(yToValue(y), lowerValue));
+            int value = Math.min(highlightValue, Math.max(yToValue(y), lowerValue));
             if (value != upperValue) {
                 upperValue = value;
+                repaint();
+                fireLiveEvent();
+            }
+        }
+
+        private void updateHighlight(int y) {
+            int value = Math.min(maxValue, Math.max(yToValue(y), upperValue));
+            if (value != highlightValue) {
+                highlightValue = value;
                 repaint();
                 fireLiveEvent();
             }
@@ -664,13 +686,25 @@ public class StyledComponents {
         private void updateCursor(MouseEvent e) {
             int y = e.getY();
             int hit = THUMB_SIZE / 2 + 3;
-            boolean onThumb = Math.abs(y - valueToY(lowerValue)) <= hit || Math.abs(y - valueToY(upperValue)) <= hit;
+            boolean onThumb = Math.abs(y - valueToY(lowerValue)) <= hit
+                || Math.abs(y - valueToY(upperValue)) <= hit
+                || Math.abs(y - valueToY(highlightValue)) <= hit;
             setCursor(onThumb ? Cursor.getPredefinedCursor(Cursor.HAND_CURSOR) : Cursor.getDefaultCursor());
         }
 
         // ── 取值 ──
         public int getLowerValue() { return lowerValue; }
         public int getUpperValue() { return upperValue; }
+        public int getHighlightValue() { return highlightValue; }
+
+        public void setHighlightValue(int value) {
+            int next = Math.max(upperValue, Math.min(value, maxValue));
+            if (next != highlightValue) {
+                highlightValue = next;
+                repaint();
+                fireChangeEvent();
+            }
+        }
 
         public void setLowerValue(int value) {
             int next = Math.max(minValue, Math.min(value, upperValue));
@@ -682,7 +716,7 @@ public class StyledComponents {
         }
 
         public void setUpperValue(int value) {
-            int next = Math.min(maxValue, Math.max(value, lowerValue));
+            int next = Math.min(highlightValue, Math.max(value, lowerValue));
             if (next != upperValue) {
                 upperValue = next;
                 repaint();
@@ -692,11 +726,17 @@ public class StyledComponents {
 
         /** 同时设置两端，只发一次 change（启动灌初值时用）。 */
         public void setValues(int lower, int upper) {
+            setValues(lower, upper, upper);
+        }
+
+        public void setValues(int lower, int upper, int highlight) {
             int lo = Math.max(minValue, Math.min(Math.min(lower, upper), maxValue));
             int hi = Math.max(lo, Math.min(Math.max(lower, upper), maxValue));
-            if (lo == lowerValue && hi == upperValue) return;
+            int hl = Math.max(hi, Math.min(Math.max(highlight, hi), maxValue));
+            if (lo == lowerValue && hi == upperValue && hl == highlightValue) return;
             lowerValue = lo;
             upperValue = hi;
+            highlightValue = hl;
             repaint();
             fireChangeEvent();
         }
@@ -708,6 +748,7 @@ public class StyledComponents {
             maxValue = max;
             lowerValue = Math.max(min, Math.min(lowerValue, max));
             upperValue = Math.max(lowerValue, Math.min(upperValue, max));
+            highlightValue = Math.max(upperValue, Math.min(highlightValue, max));
             repaint();
         }
 
@@ -725,6 +766,7 @@ public class StyledComponents {
             int height = trackHeight();
             int lowerY = valueToY(lowerValue);
             int upperY = valueToY(upperValue);
+            int highlightY = valueToY(highlightValue);
 
             g2d.setColor(Color.LIGHT_GRAY);
             g2d.fillRoundRect(x, top, TRACK_WIDTH, height, TRACK_WIDTH, TRACK_WIDTH);
@@ -733,6 +775,13 @@ public class StyledComponents {
             g2d.setColor(UIThemeManager.ThemeColors.PRIMARY_BLUE);
             g2d.fillRoundRect(x, Math.min(lowerY, upperY), TRACK_WIDTH,
                               Math.max(1, Math.abs(lowerY - upperY)), TRACK_WIDTH, TRACK_WIDTH);
+
+            // 兴趣带（上限→高亮上沿）：地图上会用紫色棋盘标出这段里的方块
+            if (highlightEnabled && highlightY < upperY) {
+                g2d.setColor(HIGHLIGHT_COLOR);
+                g2d.fillRoundRect(x, highlightY, TRACK_WIDTH,
+                                  Math.max(1, upperY - highlightY), TRACK_WIDTH, TRACK_WIDTH);
+            }
 
             // 每 64 一格刻度
             g2d.setColor(new Color(255, 255, 255, 140));
@@ -743,15 +792,22 @@ public class StyledComponents {
 
             drawThumb(g2d, x, lowerY, UIThemeManager.ThemeColors.MINECRAFT_GREEN);
             drawThumb(g2d, x, upperY, UIThemeManager.ThemeColors.WARNING_ORANGE);
+            drawThumb(g2d, x, highlightY, highlightEnabled ? HIGHLIGHT_COLOR : Color.GRAY);
 
             g2d.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 11));
             FontMetrics fm = g2d.getFontMetrics();
             g2d.setColor(Color.DARK_GRAY);
+            drawValue(g2d, fm, x, highlightY, highlightValue);
             drawValue(g2d, fm, x, upperY, upperValue);
             drawValue(g2d, fm, x, lowerY, lowerValue);
 
             g2d.dispose();
         }
+
+        /** 兴趣带高亮色（与画布上的紫棋盘同一色系） */
+        static final Color HIGHLIGHT_COLOR = new Color(0x80, 0x30, 0xC0);
+        /** 关掉"兴趣带"开关时紫 thumb 画成灰的 */
+        public volatile boolean highlightEnabled = true;
 
         private void drawThumb(Graphics2D g2d, int trackX, int y, Color color) {
             int px = trackX + TRACK_WIDTH / 2 - THUMB_SIZE / 2;

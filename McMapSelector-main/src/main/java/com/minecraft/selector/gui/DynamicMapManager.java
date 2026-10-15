@@ -190,6 +190,7 @@ public class DynamicMapManager {
             }
 
             ((RenderedMap) combinedImage).copyHeightsFrom(regionImage, pixelX, pixelY);
+            ((RenderedMap) combinedImage).copyHighlightsFrom(regionImage, pixelX, pixelY);
 
             // 可选：绘制区域边界（调试用）
             if (false) { // 设置为true可以看到区域边界

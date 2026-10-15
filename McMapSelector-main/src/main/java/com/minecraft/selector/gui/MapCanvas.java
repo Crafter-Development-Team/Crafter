@@ -571,6 +571,13 @@ public class MapCanvas extends JPanel implements Scrollable {
             int scaledHeight = (int) (image.getHeight() * scale);
             
             g2d.drawImage(image, imageOffset.x, imageOffset.y, scaledWidth, scaledHeight, null);
+
+            // 兴趣带高亮：按屏幕坐标叠紫棋盘（图案不随地图移动）。
+            // 缩放用"图像实际绘制尺寸"推算，保证与 drawImage 的取整完全一致，不留缝。
+            if (image instanceof RenderedMap) {
+                drawHighlight(g2d, (RenderedMap) image,
+                    (double) scaledWidth / image.getWidth(), (double) scaledHeight / image.getHeight());
+            }
             
             // 绘制选择框 - 根据当前缩放和偏移调整
             if (selecting && selectionStart != null && selectionEnd != null) {
@@ -626,6 +633,29 @@ public class MapCanvas extends JPanel implements Scrollable {
         g2d.dispose();
     }
     
+    /**
+     * 把"兴趣带里有方块"的像素按屏幕坐标叠成紫棋盘：图案锚在屏幕原点，所以拖动/缩放时它不动。
+     * 逐行把连续的高亮像素并成一段再 fillRect；边界用 floor 与 drawImage 的最近邻缩放对齐。
+     */
+    private void drawHighlight(Graphics2D g2d, RenderedMap map, double scaleX, double scaleY) {
+        int mapWidth = map.getWidth(), mapHeight = map.getHeight();
+        g2d.setPaint(CheckerBackground.highlightPaint());
+        for (int z = 0; z < mapHeight; z++) {
+            int rowTop = imageOffset.y + (int) Math.floor(z * scaleY);
+            int rowBottom = imageOffset.y + (int) Math.floor((z + 1) * scaleY);
+            int rowHeight = Math.max(1, rowBottom - rowTop);
+            int x = 0;
+            while (x < mapWidth) {
+                if (!map.isHighlighted(x, z)) { x++; continue; }
+                int start = x;
+                while (x < mapWidth && map.isHighlighted(x, z)) x++;
+                int left = imageOffset.x + (int) Math.floor(start * scaleX);
+                int right = imageOffset.x + (int) Math.floor(x * scaleX);
+                g2d.fillRect(left, rowTop, Math.max(1, right - left), rowHeight);
+            }
+        }
+    }
+
     /**
      * 设置选择回调
      */

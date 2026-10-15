@@ -586,6 +586,30 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
     }
     
     /**
+     * 一块瓦片上的兴趣带高亮：按屏幕坐标叠紫棋盘（图案锚在屏幕原点，所以拖动/缩放时不动）。
+     * 逐行把连续的高亮像素并成一段再 fillRect；边界用 floor 与 drawImage 的最近邻缩放对齐，
+     * 否则缩放后瓦片之间会露出 1~3 像素的缝。
+     */
+    private void drawTileHighlight(Graphics2D g2d, RenderedMap map, int originX, int originY, double pixelScale) {
+        int mapWidth = map.getWidth(), mapHeight = map.getHeight();
+        g2d.setPaint(CheckerBackground.highlightPaint());
+        for (int z = 0; z < mapHeight; z++) {
+            int rowTop = originY + (int) Math.floor(z * pixelScale);
+            int rowBottom = originY + (int) Math.floor((z + 1) * pixelScale);
+            int rowHeight = Math.max(1, rowBottom - rowTop);
+            int x = 0;
+            while (x < mapWidth) {
+                if (!map.isHighlighted(x, z)) { x++; continue; }
+                int start = x;
+                while (x < mapWidth && map.isHighlighted(x, z)) x++;
+                int left = originX + (int) Math.floor(start * pixelScale);
+                int right = originX + (int) Math.floor(x * pixelScale);
+                g2d.fillRect(left, rowTop, Math.max(1, right - left), rowHeight);
+            }
+        }
+    }
+
+    /**
      * 绘制区域
      */
     private void drawRegions(Graphics2D g2d) {
@@ -612,6 +636,12 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
                     BufferedImage image = tile.getImage();
                     // 使用+1像素重叠来消除缝隙
                     g2d.drawImage(image, screenX, screenY, screenWidth + 1, screenHeight + 1, null);
+                    // 兴趣带高亮：同样按屏幕坐标叠紫棋盘（图案不随地图移动）
+                    if (image instanceof RenderedMap) {
+                        // 用图像"实际绘制尺寸"(screenWidth+1) 算缩放：否则瓦片交界处会空出 1 像素露底
+                        drawTileHighlight(g2d, (RenderedMap) image, screenX, screenY,
+                            (double) (screenWidth + 1) / REGION_SIZE);
+                    }
                     
                 } else if (availableRegions.contains(regionCoord)) {
                     if (regionManager.isRegionLoading(regionCoord)) {

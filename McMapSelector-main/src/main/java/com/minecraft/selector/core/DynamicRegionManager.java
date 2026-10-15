@@ -38,6 +38,8 @@ public class DynamicRegionManager {
     private final MapRenderer.SurfaceMode mode;
     /** 当前 Y 带：可运行时改，新的瓦片用新带渲染 */
     private volatile Integer clipY, clipMinY;
+    /** 兴趣带上沿：上界与它之间若有方块，画布会叠紫棋盘标出来 */
+    private volatile Integer highlightTop;
     /** 每次换带自增：用来丢弃"用旧带算完的"瓦片 */
     private volatile long bandGeneration;
 
@@ -113,15 +115,31 @@ public class DynamicRegionManager {
      */
     public static class RegionTile {
         private final Point regionCoord;
+        /** 这份图对应的 Y 带与兴趣带上沿；与管理器当前值不一致时要重渲染 */
+        final Integer tileClipY, tileClipMinY, tileHighlightTop;
         private final BufferedImage image;
         private final long loadTime;
         private long lastAccessTime;
         
         public RegionTile(Point regionCoord, BufferedImage image) {
+            this(regionCoord, image, null, null, null);
+        }
+
+        public RegionTile(Point regionCoord, BufferedImage image,
+                          Integer tileClipY, Integer tileClipMinY, Integer tileHighlightTop) {
             this.regionCoord = regionCoord;
             this.image = image;
+            this.tileClipY = tileClipY;
+            this.tileClipMinY = tileClipMinY;
+            this.tileHighlightTop = tileHighlightTop;
             this.loadTime = System.currentTimeMillis();
             this.lastAccessTime = loadTime;
+        }
+
+        boolean matchesBand(Integer clipY, Integer clipMinY, Integer highlightTop) {
+            return java.util.Objects.equals(tileClipY, clipY)
+                && java.util.Objects.equals(tileClipMinY, clipMinY)
+                && java.util.Objects.equals(tileHighlightTop, highlightTop);
         }
         
         public Point getRegionCoord() { return regionCoord; }
@@ -212,8 +230,13 @@ public class DynamicRegionManager {
      * 每块瓦片一个任务，完成一块就通知画布重绘一块。
      */
     public void setBand(Integer clipY, Integer clipMinY) {
+        setBand(clipY, clipMinY, null);
+    }
+
+    public void setBand(Integer clipY, Integer clipMinY, Integer highlightTop) {
         this.clipY = clipY;
         this.clipMinY = clipMinY;
+        this.highlightTop = highlightTop;
         long band = ++bandGeneration;
         java.util.List<Point> coords;
         synchronized (stateLock) {
@@ -233,10 +256,22 @@ public class DynamicRegionManager {
         for (Point coord : coords) {
             final long expected = band;
             try {
-                loadingExecutor.execute(() -> rerenderTileForBand(coord, expected));
+                loadingExecutor.execute(() -> rerenderTileForBand(coord, expected, true));
             } catch (java.util.concurrent.RejectedExecutionException ignored) {
                 return;
             }
+        }
+    }
+
+    private Point regionCoordOf(File file) {
+        String name = file.getName();
+        if (!name.startsWith("r.") || !name.endsWith(".mca")) return null;
+        String[] parts = name.substring(2, name.length() - 4).split("\\.");
+        if (parts.length != 2) return null;
+        try {
+            return new Point(Integer.parseInt(parts[0]), Integer.parseInt(parts[1]));
+        } catch (NumberFormatException error) {
+            return null;
         }
     }
 
@@ -244,10 +279,10 @@ public class DynamicRegionManager {
         return new File(regionDir, String.format("r.%d.%d.mca", coord.x, coord.y));
     }
 
-    private void rerenderTileForBand(Point coord, long expectedBand) {
+    private void rerenderTileForBand(Point coord, long expectedBand, boolean countFrame) {
         if (expectedBand != bandGeneration) return;   // 已被更新的带取代：别白算
         final long requestGeneration = generation;
-        final Integer top = clipY, bottom = clipMinY;
+        final Integer top = clipY, bottom = clipMinY, highlight = highlightTop;
         final String key = regionFile(coord).getAbsolutePath();
         final long started = System.currentTimeMillis();
         CacheEntry entry;
@@ -256,13 +291,13 @@ public class DynamicRegionManager {
         if (entry != null && entry.palette == BlockColors.snapshot()) {
             try {
                 // 数组快路径出图：不建 BlockInfo、不建 MapRenderer（一帧垃圾量从几百 MB 降到几 MB）
-                image = entry.cache.toImage(top, bottom);
+                image = entry.cache.toImage(top, bottom, highlight);
             } catch (Exception error) {
                 logManager.warn("换带重合成失败，回落重载: " + key + " - " + error.getMessage(), "DynamicRegionManager");
                 image = null;
             }
         }
-        boolean frameDone = countBandTile(System.currentTimeMillis() - started, image != null, expectedBand);
+        boolean frameDone = !countFrame || countBandTile(System.currentTimeMillis() - started, image != null, expectedBand);
         if (image == null) {
             // 没有缓存（或颜色资源换了）：删掉瓦片走正常加载（要读盘，慢，这里记一笔）
             if (expectedBand == bandGeneration) {
@@ -276,7 +311,7 @@ public class DynamicRegionManager {
             }
             return;
         }
-        RegionTile tile = new RegionTile(new Point(coord), image);
+        RegionTile tile = new RegionTile(new Point(coord), image, top, bottom, highlight);
         synchronized (stateLock) {
             // 期间又换过带：这块交给更新的那次任务，别用旧带覆盖
             if (closed || generation != requestGeneration || expectedBand != bandGeneration) return;
@@ -306,6 +341,9 @@ public class DynamicRegionManager {
                 if (cache == null) return;   // 下界去顶：不缓存
                 synchronized (bandCaches) { bandCaches.put(key, new CacheEntry(cache, palette)); }
                 logManager.info("Y 带缓存就绪: " + file.getName() + "（换带可实时）", "DynamicRegionManager");
+                // 这块瓦片原本可能是读盘渲染的（没有兴趣带掩码）：立刻用缓存重渲一次
+                Point coord = regionCoordOf(file);
+                if (coord != null) requestTileRefresh(coord);
             });
         } catch (java.util.concurrent.RejectedExecutionException ignored) {
         }
@@ -484,9 +522,11 @@ public class DynamicRegionManager {
         Long retry = failedUntil.get(regionCoord);
         if (retry != null && retry > System.currentTimeMillis()) return;
         final long requestGeneration = generation;
+        final Integer renderClipY = clipY, renderClipMinY = clipMinY, renderHighlight = highlightTop;
         FutureTask<RegionTile> task = new FutureTask<RegionTile>(() -> {
             BufferedImage image = tileRenderer.render(regionCoord);
-            return image == null ? null : new RegionTile(new Point(regionCoord), image);
+            return image == null ? null
+                : new RegionTile(new Point(regionCoord), image, renderClipY, renderClipMinY, renderHighlight);
         }) {
             @Override protected void done() {
                 synchronized (stateLock) {
@@ -528,7 +568,29 @@ public class DynamicRegionManager {
      * 获取已加载的区域
      */
     public RegionTile getLoadedRegion(Point regionCoord) {
-        return loadedRegions.get(regionCoord);
+        return getLoadedRegion(regionCoord, true);
+    }
+
+    /** refreshIfStale=true 时，发现瓦片不是当前带/兴趣带渲染的，就排队重渲染（先返回旧图，不闪）。 */
+    public RegionTile getLoadedRegion(Point regionCoord, boolean refreshIfStale) {
+        RegionTile tile = loadedRegions.get(regionCoord);
+        if (tile != null && refreshIfStale && !tile.matchesBand(clipY, clipMinY, highlightTop)) {
+            requestTileRefresh(regionCoord);
+        }
+        return tile;
+    }
+
+    /** 把一块"带/兴趣带过期"的瓦片排进重渲染队列（同一块只允许一个在飞）。 */
+    private void requestTileRefresh(Point regionCoord) {
+        synchronized (stateLock) {
+            if (closed || loadingRegions.containsKey(regionCoord)) return;
+            if (!loadedRegions.containsKey(regionCoord)) return;
+        }
+        final long expected = bandGeneration;
+        try {
+            loadingExecutor.execute(() -> rerenderTileForBand(regionCoord, expected, false));
+        } catch (java.util.concurrent.RejectedExecutionException ignored) {
+        }
     }
     
     /**

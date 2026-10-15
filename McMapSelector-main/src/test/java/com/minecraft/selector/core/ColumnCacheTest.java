@@ -9,6 +9,7 @@ import java.awt.image.BufferedImage;
 import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -158,6 +159,34 @@ class ColumnCacheTest {
             }
         } finally {
             renderer.shutdown();
+        }
+    }
+
+    @Test void highlightFlagMarksColumnsWithBlocksAboveTheTopBound() throws Exception {
+        Path path = fixture();
+        ColumnCache cache = scan(path, MapRenderer.SurfaceMode.AUTO);
+        // 上界 64、兴趣带上沿 70：x=0（石 64..70）在 (64,70] 里有方块 → 标记；
+        // x=2（只有石 64）与 x=3（只有深层石 -50）→ 不标记
+        RenderedMap image = cache.toImage(64, null, 70);
+        assertTrue(image.isHighlighted(0, 0), "x=0 在兴趣带里有方块");
+        assertTrue(image.isHighlighted(1, 0), "x=1 玻璃 70 也在带里");
+        assertFalse(image.isHighlighted(2, 0), "x=2 带里没有方块");
+        assertFalse(image.isHighlighted(3, 0), "x=3 只有深层方块");
+
+        // 兴趣带上沿 == 上界 → 带为空 → 全不标记
+        RenderedMap off = cache.toImage(64, null, 64);
+        for (int z = 0; z < 16; z++)
+            for (int x = 0; x < 16; x++)
+                assertFalse(off.isHighlighted(x, z), "空兴趣带不该标记 @" + x + "," + z);
+
+        // 标记只是"掩码"：不得改变像素与高度
+        RenderedMap plain = cache.toImage(64, null);
+        for (int z = 0; z < 16; z++) {
+            for (int x = 0; x < 16; x++) {
+                assertEquals(plain.getRGB(x, z), image.getRGB(x, z), "highlight 不该改像素 @" + x + "," + z);
+                assertEquals(RenderedMap.heightAt(plain, x, z), RenderedMap.heightAt(image, x, z),
+                    "highlight 不该改高度 @" + x + "," + z);
+            }
         }
     }
 

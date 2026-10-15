@@ -9,6 +9,7 @@ import java.awt.Point;
 import java.awt.image.BufferedImage;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** 空地棋盘底纹：8px 双色方格，锚在屏幕坐标上，不随地图平移移动。 */
@@ -46,6 +47,24 @@ class MapCanvasTest {
             canvas.setViewCenter(new Point(0, 0));   // 平移地图
             assertEquals(before, painted(canvas).getRGB(5, 45) & 0xFFFFFF);
         });
+    }
+
+    /**
+     * 兴趣带高亮必须是"半透明的紫色棋盘"：两格同色系、靠 alpha 区分，
+     * 这样底下的地形颜色还能透出来（早先"黑格/白格各压 50% 紫"会把地形洗成灰）。
+     */
+    @Test void highlightPaintIsTranslucentPurple() {
+        java.awt.TexturePaint paint = CheckerBackground.highlightPaint();
+        BufferedImage tile = paint.getImage();
+        int dark = tile.getRGB(9, 1), light = tile.getRGB(1, 1);
+        assertNotEquals(dark, light, "高亮贴图应该是两色棋盘");
+        int darkAlpha = (dark >>> 24) & 0xFF, lightAlpha = (light >>> 24) & 0xFF;
+        assertTrue(darkAlpha > lightAlpha, "深格应比浅格更不透明（深 " + darkAlpha + " / 浅 " + lightAlpha + "）");
+        assertTrue(lightAlpha > 0 && darkAlpha < 255, "必须半透明：浅 " + lightAlpha + " / 深 " + darkAlpha);
+        for (int argb : new int[]{dark, light}) {
+            int r = (argb >> 16) & 0xFF, g = (argb >> 8) & 0xFF, b = argb & 0xFF;
+            assertTrue(b > r && r > g, "高亮应该偏紫，实际 " + Integer.toHexString(argb));
+        }
     }
 
     private static BufferedImage painted(MapCanvas canvas) {

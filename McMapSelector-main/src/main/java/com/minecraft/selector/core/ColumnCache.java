@@ -81,6 +81,16 @@ public final class ColumnCache {
      * 实时重合成走这条：不构造任何 BlockInfo，一帧的垃圾量从几百 MB 降到几 MB。
      */
     public void toArrays(Integer clipY, Integer clipMinY, int[] heights, int[] baseColors) {
+        toArrays(clipY, clipMinY, null, heights, baseColors, null);
+    }
+
+    /**
+     * 直接把结果写进调用方给的「高度 / 基色」两个数组。
+     * highlightTop 非空时，额外标出"在上界之上、highlightTop 之下还有方块"的列（highlight[i]=1），
+     * 由画布按屏幕坐标叠紫色棋盘 —— 所以图案不会随地图拖动。
+     */
+    public void toArrays(Integer clipY, Integer clipMinY, Integer highlightTop,
+                         int[] heights, int[] baseColors, byte[] highlight) {
         int[] included = new int[8];
         for (int z = 0; z < size; z++) {
             for (int x = 0; x < size; x++) {
@@ -89,8 +99,12 @@ public final class ColumnCache {
                 int from = offsets[column], to = offsets[column + 1];
                 int count = 0, topRun = -1, topY = 0;
                 double alpha = 0;
+                boolean above = false;
+                int topBound = clipY != null ? clipY : Integer.MIN_VALUE;
+                boolean bandActive = highlightTop != null && highlightTop > topBound;   // 空带不标
                 for (int run = from; run < to; run++) {
                     int yTop = runTopY[run], yBottom = runBottomY[run];
+                    if (bandActive && yTop > topBound && yBottom <= highlightTop) above = true;
                     if (clipMinY != null && yTop < clipMinY) break;
                     int high = clipY != null ? Math.min(yTop, clipY) : yTop;
                     int low = clipMinY != null ? Math.max(yBottom, clipMinY) : yBottom;
@@ -106,6 +120,7 @@ public final class ColumnCache {
                     }
                     if (alpha >= 0.995) break;
                 }
+                if (highlight != null) highlight[index] = (byte) (above ? 1 : 0);
                 if (topRun < 0) {
                     heights[index] = RenderedMap.NO_HEIGHT;
                     baseColors[index] = 0;
@@ -121,10 +136,16 @@ public final class ColumnCache {
 
     /** 换带出图：数组快路径 + 与全量渲染共用的描边规则。 */
     public RenderedMap toImage(Integer clipY, Integer clipMinY) {
+        return toImage(clipY, clipMinY, null);
+    }
+
+    /** 带"兴趣带高亮"标记的出图；highlightTop == null 表示不要高亮。 */
+    public RenderedMap toImage(Integer clipY, Integer clipMinY, Integer highlightTop) {
         int[] heights = new int[size * size];
         int[] baseColors = new int[size * size];
-        toArrays(clipY, clipMinY, heights, baseColors);
-        return MapRenderer.renderArrays(size, size, heights, baseColors);
+        byte[] highlight = highlightTop != null ? new byte[size * size] : null;
+        toArrays(clipY, clipMinY, highlightTop, heights, baseColors, highlight);
+        return MapRenderer.renderArrays(size, size, heights, baseColors, highlight);
     }
 
     private static final Color EMPTY_COLOR = new Color(0, 0, 0, 0);

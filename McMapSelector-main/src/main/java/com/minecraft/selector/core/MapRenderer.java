@@ -350,12 +350,13 @@ public class MapRenderer {
         private final MapRenderer renderer;
         private final BlockInfo[][] blocksFallback;
         private final RenderedMap imageFallback;
-        private final Integer bandTop, bandBottom;
+        private final Integer bandTop, bandBottom, highlightTop;
         private BlockInfo[][] blocks;
         private RenderedMap image;
 
         RegionScan(ColumnCache cache, BlockColors.Palette palette, MapRenderer renderer,
-                   BlockInfo[][] blocksFallback, RenderedMap imageFallback, Integer bandTop, Integer bandBottom) {
+                   BlockInfo[][] blocksFallback, RenderedMap imageFallback,
+                   Integer bandTop, Integer bandBottom, Integer highlightTop) {
             this.cache = cache;
             this.palette = palette;
             this.renderer = renderer;
@@ -363,6 +364,7 @@ public class MapRenderer {
             this.imageFallback = imageFallback;
             this.bandTop = bandTop;
             this.bandBottom = bandBottom;
+            this.highlightTop = highlightTop;
         }
 
         /** 逐列的 BlockInfo（测试/兼容用，按需构造）。 */
@@ -374,7 +376,7 @@ public class MapRenderer {
         /** 出图：有缓存走数组快路径（不建 BlockInfo），否则用刚才那次带状渲染的结果。 */
         public RenderedMap image() {
             if (image == null) {
-                image = cache != null ? cache.toImage(bandTop, bandBottom)
+                image = cache != null ? cache.toImage(bandTop, bandBottom, highlightTop)
                     : (imageFallback != null ? imageFallback : (RenderedMap) renderer.renderToPng(blocksFallback, 1));
             }
             return image;
@@ -387,12 +389,19 @@ public class MapRenderer {
      */
     public RegionScan scanRegionBlocks(String mcaFilePath,int regionSize,Integer bandTop,Integer bandBottom,
                                        boolean allowCache) throws IOException {
+        return scanRegionBlocks(mcaFilePath, regionSize, bandTop, bandBottom, allowCache, null);
+    }
+
+    /** highlightTop 非空时，返回的图会带上"上界之上、highlightTop 之下有方块"的逐像素标记。 */
+    public RegionScan scanRegionBlocks(String mcaFilePath,int regionSize,Integer bandTop,Integer bandBottom,
+                                       boolean allowCache,Integer highlightTop) throws IOException {
         ColumnCache cache=allowCache?scanRegion(mcaFilePath,regionSize):null;
         if(cache==null) {
             BlockInfo[][] blocks=getTopBlocks(mcaFilePath,regionSize,1);
-            return new RegionScan(null,scanPalette,this,blocks,(RenderedMap)renderToPng(blocks,1),bandTop,bandBottom);
+            return new RegionScan(null,scanPalette,this,blocks,(RenderedMap)renderToPng(blocks,1),
+                bandTop,bandBottom,highlightTop);
         }
-        return new RegionScan(cache,scanPalette,this,null,null,bandTop,bandBottom);
+        return new RegionScan(cache,scanPalette,this,null,null,bandTop,bandBottom,highlightTop);
     }
 
     /**
@@ -650,6 +659,11 @@ public class MapRenderer {
      * 但不需要逐个像素构造 BlockInfo（Y 带实时重合成走这条路，避免每帧上百万对象）。
      */
     public static RenderedMap renderArrays(int width, int height, int[] heights, int[] baseColors) {
+        return renderArrays(width, height, heights, baseColors, null);
+    }
+
+    /** 同上，另带每像素的"兴趣带"标记（canvas 按屏幕坐标叠紫棋盘）。 */
+    public static RenderedMap renderArrays(int width, int height, int[] heights, int[] baseColors, byte[] highlight) {
         RenderedMap image = new RenderedMap(width, height);
         int[] pixels = new int[width * height];
         IntStream.range(0, height).parallel().forEach(i -> {
@@ -665,6 +679,7 @@ public class MapRenderer {
         });
         image.setRGB(0, 0, width, height, pixels, 0, width);
         image.putHeights(heights);
+        image.putHighlights(highlight);
         return image;
     }
 

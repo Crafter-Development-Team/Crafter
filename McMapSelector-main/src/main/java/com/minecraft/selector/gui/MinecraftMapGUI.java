@@ -234,6 +234,7 @@ public class MinecraftMapGUI extends JFrame {
         noteLiveActive();
 
         final int top = heightRangeSlider.getUpperValue(), bottom = heightRangeSlider.getLowerValue();
+        final Integer highlight = highlightBandTop();
         final long generation = ++liveGeneration;
         final MapRenderer.SurfaceMode mode = surfaceMode;
         // 拖动时事件很密：只保留一个在算的任务，期间来的请求合并成"算完再补一次"
@@ -244,7 +245,7 @@ public class MinecraftMapGUI extends JFrame {
         backgroundExecutor.submit(() -> {
             try {
                 long started = System.currentTimeMillis();
-                RenderedMap combined = composeFromCaches(recipe, caches, top, bottom);
+                RenderedMap combined = composeFromCaches(recipe, caches, top, bottom, highlight);
                 long millis = System.currentTimeMillis() - started;
                 SwingUtilities.invokeLater(() -> {
                     if (generation != liveGeneration || mode != surfaceMode) return;
@@ -273,7 +274,7 @@ public class MinecraftMapGUI extends JFrame {
     }
 
     /** 按 recipe 的 region 与偏移，把缓存里的层栈重新合成大图。 */
-    private RenderedMap composeFromCaches(ViewRecipe recipe, ColumnCache[] caches, int top, int bottom) {
+    private RenderedMap composeFromCaches(ViewRecipe recipe, ColumnCache[] caches, int top, int bottom, Integer highlight) {
         RenderedMap combined = new RenderedMap(recipe.totalWidth, recipe.totalHeight);
         Graphics2D g2d = combined.createGraphics();
         MapRenderer renderer = new MapRenderer(1, null, recipe.mode, top, bottom);
@@ -283,12 +284,13 @@ public class MinecraftMapGUI extends JFrame {
             g2d.fillRect(0, 0, recipe.totalWidth, recipe.totalHeight);
             for (int i = 0; i < caches.length; i++) {
                 if (caches[i] == null) continue;
-                BufferedImage image = caches[i].toImage(top, bottom);
+                BufferedImage image = caches[i].toImage(top, bottom, highlight);
                 if (image == null) continue;
                 int offsetX = (recipe.regionX[i] - recipe.minRegionX) * 512;
                 int offsetY = (recipe.regionZ[i] - recipe.minRegionZ) * 512;
                 g2d.drawImage(image, offsetX, offsetY, null);
                 combined.copyHeightsFrom(image, offsetX, offsetY);
+                combined.copyHighlightsFrom(image, offsetX, offsetY);
             }
         } finally {
             renderer.shutdown();
@@ -430,7 +432,7 @@ public class MinecraftMapGUI extends JFrame {
         ybandState(String.format("dynamic band %d..%d", bottom, top));
         backgroundExecutor.submit(() -> {
             try {
-                manager.setBand(top, bottom);
+                manager.setBand(top, bottom, highlightBandTop());
             } catch (Exception error) {
                 logManager.error("Dynamic band update failed: " + error.getMessage(), "MinecraftMapGUI", error);
             } finally {
@@ -481,6 +483,16 @@ public class MinecraftMapGUI extends JFrame {
             String stats = manager.takeBandStats();
             if (stats != null) ybandLog("Y 带性能(动态视口): " + stats);
         }
+    }
+
+    private javax.swing.JCheckBox highlightCheckbox;
+
+    /** 兴趣带上沿：开关关掉、或没高过上界时返回 null（= 不高亮）。 */
+    private Integer highlightBandTop() {
+        if (highlightCheckbox == null || !highlightCheckbox.isSelected()) return null;
+        int highlight = heightRangeSlider.getHighlightValue();
+        int top = heightRangeSlider.getUpperValue();
+        return highlight > top ? highlight : null;
     }
 
     /** 地图渲染的 loading 延迟阈值：短于它就完全不显示遮罩 */
@@ -776,8 +788,7 @@ public class MinecraftMapGUI extends JFrame {
         heightRangeSlider.addLiveListener(e -> {
             if (isDynamicMode) { dynamicBandUpdate(); return; }
             if (!resurfaceFromCache(true)) previewFromSource();
-        });
-        // 值落定：绝不轻易全量重渲 —— 缓存能接管就它管；临时裁剪已对应当前带就等缓存转精确；
+        });        // 值落定：绝不轻易全量重渲 —— 缓存能接管就它管；临时裁剪已对应当前带就等缓存转精确；
         // 缓存正在建也等它；只有在"这个视图没有缓存可用"时才回到防抖全量渲染
         heightRangeSlider.addChangeListener(e -> {
             logBandSummary();   // 松手：把这一轮的帧耗时汇总一行
@@ -1098,7 +1109,18 @@ public class MinecraftMapGUI extends JFrame {
         JLabel importYHint = new JLabel("<html><center>Drag the handles.<br>Preview = import band.</center></html>",
                                         SwingConstants.CENTER);
         importYHint.setFont(importYHint.getFont().deriveFont(Font.PLAIN, 10f));
-        importYPanel.add(importYHint, BorderLayout.NORTH);
+        highlightCheckbox = new javax.swing.JCheckBox("Highlight band", true);
+        highlightCheckbox.setToolTipText("Purple handle: anything between it and the top Y gets marked");
+        highlightCheckbox.addActionListener(e -> {
+            heightRangeSlider.highlightEnabled = highlightCheckbox.isSelected();
+            heightRangeSlider.repaint();
+            if (isDynamicMode) dynamicBandUpdate();
+            else if (!resurfaceFromCache(false)) heightDebounce.restart();
+        });
+        JPanel importYHead = new JPanel(new java.awt.GridLayout(0, 1, 2, 2));
+        importYHead.add(highlightCheckbox);
+        importYHead.add(importYHint);
+        importYPanel.add(importYHead, BorderLayout.NORTH);
         importYPanel.add(heightRangeSlider, BorderLayout.CENTER);
         mapPanel.add(importYPanel, BorderLayout.EAST);
 
@@ -1735,7 +1757,7 @@ displayedTop=null;displayedBottom=null;sourceTop=null;sourceBottom=null;previewC
 
                             // 渲染单个区域：顺带把层缓存建出来，渲染完就能实时换 Y 带
                             MapRenderer.RegionScan scan = renderer.scanRegionBlocks(mcaFile, 32,
-                                requestedTop, requestedBottom, true);   // 所有 region 都在渲染那次顺手建缓存，保证渲染完就能实时拖
+                                requestedTop, requestedBottom, true, highlightBandTop());   // 顺手建缓存 + 兴趣带标记
                             if (scan.cache != null) stashColumnCache(mcaFile, scan.cache, scan.palette);
                             BufferedImage regionImage = scan.image();
                             if (regionImage != null) {
@@ -1747,6 +1769,7 @@ displayedTop=null;displayedBottom=null;sourceTop=null;sourceBottom=null;previewC
 
                                 g2d.drawImage(regionImage, offsetX, offsetY, null);
                                 combinedImage.copyHeightsFrom(regionImage, offsetX, offsetY);
+                                combinedImage.copyHighlightsFrom(regionImage, offsetX, offsetY);
                             }
                         }
                         completedRegions.incrementAndGet();
@@ -1893,7 +1916,7 @@ displayedTop=null;displayedBottom=null;sourceTop=null;sourceBottom=null;previewC
                 try {
                     // 渲染区块：顺带把层缓存建出来，渲染完就能实时换 Y 带
                     MapRenderer.RegionScan scan = renderer.scanRegionBlocks(regionPath, 32,
-                        requestedTop, requestedBottom, true);
+                        requestedTop, requestedBottom, true, highlightBandTop());
                     if (scan.cache != null) stashColumnCache(regionPath, scan.cache, scan.palette);
                     BufferedImage image = scan.image();
 
@@ -2157,7 +2180,7 @@ displayedTop=null;displayedBottom=null;sourceTop=null;sourceBottom=null;previewC
             try {
                 // 渲染整个区域 (32x32区块 = 512x512方块)：平移加载时也顺手把该 region 的层缓存建好
                 MapRenderer.RegionScan scan = renderer.scanRegionBlocks(regionPath.getAbsolutePath(), 32,
-                    requestedTop, requestedBottom, true);
+                    requestedTop, requestedBottom, true, highlightBandTop());
                 if (scan.cache != null) stashColumnCache(regionPath.getAbsolutePath(), scan.cache, scan.palette);
                 BufferedImage regionImage = scan.image();
                 if (regionImage != null) {
@@ -2608,6 +2631,7 @@ displayedTop=null;displayedBottom=null;sourceTop=null;sourceBottom=null;previewC
                                     logManager.debug(String.format("Placing region image at: (%d, %d)", offsetX, offsetY), "MinecraftMapGUI");
                                     g2d.drawImage(regionImage, offsetX, offsetY, null);
                                     combinedImage.copyHeightsFrom(regionImage, offsetX, offsetY);
+                                    combinedImage.copyHighlightsFrom(regionImage, offsetX, offsetY);
                                 } else {
                                     logManager.warn("Region image render failed: r." + regionX + "." + regionZ + ".mca", "MinecraftMapGUI");
                                 }
