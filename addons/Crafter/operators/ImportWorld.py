@@ -141,6 +141,11 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             row_partition_size = col_2_aschunk.row()
             row_partition_size.enabled = addon_prefs.notexportFullModel
             row_partition_size.prop(addon_prefs, "partitionSize")
+            try:
+                manual_info = calculate_auto_chunk_settings()
+                col_2_aschunk.label(text=i18n("threads") + " " + str(manual_info["modelThreads"]))
+            except Exception:
+                col_2_aschunk.label(text="Auto chunk calculation unavailable", icon="ERROR")
 
         box_lod = layout.box()
         box_lod.prop(addon_prefs, "Max_LOD_Level")
@@ -457,7 +462,12 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             auto_chunk_info = None
             effective_partition_size = addon_prefs.partitionSize
             effective_max_tasks = addon_prefs.maxTasksPerBatch
-            effective_model_threads = 1
+            manual_chunk_info = calculate_auto_chunk_settings()
+            effective_model_threads = manual_chunk_info["modelThreads"]
+            log_step(
+                f'手动分块: {effective_partition_size}x{effective_partition_size} chunks, '
+                f'批次 {effective_max_tasks} tasks, 模型线程 {effective_model_threads} (CPU/内存预算), 可用内存 '
+                f'{manual_chunk_info["availableMemoryBytes"] / (1024 ** 3):.1f} GB')
 
         # 自动模式下默认分块输出（每个分组独立去重导出）；勾选"不分块"
         # 时合并为单个完整模型导出。手动模式行为由 notexportFullModel 决定。
