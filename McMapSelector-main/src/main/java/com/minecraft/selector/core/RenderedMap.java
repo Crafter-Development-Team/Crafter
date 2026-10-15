@@ -10,7 +10,56 @@ import java.util.Arrays;
  */
 public final class RenderedMap extends BufferedImage {
     public static final int NO_HEIGHT = Integer.MIN_VALUE;
+    private String renderKey="synthetic";
+    public java.awt.Rectangle loadedPixelBounds() {
+        int minX=getWidth(),minZ=getHeight(),maxX=-1,maxZ=-1;
+        if(loaded!=null) {
+            for(int i=loaded.nextSetBit(0);i>=0;i=loaded.nextSetBit(i+1)) {int x=i%getWidth(),z=i/getWidth();minX=Math.min(minX,x);minZ=Math.min(minZ,z);maxX=Math.max(maxX,x);maxZ=Math.max(maxZ,z);}
+        } else for(int z=0;z<getHeight();z++) for(int x=0;x<getWidth();x++) if(getHeightAt(x,z)!=NO_HEIGHT) {minX=Math.min(minX,x);minZ=Math.min(minZ,z);maxX=Math.max(maxX,x);maxZ=Math.max(maxZ,z);}
+        return maxX<minX?new java.awt.Rectangle(0,0,getWidth(),getHeight()):new java.awt.Rectangle(minX,minZ,maxX-minX+1,maxZ-minZ+1);
+    }
+    public String getRenderKey() {return renderKey;}
+    void setRenderKey(String key) {renderKey=key;}
     private final int[] heights;
+    private int[] blockStates;
+    private int[] opaqueHeights,dryHeights,biomeIds;
+    private java.util.BitSet loaded;
+    private final java.util.List<String> biomes=new java.util.ArrayList<>();
+    private final java.util.Map<String,Integer> biomeIndex=new java.util.HashMap<>();
+    public boolean isLoadedAt(int x,int z) {return x>=0&&z>=0&&x<getWidth()&&z<getHeight()&&(loaded==null?getHeightAt(x,z)!=NO_HEIGHT:loaded.get(z*getWidth()+x));}
+    public String getBiomeAt(int x,int z) {if(biomeIds==null||x<0||z<0||x>=getWidth()||z>=getHeight()) return null;int id=biomeIds[z*getWidth()+x];return id==0?null:biomes.get(id-1);}
+    public static String biomeAt(BufferedImage image,int x,int z) {return image instanceof RenderedMap?((RenderedMap)image).getBiomeAt(x,z):null;}
+    public int getFitHeightAt(int x,int z,boolean opaque) {
+        if(x<0||z<0||x>=getWidth()||z>=getHeight()) return NO_HEIGHT;
+        int[] a=opaque?opaqueHeights:dryHeights;return a==null?getHeightAt(x,z):a[z*getWidth()+x];
+    }
+    void setColumnMetadata(int x,int z,String biome,int opaque,int dry) {
+        int i=z*getWidth()+x;
+        if(loaded==null) loaded=new java.util.BitSet(heights.length);loaded.set(i);
+        if(opaqueHeights==null) {opaqueHeights=new int[heights.length];dryHeights=new int[heights.length];Arrays.fill(opaqueHeights,NO_HEIGHT);Arrays.fill(dryHeights,NO_HEIGHT);}
+        opaqueHeights[i]=opaque;dryHeights[i]=dry;
+        if(biome!=null) {
+            if(biomeIds==null) biomeIds=new int[heights.length];
+            Integer id=biomeIndex.get(biome);if(id==null) {id=biomes.size()+1;biomes.add(biome);biomeIndex.put(biome,id);}biomeIds[i]=id;
+        } else if(biomeIds!=null) biomeIds[i]=0;
+    }
+
+    private final java.util.List<String> palette = new java.util.ArrayList<>();
+    private final java.util.Map<String,Integer> paletteIndex = new java.util.HashMap<>();
+
+    public String getBlockAt(int x,int z) {
+        if(blockStates==null||x<0||z<0||x>=getWidth()||z>=getHeight()) return null;
+        int id=blockStates[z*getWidth()+x];return id==0?null:palette.get(id-1);
+    }
+    void setBlockAt(int x,int z,String state) {
+        if(state==null) return;
+        if(blockStates==null) blockStates=new int[heights.length];
+        Integer id=paletteIndex.get(state);
+        if(id==null) {id=palette.size()+1;palette.add(state);paletteIndex.put(state,id);}
+        blockStates[z*getWidth()+x]=id;
+    }
+    public static String blockAt(BufferedImage image,int x,int z) {return image instanceof RenderedMap?((RenderedMap)image).getBlockAt(x,z):null;}
+
 
     public RenderedMap(int width, int height) {
         super(width, height, BufferedImage.TYPE_INT_ARGB);
@@ -35,12 +84,31 @@ public final class RenderedMap extends BufferedImage {
     public void copyHeightsFrom(BufferedImage source, int offsetX, int offsetZ) {
         if (!(source instanceof RenderedMap)) return;
         RenderedMap map = (RenderedMap) source;
+        renderKey=map.renderKey;
+        // Translate the source palette once, then copy indices without per-pixel strings.
+        int[] translation=null;
+        if(map.blockStates!=null) {
+            if(blockStates==null) blockStates=new int[heights.length];
+            translation=new int[map.palette.size()+1];
+            for(int i=0;i<map.palette.size();i++) {
+                String state=map.palette.get(i);Integer id=paletteIndex.get(state);
+                if(id==null) {id=palette.size()+1;palette.add(state);paletteIndex.put(state,id);}
+                translation[i+1]=id;
+            }
+        }
         int startX = Math.max(0, -offsetX);
         int endX = Math.min(source.getWidth(), getWidth() - offsetX);
         if (startX >= endX) return;
         for (int z = Math.max(0, -offsetZ); z < Math.min(source.getHeight(), getHeight() - offsetZ); z++) {
             System.arraycopy(map.heights, z * map.getWidth() + startX,
                 heights, (z + offsetZ) * getWidth() + offsetX + startX, endX - startX);
+            if(translation!=null) for(int x=startX;x<endX;x++) blockStates[(z+offsetZ)*getWidth()+x+offsetX]=translation[map.blockStates[z*map.getWidth()+x]];
+            else if(blockStates!=null) Arrays.fill(blockStates,(z+offsetZ)*getWidth()+offsetX+startX,(z+offsetZ)*getWidth()+offsetX+endX,0);
+            for(int x=startX;x<endX;x++) {
+                int dx=x+offsetX,dz=z+offsetZ;
+                if(map.isLoadedAt(x,z)) setColumnMetadata(dx,dz,map.getBiomeAt(x,z),map.getFitHeightAt(x,z,true),map.getFitHeightAt(x,z,false));
+                else {int i=dz*getWidth()+dx;if(loaded!=null) loaded.clear(i);if(biomeIds!=null) biomeIds[i]=0;if(opaqueHeights!=null) {opaqueHeights[i]=NO_HEIGHT;dryHeights[i]=NO_HEIGHT;}}
+            }
         }
     }
 }

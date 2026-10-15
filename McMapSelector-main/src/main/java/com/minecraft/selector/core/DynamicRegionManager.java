@@ -31,7 +31,7 @@ public class DynamicRegionManager {
     private final TileRenderer tileRenderer;
     private final Object stateLock = new Object();
     private final Map<Point, Long> failedUntil = new HashMap<>();
-    private Set<Point> desiredRegions = Collections.emptySet();
+    private volatile Set<Point> desiredRegions = Collections.emptySet();
     private long generation = 0;
     private volatile boolean closed;
     private volatile long progressRevision;
@@ -70,6 +70,8 @@ public class DynamicRegionManager {
             lastAccessTime = System.currentTimeMillis();
             return image; 
         }
+        /** Overview sampling must not refresh the viewport LRU access order. */
+        public BufferedImage peekImage() { return image; }
         public int getHeightAt(int x, int z) {
             return RenderedMap.heightAt(image, x, z);
         }
@@ -103,6 +105,9 @@ public class DynamicRegionManager {
         this(savePath,regionDir,mode,null);
     }
     public DynamicRegionManager(String savePath,File regionDir,MapRenderer.SurfaceMode mode,Integer clipY) {
+        this(savePath,regionDir,mode,clipY,PreviewOptions.DEFAULT);
+    }
+    public DynamicRegionManager(String savePath,File regionDir,MapRenderer.SurfaceMode mode,Integer clipY,PreviewOptions preview) {
         this.savePath = savePath;
         this.regionDir = regionDir;
         this.logManager = LogManager.getInstance();
@@ -114,7 +119,7 @@ public class DynamicRegionManager {
             File file = new File(regionDir, String.format("r.%d.%d.mca", coordinate.x, coordinate.y));
             // Independent progress counters per render: a shared MapRenderer was
             // concurrently resetting counters and scheduling blocking waiter tasks.
-            MapRenderer local = new MapRenderer(2, null, mode,clipY,tilePalette);
+            MapRenderer local = new MapRenderer(2, null, mode,clipY,tilePalette,preview);
             try { return local.renderToPng(local.getTopBlocks(file.getAbsolutePath(),32,1),1); }
             finally { local.shutdown(); }
         };
@@ -172,6 +177,9 @@ public class DynamicRegionManager {
     /**
      * 更新视口，加载/卸载相应区域
      */
+    private final java.util.concurrent.atomic.AtomicLong cacheHits=new java.util.concurrent.atomic.AtomicLong(),cacheMisses=new java.util.concurrent.atomic.AtomicLong();
+    public String hudMetrics(){long hit=cacheHits.get(),miss=cacheMisses.get();return "regions "+loadedRegions.size()+"/"+availableRegions.size()+", viewport "+desiredRegions.size()+", hits "+(hit+miss==0?"—":String.format(java.util.Locale.ROOT,"%.0f%%",100.0*hit/(hit+miss)));}
+    public void trimViewportCache(){synchronized(stateLock){for(Point p:new java.util.ArrayList<>(loadedRegions.keySet()))if(!desiredRegions.contains(p)){loadedRegions.remove(p);notifyRegionUnloaded(p);}}}
     public void updateViewport(Rectangle worldViewport) {
         if (worldViewport == null || worldViewport.width <= 0 || worldViewport.height <= 0 || closed) return;
         // Rectangle bounds are half-open; use long arithmetic before addition.
@@ -193,7 +201,7 @@ public class DynamicRegionManager {
             if (closed) return;
             desiredRegions = new HashSet<>(candidates);
             unloadUnneededRegions(desiredRegions);
-            for (Point point : candidates) startLoadingRegion(point);
+            for (Point point : candidates) {if(loadedRegions.containsKey(point))cacheHits.incrementAndGet();else cacheMisses.incrementAndGet();startLoadingRegion(point);}
             notifyViewportProgress();
         }
     }

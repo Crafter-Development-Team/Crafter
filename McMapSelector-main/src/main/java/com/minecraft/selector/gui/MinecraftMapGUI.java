@@ -1,6 +1,13 @@
 package com.minecraft.selector.gui;
 
 import com.minecraft.selector.core.MapRenderer;
+import com.minecraft.selector.core.PreviewOptions;
+import com.minecraft.selector.core.SelectionPreset;
+import com.minecraft.selector.utils.RecentWorlds;
+import com.minecraft.selector.core.SelectionYFit;
+import com.minecraft.selector.core.WorldAnchors;
+import com.minecraft.selector.core.CoordinatesPayload;
+import java.awt.datatransfer.StringSelection;
 import com.minecraft.selector.core.RenderedMap;
 import com.minecraft.selector.core.MinecraftResourceExtractor;
 import com.minecraft.selector.core.BlockColors;
@@ -42,6 +49,33 @@ public class MinecraftMapGUI extends JFrame {
     private JLabel regionLabel;
     private JLabel coordDisplayLabel;
     private JLabel fileInfoLabel;
+    private final JLabel selectionStatsLabel=new JLabel("No selection");
+    private WorldAnchors worldAnchors=WorldAnchors.empty();
+    private SelectionMath.Snap selectionSnap=SelectionMath.Snap.NONE;
+    private int gridMode;
+    private JMenuItem gridMenuItem;
+    private boolean confirmationOpen;
+    private volatile PreviewOptions preview=PreviewOptions.DEFAULT;
+    private final ViewOverlays overlays=new ViewOverlays();
+    private final RecentWorlds recentWorlds=new RecentWorlds();
+    private boolean multiBoxExport,includeWaypointsExport;
+    private SwingWorker<com.minecraft.selector.core.OverlayScan.Result,Void> p2ScanWorker;
+    private volatile long p2ScanRevision;
+    private javax.swing.Timer hudTimer;
+    public void setSelectionExportOptions(boolean multi,boolean markers){multiBoxExport=multi;includeWaypointsExport=markers;}
+    private final TransferHandler fileDropHandler=new TransferHandler(){
+        public boolean canImport(TransferSupport support){return support.isDataFlavorSupported(java.awt.datatransfer.DataFlavor.javaFileListFlavor);}
+        public boolean importData(TransferSupport support){if(!canImport(support))return false;try{Object value=support.getTransferable().getTransferData(java.awt.datatransfer.DataFlavor.javaFileListFlavor);java.util.List<?> files=(java.util.List<?>)value;if(files.size()!=1)throw new IOException("Drop one world, preset or pack at a time");handleDroppedFile((File)files.get(0));return true;}catch(Exception e){showFileError(e);return false;}}
+    };
+    private JMenu recentMenu;
+    private SelectionPreset pendingPreset;
+    private final Map<String,JCheckBoxMenuItem> previewItems=new HashMap<>();
+    private JMenuItem biomeMenu;
+    private javax.swing.Timer selectionCoverageTimer;
+    private SwingWorker<SelectionYFit.Result,Void> selectionCoverageWorker;
+    public void setInitialSelectionSeed(SelectionMath.Bounds seed) {if(seed!=null) pendingPreset=new SelectionPreset(seed,null,null,null);}
+
+
 
     private JTextField minYEntry;
     private JTextField maxYEntry;
@@ -69,7 +103,7 @@ public class MinecraftMapGUI extends JFrame {
         // Height choices made during preparation apply when the first viewport is created.
         // In particular --render-y's debounce must not invalidate the world loading worker.
         if(loadingPanel.getPhase()==LoadingPhasePanel.Phase.PREPARING) return;
-        ++viewGeneration;
+        cancelP2Scan();++viewGeneration;
         coordDisplayLabel.setText("X: —  Y: —  Z: —");
         dynamicMapManager.clear();
         mapCanvas.setImage(null);
@@ -196,7 +230,7 @@ public class MinecraftMapGUI extends JFrame {
         // 如果是Blender模式，显示模式信息
         if (worldPath != null || isBlenderMode) {
             SwingUtilities.invokeLater(() -> {
-                progressLabel.setText("Blender integration mode started");
+                progressLabel.setText(isBlenderMode?"Blender integration mode started":"Opening world preview…");
 
                 // 设置Blender模式的高度范围
                 if (heightRangeSlider != null) {
@@ -279,7 +313,7 @@ public class MinecraftMapGUI extends JFrame {
         addWindowListener(new java.awt.event.WindowAdapter() {
             @Override
             public void windowClosing(java.awt.event.WindowEvent e) {
-                shutdownThreadPools();
+                cancelP2Scan();if(hudTimer!=null)hudTimer.stop();shutdownThreadPools();
                 System.exit(0);
             }
         });
@@ -326,6 +360,7 @@ public class MinecraftMapGUI extends JFrame {
             // 当滑块值改变时，同步更新文本框
             minYEntry.setText(String.valueOf(heightRangeSlider.getLowerValue()));
             maxYEntry.setText(String.valueOf(heightRangeSlider.getUpperValue()));
+            updateSelectionStats();
         });
 
         // 地图范围选择输入框已删除
@@ -379,45 +414,10 @@ public class MinecraftMapGUI extends JFrame {
 
         // 设置选择回调
         mapCanvas.setSelectionCallback(new MapCanvas.SelectionCallback() {
-            @Override
-            public void onSelectionComplete(int minX, int minZ, int maxX, int maxZ) {
-                // 选择完成时只更新UI显示，启用确认按钮
-                SwingUtilities.invokeLater(() -> {
-                    confirmSelectionButton.setEnabled(true);
-                    progressLabel.setText(String.format("Selected area: (%d,%d) to (%d,%d) - click Confirm",
-                        minX, minZ, maxX, maxZ));
-                });
-            }
-
-            @Override
-            public void onSelectionConfirmed(int minX, int minZ, int maxX, int maxZ) {
-                // 按Enter确认时返回坐标并更新输入框
-                SwingUtilities.invokeLater(() -> {
-                    int centerX = (minX + maxX) / 2;
-                    int centerZ = (minZ + maxZ) / 2;
-                    int sizeX = maxX - minX;
-                    int sizeZ = maxZ - minZ;
-                    int size = Math.max(sizeX, sizeZ);
-
-                    // 地图范围选择输入框已删除，不再更新输入框
-
-                    progressLabel.setText(String.format("Confirmed area: (%d,%d) to (%d,%d)",
-                        minX, minZ, maxX, maxZ));
-
-                    // 在控制台输出坐标
-                    System.out.printf("=== Confirmed Selection ===\n");
-                    System.out.printf("Top-left corner: (%d, %d)\n", minX, minZ);
-                    System.out.printf("Bottom-right corner: (%d, %d)\n", maxX, maxZ);
-                    System.out.printf("Center: (%d, %d)\n", centerX, centerZ);
-                    System.out.printf("Area size: %dx%d\n", sizeX, sizeZ);
-
-                    // 如果是Blender模式，输出坐标到文件并关闭程序
-                    if (isBlenderMode && outputFilePath != null) {
-                        outputCoordinatesToFile(minX, minZ, maxX, maxZ);
-                    }
-                });
-            }
+            @Override public void onSelectionComplete(int minX,int minZ,int maxX,int maxZ) {updateSelectionStats();}
+            @Override public void onSelectionConfirmed(int minX,int minZ,int maxX,int maxZ) {handleSelectionConfirmation(new SelectionMath.Bounds(minX,minZ,maxX,maxZ));}
         });
+        configureCanvas(mapCanvas);
 
         // 设置视野管理回调
         mapCanvas.setViewportCallback(new MapCanvas.ViewportCallback() {
@@ -527,6 +527,7 @@ public class MinecraftMapGUI extends JFrame {
         final long request=viewGeneration;
         onEdt(() -> {
             if(request!=viewGeneration) return;
+            applyPendingPreset();
             loadingPanel.finish(request);
             statusIndicator.setStatus(LoadingAnimationPanel.StatusIndicator.StatusType.IDLE);
         });
@@ -551,10 +552,10 @@ public class MinecraftMapGUI extends JFrame {
     }
     private DynamicRegionManager createDynamicRegionManager() {
         final long request=viewGeneration;
-        final DynamicRegionManager manager=new DynamicRegionManager(savePath,getCurrentRegionDir(),surfaceMode,renderHeightPanel.getClipY());
+        final DynamicRegionManager manager=new DynamicRegionManager(savePath,getCurrentRegionDir(),surfaceMode,renderHeightPanel.getClipY(),preview);
         showMapLoading(request,"Loading visible map regions...");
         manager.addRegionLoadListener(new DynamicRegionManager.RegionLoadListener() {
-            public void onRegionLoaded(Point point,DynamicRegionManager.RegionTile tile) {}
+            public void onRegionLoaded(Point point,DynamicRegionManager.RegionTile tile) {onEdt(()->{if(request==viewGeneration&&manager==dynamicRegionManager) updateSelectionStats();});}
             public void onRegionUnloaded(Point point) {}
             public void onLoadingStarted(Point point) {}
             public void onLoadingFailed(Point point,Exception error) {}
@@ -563,6 +564,8 @@ public class MinecraftMapGUI extends JFrame {
                     if(request!=viewGeneration || dynamicRegionManager!=manager || revision!=manager.getProgressRevision()) return;
                     if(settled>=total) {
                         loadingPanel.finish(request);
+                        applyPendingPreset();
+                        if(revision!=manager.getProgressRevision()) return;
                         statusIndicator.setStatus(failed==0?LoadingAnimationPanel.StatusIndicator.StatusType.IDLE:LoadingAnimationPanel.StatusIndicator.StatusType.ERROR);
                         progressLabel.setText(total==0?"No map regions in this viewport":
                             "Map regions loaded: "+settled+"/"+total+(failed==0?"":" (failed: "+failed+")"));
@@ -591,6 +594,8 @@ public class MinecraftMapGUI extends JFrame {
 
         // 菜单栏 (Windows 原生风格)
         setJMenuBar(createMenuBar());
+        getRootPane().setTransferHandler(fileDropHandler);((JComponent)getContentPane()).setTransferHandler(fileDropHandler);
+        hudTimer=new javax.swing.Timer(1000,e->{if(overlays.hud){overlays.hudText=com.minecraft.selector.core.PerformanceMonitor.heapHud()+" · "+(isDynamicMode&&dynamicRegionManager!=null?dynamicRegionManager.hudMetrics():"static viewport; tile cache n/a");repaintCanvases();}});hudTimer.start();
 
         // 顶部交互工具栏 (滑块/输入框等)
         add(createToolbar(), BorderLayout.NORTH);
@@ -620,6 +625,8 @@ public class MinecraftMapGUI extends JFrame {
         leftStatusPanel.add(progressLabel);
         statusPanel.add(leftStatusPanel, BorderLayout.WEST);
         statusPanel.add(coordDisplayLabel, BorderLayout.EAST);
+        selectionStatsLabel.setToolTipText("Inclusive bounds. Cost is volume capacity, not actual solid blocks. Alt+arrows expand; Ctrl+Alt+arrows shrink; Shift=16.");
+        statusPanel.add(selectionStatsLabel,BorderLayout.CENTER);
 
         JPanel bottomPanel = new JPanel(new BorderLayout());
         bottomPanel.add(statusPanel, BorderLayout.SOUTH);
@@ -638,6 +645,17 @@ public class MinecraftMapGUI extends JFrame {
         addMenuItem(fileMenu, "Select MC Client", e -> selectMinecraftJar(), null, "Select Minecraft client JAR file");
         addMenuItem(fileMenu, "Select Mods Folder", e -> selectColorResources(true), null, "Load actual mod textures");
         addMenuItem(fileMenu, "Select Resource Packs", e -> selectColorResources(false), null, "Select ZIP packs in override order");
+        recentMenu=new JMenu("Recent worlds");fileMenu.add(recentMenu);refreshRecentWorlds();
+        recentMenu.addMenuListener(new javax.swing.event.MenuListener() {
+            public void menuSelected(javax.swing.event.MenuEvent e) {refreshRecentWorlds();}
+            public void menuDeselected(javax.swing.event.MenuEvent e) {}
+            public void menuCanceled(javax.swing.event.MenuEvent e) {}
+        });
+        addMenuItem(fileMenu,"Save selection preset…",e->savePreset(),null,null);
+        addMenuItem(fileMenu,"Load selection preset…",e->loadPreset(),null,null);
+        addMenuItem(fileMenu,"Save waypoints…",e->saveWaypoints(),null,null);
+        addMenuItem(fileMenu,"Load waypoints…",e->loadWaypoints(),null,null);
+        addMenuItem(fileMenu,"Export view PNG…",e->exportView(),null,null);
         fileMenu.addSeparator();
         addMenuItem(fileMenu, "Clear Cache", e -> clearPngCache(), null, "Delete PNG map cache files");
         fileMenu.addSeparator();
@@ -647,7 +665,49 @@ public class MinecraftMapGUI extends JFrame {
         menuBar.add(fileMenu);
         JMenu viewMenu = new JMenu("View");
         viewMenu.add(hideNetherRoofCheckbox);
+        gridMenuItem=addMenuItem(viewMenu,"Map grid: Off",e->cycleGrid(),null,"G: Off / Chunk / Chunk+Region");
+        addPreviewItem(viewMenu,"Transparent water","water",false);
+        addPreviewItem(viewMenu,"Cave floor below Render Top Y","cave",false);
+        biomeMenu=addMenuItem(viewMenu,"Biomes: Surface",e->togglePreview("biome"),null,"B: Surface / Tint / Biome overlay");
+        addPreviewItem(viewMenu,"Night preview","night",false);
+        addPreviewItem(viewMenu,"Contours (16 blocks)","contours",false);
+        addPreviewItem(viewMenu,"Spawn / player / POI markers","markers",true);
+        addPreviewItem(viewMenu,"Empty / missing chunk shading","gaps",true);
+        addPreviewItem(viewMenu,"Scale bar","scale",true);
+        addMenuItem(viewMenu,"World information…",e->showWorldInfo(),null,"I on map");
+        addMenuItem(viewMenu,"Resource coverage…",e->showCoverage(),null,null);
+        addPreviewItem(viewMenu,"Minimap overview","minimap",false);
+        addPreviewItem(viewMenu,"Memory / cache / viewport HUD","hud",false);
+        addPreviewItem(viewMenu,"Ore heatmap","ore",false);
+        addMenuItem(viewMenu,"Scan ore heatmap from JSON…",e->scanOres(),null,"Generic ID regex / list; uses Import Y range");
+        addMenuItem(viewMenu,"Cancel background scan",e->cancelP2Scan(),null,null);
+        addMenuItem(viewMenu,"Trim viewport cache",e->trimViewportCache(),null,"Keep current viewport; release warm tiles");
         menuBar.add(viewMenu);
+        JMenu selectionMenu=new JMenu("Selection");
+        addMenuItem(selectionMenu,"Undo selection",e->activeCanvas().undoSelection(),null,"Ctrl+Z on map");
+        addMenuItem(selectionMenu,"Select visible viewport",e->activeCanvas().selectVisible(),null,"Ctrl+A on map");
+        addMenuItem(selectionMenu,"Edit selection bounds…",e->editSelectionBounds(),null,null);
+        addMenuItem(selectionMenu,"Auto-fit Import Y",e->autoFitImportY(),null,"Space on map; loaded heights only");
+        addPreviewItem(selectionMenu,"Pos1 / Pos2 left-click mode","pos",false);
+        addMenuItem(selectionMenu,"Fit Import Y (opaque water/glass)",e->autoFitImportY(true),null,"Shift+Space on map");
+        addMenuItem(selectionMenu,"Copy coordinates",e->copyCoordinates(),null,"Ctrl+Shift+C on map");
+        addMenuItem(selectionMenu,"Confirm selection…",e->confirmSelection(),null,"Enter on map");
+        JMenu tools=new JMenu("Selection tool");ButtonGroup group=new ButtonGroup();
+        for(String tool:new String[]{"Box","Chunk paint","Circle"}){JRadioButtonMenuItem item=new JRadioButtonMenuItem(tool,"Box".equals(tool));group.add(item);tools.add(item);item.addActionListener(e->{overlays.selectionMode=tool;overlays.posMode=false;JCheckBoxMenuItem pos=previewItems.get("pos");if(pos!=null)pos.setSelected(false);if(!"Box".equals(tool)){overlays.addBoxMode=false;JCheckBoxMenuItem add=previewItems.get("addbox");if(add!=null)add.setSelected(false);}progressLabel.setText(selectionToolHint(tool));});}selectionMenu.add(tools);
+        addPreviewItem(selectionMenu,"Add box (Alt+RMB)","addbox",false);
+        previewItems.get("addbox").setToolTipText("Sticky append: plain right-drag adds another AABB. Also: Alt+RMB or Ctrl+RMB (Linux WM often steals Alt).");
+        addMenuItem(selectionMenu,"Suggest selection by chunk metadata…",e->filterChunks(),null,null);
+        menuBar.add(selectionMenu);
+        JMenu navigate=new JMenu("Navigate");
+        addMenuItem(navigate,"Jump to Spawn",e->jumpAnchor("F2"),"F2",null);
+        addMenuItem(navigate,"Jump to Player (or Spawn)",e->jumpAnchor("F3"),"F3",null);
+        addMenuItem(navigate,"Jump to Selection",e->jumpAnchor("F4"),"F4",null);
+        addMenuItem(navigate,"Go to X/Z…",e->GoToDialog.show(this,this::jumpTo),"control G",null);
+        addMenuItem(navigate,"Maximum zoom",e->activeCanvas().zoomExtents(true),null,"Home on map");
+        addMenuItem(navigate,"Fit loaded content",e->activeCanvas().zoomExtents(false),null,"End on map");
+        addMenuItem(navigate,"Add waypoint / POI…",e->addWaypoint(),null,null);
+        addMenuItem(navigate,"Remove waypoint / POI…",e->removeWaypoint(),null,null);
+        menuBar.add(navigate);
 
         return menuBar;
     }
@@ -680,6 +740,12 @@ public class MinecraftMapGUI extends JFrame {
         // ── 操作按钮 ──
         confirmSelectionButton.addActionListener(e -> confirmSelection());
         bar.add(confirmSelectionButton);
+        JComboBox<SelectionMath.Snap> snap=new JComboBox<>(SelectionMath.Snap.values());
+        snap.setToolTipText("Snap inclusive selection outward to chunk (16) or region (512) boundaries");
+        snap.addActionListener(e->{selectionSnap=(SelectionMath.Snap)snap.getSelectedItem();mapCanvas.setSnapMode(selectionSnap);if(dynamicMapCanvas!=null) dynamicMapCanvas.setSnapMode(selectionSnap);});
+        bar.add(new JLabel("Snap:"));bar.add(snap);
+        JButton bounds=new JButton("Bounds…");bounds.addActionListener(e->editSelectionBounds());bar.add(bounds);
+        JButton trim=new JButton("Trim cache");trim.addActionListener(e->trimViewportCache());bar.add(trim);
 
         bar.add(new JSeparator(SwingConstants.VERTICAL));
 
@@ -790,8 +856,9 @@ public class MinecraftMapGUI extends JFrame {
         if (currentDimension != null && dim.getId().equals(currentDimension.getId())) return;
         if (savePath == null) return;
 
-        currentDimension = dim;lastMcaPath=null;
-        ++viewGeneration;
+        currentDimension = dim;overlays.dimension=dim.getId();lastMcaPath=null;
+        mapCanvas.resetSelection();if(dynamicMapCanvas!=null) dynamicMapCanvas.resetSelection();
+        cancelP2Scan();++viewGeneration;
         dynamicMapManager.clear();
         mapCanvas.setImage(null);
         mapImage = null;
@@ -836,7 +903,7 @@ public class MinecraftMapGUI extends JFrame {
         int result = fileChooser.showOpenDialog(this);
         if (result == JFileChooser.APPROVE_OPTION) {
             File selectedDir = fileChooser.getSelectedFile();
-            ++viewGeneration;
+            cancelP2Scan();++viewGeneration;
             dynamicMapManager.clear();
             mapCanvas.setImage(null);
             mapImage = null;
@@ -909,8 +976,9 @@ public class MinecraftMapGUI extends JFrame {
         final List<WorldPathResolver.DimensionInfo> dimensions;
         final BlockColors.Palette palette;
         final double[] player;
-        PreparedWorld(List<WorldPathResolver.DimensionInfo> dimensions,BlockColors.Palette palette,double[] player) {
-            this.dimensions=dimensions;this.palette=palette;this.player=player;
+        final WorldAnchors anchors;
+        PreparedWorld(List<WorldPathResolver.DimensionInfo> dimensions,BlockColors.Palette palette,double[] player,WorldAnchors anchors) {
+            this.dimensions=dimensions;this.palette=palette;this.player=player;this.anchors=anchors;
         }
     }
     private PreparedWorld loadSaveData(long request,String world,ResourceOptions resources) {
@@ -924,11 +992,17 @@ public class MinecraftMapGUI extends JFrame {
         File levelDat=new File(world,"level.dat");
         double[] player=levelDat.isFile()?readPlayerPos(levelDat.getAbsolutePath()):null;
         if(player==null) logManager.warn("No player position; opening nearest available map region","MinecraftMapGUI");
-        return new PreparedWorld(dimensions,palette,player);
+        WorldAnchors anchors=WorldAnchors.empty();
+        try {if(levelDat.isFile()) anchors=WorldAnchors.read(new File(world));}
+        catch(Exception e) {logManager.warn("World anchor metadata unavailable: "+e.getMessage(),"MinecraftMapGUI");}
+        return new PreparedWorld(dimensions,palette,player,anchors);
     }
     private void applyPreparedWorld(PreparedWorld world) {
         availableDimensions=world.dimensions;currentDimension=availableDimensions.get(0);
-        BlockColors.setPalette(world.palette);playerPos=world.player;
+        BlockColors.setPalette(world.palette);playerPos=world.player;worldAnchors=world.anchors;
+        overlays.anchors=worldAnchors;overlays.dimension=currentDimension.getId();
+        try {recentWorlds.add(new File(savePath));refreshRecentWorlds();}catch(IOException e) {logManager.warn("Recent worlds: "+e.getMessage(),"MinecraftMapGUI");}
+        mapCanvas.resetSelection();if(dynamicMapCanvas!=null) dynamicMapCanvas.resetSelection();
         refreshDimensionDropdown();
         playerPosLabel.setText(playerPos==null?"Player: —":String.format("Player: X:%.1f, Y:%.1f, Z:%.1f",playerPos[0],playerPos[1],playerPos[2]));
         openPreparedWorld();
@@ -981,7 +1055,7 @@ public class MinecraftMapGUI extends JFrame {
     }
     private void reloadColorResources() {
         singleResourcePath=null;
-        ++viewGeneration;
+        cancelP2Scan();++viewGeneration;
         final long generation=++colorGeneration;
         final long request=viewGeneration;
         final boolean dynamic=isDynamicMode;
@@ -1144,6 +1218,7 @@ public class MinecraftMapGUI extends JFrame {
         showMapLoading(viewGeneration,"Loading map regions...");
         final long requestGeneration = viewGeneration;
         final MapRenderer.SurfaceMode requestedMode = surfaceMode;
+        final PreviewOptions requestedPreview=preview;
         final Integer requestedTop=renderHeightPanel.getClipY();
         SwingWorker<BufferedImage, Void> worker = new SwingWorker<BufferedImage, Void>() {
             @Override
@@ -1172,7 +1247,7 @@ public class MinecraftMapGUI extends JFrame {
 
                 // 创建地图渲染器
                 int maxWorkers = Math.min(Runtime.getRuntime().availableProcessors(), 4);
-                MapRenderer renderer = new MapRenderer(maxWorkers, progressCallback, requestedMode,requestedTop);
+                MapRenderer renderer = new MapRenderer(maxWorkers, progressCallback, requestedMode,requestedTop,BlockColors.snapshot(),requestedPreview);
 
                 try {
                     // 计算区域范围
@@ -1314,10 +1389,10 @@ public class MinecraftMapGUI extends JFrame {
      * 渲染单个MCA文件
      */
     private void renderSingleMcaFile(String mcaFilePath) {
-        ++viewGeneration;++colorGeneration;
+        cancelP2Scan();++viewGeneration;++colorGeneration;
         if(dynamicRegionManager!=null) {dynamicRegionManager.shutdown();dynamicRegionManager=null;}
         if(isDynamicMode) disableDynamicMode();
-        savePath=null;lastMcaPath=mcaFilePath;
+        savePath=null;worldAnchors=WorldAnchors.empty();overlays.anchors=worldAnchors;overlays.dimension="minecraft:overworld";currentDimension=null;availableDimensions=new ArrayList<>();refreshDimensionDropdown();mapCanvas.resetSelection();lastMcaPath=mcaFilePath;currentRegion=null;
         String[] regionParts=new File(mcaFilePath).getName().split("\\.");
         if(regionParts.length==4) try {currentRegion=new Point(Integer.parseInt(regionParts[1]),Integer.parseInt(regionParts[2]));}
         catch(NumberFormatException ignored) {currentRegion=null;}
@@ -1338,6 +1413,7 @@ public class MinecraftMapGUI extends JFrame {
         final BlockColors.Palette requestedPalette=BlockColors.snapshot();
         final long requestGeneration = viewGeneration;
         final MapRenderer.SurfaceMode requestedMode = surfaceMode;
+        final PreviewOptions requestedPreview=preview;
         final Integer requestedTop=renderHeightPanel.getClipY();
         SwingWorker<BufferedImage, Void> worker = new SwingWorker<BufferedImage, Void>() {
             private BlockColors.Palette renderedPalette=requestedPalette;
@@ -1370,7 +1446,7 @@ public class MinecraftMapGUI extends JFrame {
 
                 // 创建地图渲染器
                 int maxWorkers = Math.min(Runtime.getRuntime().availableProcessors(), 4); // GUI模式使用较少线程
-                MapRenderer renderer = new MapRenderer(maxWorkers, progressCallback, requestedMode,requestedTop,renderedPalette);
+                MapRenderer renderer = new MapRenderer(maxWorkers, progressCallback, requestedMode,requestedTop,renderedPalette,requestedPreview);
 
                 try {
                     // 渲染区块
@@ -1556,17 +1632,118 @@ public class MinecraftMapGUI extends JFrame {
     /**
      * 确认选择区域
      */
-    private void confirmSelection() {
-        // 根据当前模式触发相应画布的确认回调
-        if (isDynamicMode && dynamicMapCanvas != null) {
-            dynamicMapCanvas.confirmCurrentSelection();
-        } else if (mapCanvas != null) {
-            mapCanvas.confirmCurrentSelection();
-        }
-
-        // 禁用确认按钮
-        confirmSelectionButton.setEnabled(false);
+    private SelectionCanvas activeCanvas() {return isDynamicMode&&dynamicMapCanvas!=null?dynamicMapCanvas:mapCanvas;}
+    private void configureCanvas(MapCanvas canvas) {
+        canvas.setSelectionChangeListener(b->updateSelectionStats());canvas.setCommandListener(this::selectionCommand);
+        canvas.setTransferHandler(fileDropHandler);canvas.setOverlays(overlays);canvas.setImportFloorListener(this::setImportFloor);canvas.setSnapMode(selectionSnap);canvas.setGridMode(gridMode);
     }
+    private void configureCanvas(DynamicMapCanvas canvas) {
+        canvas.setSelectionChangeListener(b->updateSelectionStats());canvas.setCommandListener(this::selectionCommand);
+        canvas.setTransferHandler(fileDropHandler);canvas.setOverlays(overlays);canvas.setImportFloorListener(this::setImportFloor);canvas.setSnapMode(selectionSnap);canvas.setGridMode(gridMode);
+    }
+    private void selectionCommand(String command) {
+        switch(command) {
+            case "fit":autoFitImportY(false);break;
+            case "fitOpaque":autoFitImportY(true);break;
+            case "water":case "cave":case "biome":case "night":case "contours":case "pos":togglePreview(command);break;
+            case "info":showWorldInfo();break;
+            case "grid":cycleGrid();break;
+            case "goto":GoToDialog.show(this,this::jumpTo);break;
+            case "copy":copyCoordinates();break;
+            default:jumpAnchor(command);
+        }
+    }
+    private void updateSelectionStats() {
+        if(mapCanvas==null||heightRangeSlider==null) return;
+        overlays.minY=heightRangeSlider.getLowerValue();overlays.maxY=heightRangeSlider.getUpperValue();repaintCanvases();
+        SelectionMath.Bounds b=activeCanvas().getSelectionBounds();
+        if(confirmSelectionButton!=null) confirmSelectionButton.setEnabled(b!=null);
+        if(b==null) {selectionStatsLabel.setText("No selection");selectionStatsLabel.setForeground(UIManager.getColor("Label.foreground"));return;}
+        SelectionStats stats=new SelectionStats(b,heightRangeSlider.getLowerValue(),heightRangeSlider.getUpperValue());
+        selectionStatsLabel.setText(stats.toString()+" · checking cached columns…");queueSelectionCoverage();selectionStatsLabel.setForeground(stats.isLarge()?new Color(190,80,0):UIManager.getColor("Label.foreground"));
+    }
+    private void setImportFloor(int y) {
+        if(y==RenderedMap.NO_HEIGHT) {progressLabel.setText("No cached height at this column; Import Y unchanged");return;}
+        heightRangeSlider.setLowerValue(y);
+        progressLabel.setText("Import min-Y = "+heightRangeSlider.getLowerValue()+" (cached height "+y+")");
+    }
+    private void autoFitImportY() {autoFitImportY(false);}
+    private void autoFitImportY(boolean opaque) {
+        final SelectionCanvas canvas=activeCanvas();final SelectionMath.Bounds b=canvas.getSelectionBounds();
+        if(b==null) {progressLabel.setText("Select an area before fitting Import Y");return;}
+        final long generation=viewGeneration;
+        progressLabel.setText("Fitting Import Y from cached selection heights…");
+        new SwingWorker<SelectionYFit.Result,Void>() {
+            @Override protected SelectionYFit.Result doInBackground() {return canvas.fitSelectionY(b,opaque);}
+            @Override protected void done() {
+                if(generation!=viewGeneration||canvas!=activeCanvas()||!b.equals(canvas.getSelectionBounds())) return;
+                try {
+                    SelectionYFit.Result r=get();
+                    if(r.count==0) {progressLabel.setText("No cached heights in selection; Import Y unchanged");return;}
+                    // Apply both fitted ends atomically; do not truncate extended-world heights.
+                    heightRangeSlider.setSelectedRange(r.min,r.max);
+                    progressLabel.setText("Import Y fit: "+heightRangeSlider.getLowerValue()+"…"+heightRangeSlider.getUpperValue()+" ("+r.count+" cached samples; "+r.empty+" empty, "+r.missing+" missing samples; unloaded columns ignored)");
+                } catch(Exception e) {progressLabel.setText("Could not fit Import Y: "+e.getMessage());}
+            }
+        }.execute();
+    }
+    private void editSelectionBounds() {
+        final SelectionCanvas canvas=activeCanvas();final long generation=viewGeneration;
+        JDialog dialog=new JDialog(this,"Selection bounds (inclusive)",false);
+        dialog.setContentPane(new SelectionBoundsPanel(canvas.getSelectionBounds(),b->{
+            if(canvas!=activeCanvas()||generation!=viewGeneration) {dialog.dispose();return;}
+            canvas.setSelectionBounds(b);progressLabel.setText("Selection updated: "+canvas.getSelectionBounds());
+        }));
+        dialog.pack();dialog.setLocationRelativeTo(this);dialog.setVisible(true);
+    }
+    private void copyCoordinates() {
+        SelectionMath.Bounds b=activeCanvas().getSelectionBounds();String text;
+        if(b!=null) text=ClipboardCoords.selection(b,heightRangeSlider.getLowerValue(),heightRangeSlider.getUpperValue());
+        else {int[] xyz=activeCanvas().getHoverCoordinates();if(xyz==null||xyz[1]==RenderedMap.NO_HEIGHT) {progressLabel.setText("No selection or known hover coordinates to copy");return;}text=ClipboardCoords.hover(xyz[0],xyz[1],xyz[2]);}
+        try {Toolkit.getDefaultToolkit().getSystemClipboard().setContents(new StringSelection(text),null);progressLabel.setText("Copied: "+text);}
+        catch(IllegalStateException|HeadlessException e) {progressLabel.setText("Clipboard unavailable: "+text);}
+    }
+    private void cycleGrid() {
+        gridMode=(gridMode+1)%3;mapCanvas.setGridMode(gridMode);if(dynamicMapCanvas!=null) dynamicMapCanvas.setGridMode(gridMode);
+        String name=new String[]{"Off","Chunk","Chunk+Region"}[gridMode];gridMenuItem.setText("Map grid: "+name);progressLabel.setText("Map grid: "+name);
+    }
+    private void jumpTo(Point point) {
+        boolean data=activeCanvas().jumpToWorldCoordinate(point);
+        progressLabel.setText("View centered on ("+point.x+", "+point.y+")"+(data?"":"; no cached map data nearby"));
+    }
+    private void jumpAnchor(String key) {
+        if("F4".equals(key)) {SelectionMath.Bounds b=activeCanvas().getSelectionBounds();if(b!=null) jumpTo(b.center());else progressLabel.setText("No selection to center on");return;}
+        WorldAnchors.Anchor anchor="F3".equals(key)&&worldAnchors.player!=null?worldAnchors.player:worldAnchors.spawn;
+        if(anchor==null) {JOptionPane.showMessageDialog(this,"Spawn/player coordinates are unavailable in level.dat","World anchor unavailable",JOptionPane.INFORMATION_MESSAGE);return;}
+        if(currentDimension!=null&&!anchor.dimension.equals(currentDimension.getId())) {
+            WorldPathResolver.DimensionInfo target=null;
+            for(WorldPathResolver.DimensionInfo dim:availableDimensions) if(anchor.dimension.equals(dim.getId())) {target=dim;break;}
+            if(target==null) {JOptionPane.showMessageDialog(this,"Anchor dimension is unavailable: "+anchor.dimension);return;}
+            dimensionDropdown.setSelectedItem(target);
+            // Dimension switching queues its initial view; jump after that EDT task.
+            SwingUtilities.invokeLater(()->jumpTo(anchor.xz));
+        } else jumpTo(anchor.xz);
+    }
+    private void handleSelectionConfirmation(SelectionMath.Bounds b) {
+        if(confirmationOpen) return;
+        confirmationOpen=true;
+        try {
+            int minY=heightRangeSlider.getLowerValue(),maxY=heightRangeSlider.getUpperValue();
+            long generation=viewGeneration;SelectionCanvas canvas=activeCanvas();Map<String,Object> approvedShape=canvas.getSelectionShape().json();
+            SelectionStats stats=new SelectionStats(b,minY,maxY);
+            String message="Import bounds: "+ClipboardCoords.selection(b,minY,maxY)+"\n"+stats+"\n\n"+
+                (stats.isLarge()?"Large selection: Blender may require substantial memory and time.\n":"")+"Selection shape exports as inclusive union AABB"+(multiBoxExport?" + boxes extras":"")+".\nContinue with this selection?";
+            int result=JOptionPane.showConfirmDialog(this,message,"Confirm import selection",JOptionPane.OK_CANCEL_OPTION,stats.isLarge()?JOptionPane.WARNING_MESSAGE:JOptionPane.QUESTION_MESSAGE);
+            if(result!=JOptionPane.OK_OPTION) {progressLabel.setText("Confirmation cancelled; selection kept");return;}
+            if(generation!=viewGeneration||canvas!=activeCanvas()||!approvedShape.equals(canvas.getSelectionShape().json())||!b.equals(canvas.getSelectionBounds())||minY!=heightRangeSlider.getLowerValue()||maxY!=heightRangeSlider.getUpperValue()) {
+                progressLabel.setText("Map or import bounds changed during confirmation; please confirm again");return;
+            }
+            progressLabel.setText("Confirmed: "+b);
+            if(isBlenderMode&&outputFilePath!=null) outputCoordinatesToFile(b.minX,b.minZ,b.maxX,b.maxZ,minY,maxY);
+        } finally {confirmationOpen=false;updateSelectionStats();}
+    }
+
+    private void confirmSelection() {activeCanvas().confirmCurrentSelection();}
 
     /**
      * 切换自动加载模式
@@ -1592,6 +1769,7 @@ public class MinecraftMapGUI extends JFrame {
         final long requestGeneration = viewGeneration;
         final File requestedRegionDir = getCurrentRegionDir();
         final MapRenderer.SurfaceMode requestedMode = surfaceMode;
+        final PreviewOptions requestedPreview=preview;
         final Integer requestedTop=renderHeightPanel.getClipY();
         if (!autoLoadCheckbox.isSelected() || isDynamicMode || loadingPanel.getPhase()==LoadingPhasePanel.Phase.PREPARING) return;
 
@@ -1622,7 +1800,7 @@ public class MinecraftMapGUI extends JFrame {
             };
 
             // 创建地图渲染器，使用单线程避免影响主渲染
-            MapRenderer renderer = new MapRenderer(1, progressCallback, requestedMode,requestedTop);
+            MapRenderer renderer = new MapRenderer(1, progressCallback, requestedMode,requestedTop,BlockColors.snapshot(),requestedPreview);
 
             try {
                 // 渲染整个区域 (32x32区块 = 512x512方块)
@@ -1746,7 +1924,7 @@ public class MinecraftMapGUI extends JFrame {
             return;
         }
 
-        ++viewGeneration;
+        cancelP2Scan();++viewGeneration;
         dimensionDropdown.setEnabled(false);
         showLoadingState("Parsing world: " + worldPath);
 
@@ -1760,7 +1938,7 @@ public class MinecraftMapGUI extends JFrame {
             if (saveInfoLabel != null) {
                 saveInfoLabel.setText("Current save: " + worldDir.getName());
             }
-            progressLabel.setText("Blender mode: reading save info...");
+            progressLabel.setText("Reading save info...");
         });
 
         // 在后台线程中加载存档数据，模拟用户选择存档的完整流程
@@ -1780,32 +1958,12 @@ public class MinecraftMapGUI extends JFrame {
     /**
      * 输出坐标到文件（用于Blender集成）
      */
-    private void outputCoordinatesToFile(int minX, int minZ, int maxX, int maxZ) {
+    private void outputCoordinatesToFile(int minX,int minZ,int maxX,int maxZ,int actualMinY,int actualMaxY) {
         try {
-            // 使用高度滑块/输入框的当前值（用户在GUI中可调整），而非构造时的固定值
-            int actualMinY;
-            int actualMaxY;
-            if (heightRangeSlider != null) {
-                actualMinY = heightRangeSlider.getLowerValue();
-                actualMaxY = heightRangeSlider.getUpperValue();
-            } else {
-                actualMinY = blenderMinY;
-                actualMaxY = blenderMaxY;
-            }
-
-            // 写入文件
-            try (java.io.FileWriter writer = new java.io.FileWriter(outputFilePath)) {
-                // 简单的JSON输出
-                writer.write("{\n");
-                writer.write("  \"minX\": " + minX + ",\n");
-                writer.write("  \"minY\": " + actualMinY + ",\n");
-                writer.write("  \"minZ\": " + minZ + ",\n");
-                writer.write("  \"maxX\": " + maxX + ",\n");
-                writer.write("  \"maxY\": " + actualMaxY + ",\n");
-                writer.write("  \"maxZ\": " + maxZ + ",\n");
-                writer.write("  \"timestamp\": " + System.currentTimeMillis() + "\n");
-                writer.write("}\n");
-            }
+            // Use exactly the Y bounds shown in the approved confirmation dialog.
+            new com.fasterxml.jackson.databind.ObjectMapper().writerWithDefaultPrettyPrinter().writeValue(
+                new File(outputFilePath),CoordinatesPayload.create(new SelectionMath.Bounds(minX,minZ,maxX,maxZ),actualMinY,actualMaxY,System.currentTimeMillis(),
+                    currentDimension==null?null:currentDimension.getId(),worldAnchors.worldName,worldAnchors.dataVersion,activeCanvas().getSelectionShape(),multiBoxExport,overlays.waypoints,includeWaypointsExport));
 
             System.out.printf("Blender mode: coordinates written to %s\n", outputFilePath);
             System.out.printf("XYZ range: (%d,%d,%d) to (%d,%d,%d)\n",
@@ -1927,6 +2085,7 @@ public class MinecraftMapGUI extends JFrame {
     private void renderAllAvailableRegions() {
         final long requestGeneration = viewGeneration;
         final MapRenderer.SurfaceMode requestedMode = surfaceMode;
+        final PreviewOptions requestedPreview=preview;
         final Integer requestedTop=renderHeightPanel.getClipY();
         if (savePath == null || savePath.isEmpty()) {
             JOptionPane.showMessageDialog(this, 
@@ -2042,7 +2201,7 @@ public class MinecraftMapGUI extends JFrame {
                 
                 // 创建地图渲染器
                 int maxWorkers = Math.min(Runtime.getRuntime().availableProcessors(), 4);
-                MapRenderer renderer = new MapRenderer(maxWorkers, progressCallback, requestedMode,requestedTop);
+                MapRenderer renderer = new MapRenderer(maxWorkers, progressCallback, requestedMode,requestedTop,BlockColors.snapshot(),requestedPreview);
                 
                 try {
                     // 渲染每个区域
@@ -2184,43 +2343,12 @@ public class MinecraftMapGUI extends JFrame {
             
             // 设置选区回调
             dynamicMapCanvas.setSelectionCallback(new DynamicMapCanvas.SelectionCallback() {
-                @Override
-                public void onSelectionComplete(int minX, int minZ, int maxX, int maxZ) {
-                    // 选择完成时只更新UI显示，启用确认按钮
-                    SwingUtilities.invokeLater(() -> {
-                        confirmSelectionButton.setEnabled(true);
-                        progressLabel.setText(String.format("Selected area: (%d,%d) to (%d,%d) - click Confirm",
-                            minX, minZ, maxX, maxZ));
-                    });
-                }
-                
-                @Override
-                public void onSelectionConfirmed(int minX, int minZ, int maxX, int maxZ) {
-                    // 按确认按钮时返回坐标并更新输入框
-                    SwingUtilities.invokeLater(() -> {
-                        int centerX = (minX + maxX) / 2;
-                        int centerZ = (minZ + maxZ) / 2;
-                        int sizeX = maxX - minX;
-                        int sizeZ = maxZ - minZ;
-
-                        progressLabel.setText(String.format("Confirmed area: (%d,%d) to (%d,%d)",
-                            minX, minZ, maxX, maxZ));
-
-                        // 在控制台输出坐标
-                        System.out.printf("=== Confirmed Selection ===\n");
-                        System.out.printf("Top-left corner: (%d, %d)\n", minX, minZ);
-                        System.out.printf("Bottom-right corner: (%d, %d)\n", maxX, maxZ);
-                        System.out.printf("Center: (%d, %d)\n", centerX, centerZ);
-                        System.out.printf("Area size: %dx%d\n", sizeX, sizeZ);
-
-                        // 如果是Blender模式，输出坐标到文件并关闭程序
-                        if (isBlenderMode && outputFilePath != null) {
-                            outputCoordinatesToFile(minX, minZ, maxX, maxZ);
-                        }
-                    });
-                }
+                @Override public void onSelectionComplete(int minX,int minZ,int maxX,int maxZ) {updateSelectionStats();}
+                @Override public void onSelectionConfirmed(int minX,int minZ,int maxX,int maxZ) {handleSelectionConfirmation(new SelectionMath.Bounds(minX,minZ,maxX,maxZ));}
             });
-            
+            configureCanvas(dynamicMapCanvas);
+            dynamicMapCanvas.restoreSelectionBounds(mapCanvas.getSelectionBounds());if(!mapCanvas.getSelectionShape().isEmpty())dynamicMapCanvas.setSelectionShape(mapCanvas.getSelectionShape(),false);
+
             // 替换地图显示组件
             Container parent = mapCanvas.getParent();
             if (parent != null) {
@@ -2237,6 +2365,7 @@ public class MinecraftMapGUI extends JFrame {
             });
             
             isDynamicMode = true;
+            updateSelectionStats();
             
             // 更新按钮文本和颜色（按钮已隐藏，但保留逻辑）
             // dynamicModeButton.setText("Exit dynamic mode");
@@ -2265,6 +2394,7 @@ public class MinecraftMapGUI extends JFrame {
             
             // 清理动态组件
             if (dynamicMapCanvas != null) {
+                mapCanvas.restoreSelectionBounds(dynamicMapCanvas.getSelectionBounds());if(!dynamicMapCanvas.getSelectionShape().isEmpty())mapCanvas.setSelectionShape(dynamicMapCanvas.getSelectionShape(),false);
                 dynamicMapCanvas.cleanup();
                 
                 // 替换回原来的地图画布
@@ -2286,6 +2416,7 @@ public class MinecraftMapGUI extends JFrame {
             }
             
             isDynamicMode = false;
+            updateSelectionStats();
             
             // 更新按钮文本和颜色（按钮已隐藏，但保留逻辑）
             // dynamicModeButton.setText("Dynamic Mode");
@@ -2342,5 +2473,172 @@ public class MinecraftMapGUI extends JFrame {
                     "Error", JOptionPane.ERROR_MESSAGE);
             }
         }
+    }
+
+    private void repaintCanvases() {if(mapCanvas!=null) mapCanvas.repaint();if(dynamicMapCanvas!=null) dynamicMapCanvas.repaint();}
+    private String selectionToolHint(String tool){
+        if("Box".equals(tool))return overlays.addBoxMode
+            ?"Box + Add box ON: right-drag appends AABB (Alt/Ctrl+RMB also). Export uses union AABB."
+            :"Box: right drag replaces; Alt/Ctrl+right drag or Selection→Add box appends. Export uses union AABB.";
+        if("Chunk paint".equals(tool))return "Chunk paint: right drag paints 16×16; Shift+right drag erases. Export uses union AABB.";
+        return tool+": right drag; Shift+paint erases. Export uses union AABB.";
+    }
+    private void addPreviewItem(JMenu menu,String title,String command,boolean selected) {
+        JCheckBoxMenuItem item=new JCheckBoxMenuItem(title,selected);previewItems.put(command,item);menu.add(item);item.addActionListener(e->togglePreview(command));
+    }
+    private void togglePreview(String command) {
+        boolean render=false;
+        switch(command) {
+            case "water":preview=new PreviewOptions(!preview.transparentWater,preview.cave,preview.biomeMode);render=true;break;
+            case "cave":preview=new PreviewOptions(preview.transparentWater,!preview.cave,preview.biomeMode);render=true;
+                if(preview.cave&&renderHeightPanel.getClipY()==null) renderHeightPanel.setClipY(((Number)renderHeightPanel.getInput().getValue()).intValue());break;
+            case "biome":preview=new PreviewOptions(preview.transparentWater,preview.cave,preview.biomeMode+1);render=true;break;
+            case "night":overlays.night=!overlays.night;break;
+            case "contours":overlays.contours=!overlays.contours;break;
+            case "markers":overlays.markers=!overlays.markers;break;
+            case "gaps":overlays.gaps=!overlays.gaps;break;
+            case "scale":overlays.scaleBar=!overlays.scaleBar;break;
+            case "minimap":overlays.minimap=!overlays.minimap;break;
+            case "hud":overlays.hud=!overlays.hud;break;
+            case "ore":overlays.ore=!overlays.ore;break;
+            case "pos":overlays.selectionMode="Box";overlays.posMode=!overlays.posMode;overlays.addBoxMode=false;mapCanvas.resetPosCorner();if(dynamicMapCanvas!=null) dynamicMapCanvas.resetPosCorner();break;
+            case "addbox":overlays.addBoxMode=!overlays.addBoxMode;overlays.selectionMode="Box";overlays.posMode=false;JCheckBoxMenuItem posItem=previewItems.get("pos");if(posItem!=null)posItem.setSelected(false);progressLabel.setText(selectionToolHint("Box"));break;
+        }
+        String[] commands={"water","cave","night","contours","markers","gaps","scale","pos","addbox"};
+        boolean[] states={preview.transparentWater,preview.cave,overlays.night,overlays.contours,overlays.markers,overlays.gaps,overlays.scaleBar,overlays.posMode,overlays.addBoxMode};
+        for(int i=0;i<commands.length;i++) if(previewItems.containsKey(commands[i])) previewItems.get(commands[i]).setSelected(states[i]);
+        if(biomeMenu!=null) biomeMenu.setText("Biomes: "+new String[]{"Surface","Tint composite","Biome overlay"}[preview.biomeMode]);
+        if(render) {if(heightDebounce!=null) heightDebounce.stop();resetSurfaceView();}else repaintCanvases();
+    }
+    private void refreshRecentWorlds() {
+        if(recentMenu==null) return;recentMenu.removeAll();
+        try {for(String path:recentWorlds.list()) addMenuItem(recentMenu,path,e->loadWorldFromPath(path),null,path);}
+        catch(IOException e) {JMenuItem error=new JMenuItem("Recent worlds unavailable: "+e.getMessage());error.setEnabled(false);recentMenu.add(error);}
+        if(recentMenu.getItemCount()==0) {JMenuItem empty=new JMenuItem("No recent worlds");empty.setEnabled(false);recentMenu.add(empty);}
+    }
+    private void showWorldInfo() {
+        StringBuilder info=new StringBuilder("Name: ").append(worldAnchors.worldName).append("\nPath: ").append(savePath==null?lastMcaPath:savePath)
+            .append("\nVersion: ").append(worldAnchors.versionName).append("\nDataVersion: ").append(worldAnchors.dataVersion).append("\nDimensions:\n");
+        for(WorldPathResolver.DimensionInfo d:availableDimensions) info.append(d.getId()).append("  ").append(d.getRegionDir()).append('\n');
+        info.append("\nResource fingerprint (SHA-256): ").append(BlockColors.snapshot().fingerprint()).append("\nPreview: ").append(preview.cacheKey()).append("; night=").append(overlays.night);
+        WorldInfoDialog.show(this,info.toString());
+    }
+    private void showCoverage() {JOptionPane.showMessageDialog(this,new ResourceCoveragePanel(ResourceCoveragePanel.report(activeCanvas().visibleBlockCounts(),BlockColors.snapshot())),"Resource coverage",JOptionPane.PLAIN_MESSAGE);}
+    private File chooseOutput(String title,String extension) {
+        JFileChooser chooser=new JFileChooser();chooser.setDialogTitle(title);chooser.setFileFilter(new FileNameExtensionFilter(extension.toUpperCase()+" files",extension));
+        if(chooser.showSaveDialog(this)!=JFileChooser.APPROVE_OPTION) return null;
+        File f=chooser.getSelectedFile();if(!f.getName().toLowerCase(java.util.Locale.ROOT).endsWith("."+extension)) f=new File(f.getPath()+"."+extension);
+        if(f.exists()&&JOptionPane.showConfirmDialog(this,"Replace "+f.getName()+"?",title,JOptionPane.OK_CANCEL_OPTION)!=JOptionPane.OK_OPTION) return null;return f;
+    }
+    private void savePreset() {
+        SelectionMath.Bounds b=activeCanvas().getSelectionBounds();if(b==null) {progressLabel.setText("Select an area before saving a preset");return;}
+        File f=chooseOutput("Save selection preset","json");if(f==null) return;
+        try {new SelectionPreset(b,heightRangeSlider.getLowerValue(),heightRangeSlider.getUpperValue(),currentDimension==null?null:currentDimension.getId(),activeCanvas().getSelectionShape(),overlays.waypoints).save(f);progressLabel.setText("Preset saved: "+f);}
+        catch(Exception e) {showFileError(e);}
+    }
+    private void loadPreset() {
+        JFileChooser chooser=new JFileChooser();chooser.setDialogTitle("Load selection preset");if(chooser.showOpenDialog(this)!=JFileChooser.APPROVE_OPTION) return;
+        loadPresetFile(chooser.getSelectedFile());
+    }
+    private void loadPresetFile(File file) {
+        try {
+            SelectionPreset preset=SelectionPreset.load(file);
+            WorldPathResolver.DimensionInfo target=null;
+            if(preset.dimension!=null) {for(WorldPathResolver.DimensionInfo d:availableDimensions) if(preset.dimension.equals(d.getId())) target=d;
+                if(target==null) throw new IOException("Preset dimension is not available in this world: "+preset.dimension);}
+            boolean dimensionChanged=target!=null&&(currentDimension==null||!target.getId().equals(currentDimension.getId()));
+            if(target!=null) switchDimension(target);
+            // Restore the values immediately, including dimensions with no nearby cached tile.
+            activeCanvas().restoreSelectionBounds(preset.bounds);
+            if(preset.minY!=null) heightRangeSlider.setSelectedRange(preset.minY,preset.maxY);
+            pendingPreset=preset;
+            if(!isDynamicMode&&mapCanvas.getImage()==null&&target!=null) {
+                Point center=preset.bounds.center();currentRegion=new Point(Math.floorDiv(center.x,512),Math.floorDiv(center.y,512));
+                File region=new File(target.getRegionDir(),String.format("r.%d.%d.mca",currentRegion.x,currentRegion.y));
+                if(region.isFile()) renderMap(region.getAbsolutePath());
+            }
+            // switchDimension queues its initial view; recenter the preset after that task.
+            if(dimensionChanged&&isDynamicMode) SwingUtilities.invokeLater(this::applyPendingPreset);else applyPendingPreset();
+        } catch(Exception e) {showFileError(e);}
+    }
+    private void applyPendingPreset() {
+        if(pendingPreset==null||mapCanvas==null) return;
+        if(isDynamicMode) {if(dynamicMapCanvas==null||dynamicRegionManager==null) return;}
+        else if(mapCanvas.getImage()==null) return;
+        SelectionPreset preset=pendingPreset;pendingPreset=null;
+        activeCanvas().restoreSelectionBounds(preset.bounds);
+        if(!preset.shape.isEmpty())activeCanvas().setSelectionShape(preset.shape,false);
+        overlays.waypoints.replace(preset.waypoints);
+        if(preset.minY!=null) heightRangeSlider.setSelectedRange(preset.minY,preset.maxY);
+        jumpTo(preset.bounds.center());updateSelectionStats();
+    }
+    private void exportView() {
+        File file=chooseOutput("Export current map view","png");if(file==null) return;
+        final BufferedImage image;
+        try {image=ViewExport.capture((JComponent)activeCanvas());}catch(Exception e) {showFileError(e);return;}
+        new SwingWorker<Void,Void>() {
+            protected Void doInBackground() throws Exception {ViewExport.write(image,file);return null;}
+            protected void done() {try {get();progressLabel.setText("View exported: "+file);}catch(Exception e) {showFileError(e);}}
+        }.execute();
+    }
+    private void showFileError(Exception e) {JOptionPane.showMessageDialog(this,e.getMessage(),"Map selector",JOptionPane.ERROR_MESSAGE);}
+
+    private void queueSelectionCoverage() {
+        if(selectionCoverageTimer==null) {selectionCoverageTimer=new javax.swing.Timer(180,e->refreshSelectionCoverage());selectionCoverageTimer.setRepeats(false);}selectionCoverageTimer.restart();
+    }
+    private void refreshSelectionCoverage() {
+        final SelectionCanvas canvas=activeCanvas();final SelectionMath.Bounds b=canvas.getSelectionBounds();final long generation=viewGeneration;if(b==null) return;
+        if(selectionCoverageWorker!=null) selectionCoverageWorker.cancel(true);
+        selectionCoverageWorker=new SwingWorker<SelectionYFit.Result,Void>() {
+            protected SelectionYFit.Result doInBackground() {return canvas.fitSelectionY(b,true);}
+            protected void done() {
+                if(isCancelled()||generation!=viewGeneration||canvas!=activeCanvas()||!b.equals(canvas.getSelectionBounds())) return;
+                try {
+                    SelectionYFit.Result r=get();SelectionStats stats=new SelectionStats(b,heightRangeSlider.getLowerValue(),heightRangeSlider.getUpperValue());
+                    java.math.BigInteger total=java.math.BigInteger.valueOf((long)b.maxX-b.minX+1).multiply(java.math.BigInteger.valueOf((long)b.maxZ-b.minZ+1));
+                    java.math.BigInteger missing=total.subtract(java.math.BigInteger.valueOf(r.count+r.empty)).max(java.math.BigInteger.ZERO);
+                    selectionStatsLabel.setText(stats.toString()+" · cached "+r.count+" / empty "+r.empty+" / gaps "+missing);
+                    selectionStatsLabel.setToolTipText("Cached surface columns: "+r.count+"; loaded empty: "+r.empty+"; missing/unloaded: "+missing+". Cost is volume capacity, not actual solid blocks. Alt+arrows expand; Ctrl+Alt+arrows shrink; Shift=16.");
+                } catch(Exception e) {if(!isCancelled()) progressLabel.setText("Coverage unavailable: "+e.getMessage());}
+            }
+        };selectionCoverageWorker.execute();
+    }
+
+    private void handleDroppedFile(File file)throws IOException {
+        switch(DropFiles.classify(file)) {
+            case WORLD:loadWorldFromPath(DropFiles.world(file).getCanonicalPath());break;
+            case PRESET:loadPresetFile(file);break;
+            case PACK:
+                if(JOptionPane.showConfirmDialog(this,"Add resource pack "+file.getName()+" and rebuild preview colors?","Resource pack",JOptionPane.OK_CANCEL_OPTION)!=JOptionPane.OK_OPTION)return;
+                String path=file.getCanonicalPath();if(!colorResources.packs.contains(path))colorResources.packs.add(path);reloadColorResources();break;
+        }
+    }
+    private void addWaypoint(){SelectionMath.Bounds b=activeCanvas().getSelectionBounds();int[] hover=activeCanvas().getHoverCoordinates();Point point=b!=null?b.center():hover!=null?new Point(hover[0],hover[2]):new Point();
+        JTextField label=new JTextField("POI"),x=new JTextField(Integer.toString(point.x)),z=new JTextField(Integer.toString(point.y));JPanel panel=new JPanel(new GridLayout(3,2,6,6));panel.add(new JLabel("Label"));panel.add(label);panel.add(new JLabel("X"));panel.add(x);panel.add(new JLabel("Z"));panel.add(z);
+        if(JOptionPane.showConfirmDialog(this,panel,"Add waypoint",JOptionPane.OK_CANCEL_OPTION)!=JOptionPane.OK_OPTION)return;
+        try{overlays.waypoints.add(new com.minecraft.selector.core.WaypointStore.Marker(label.getText(),Integer.parseInt(x.getText().trim()),Integer.parseInt(z.getText().trim()),overlays.dimension));repaintCanvases();}catch(Exception e){showFileError(e);}
+    }
+    private void removeWaypoint(){List<com.minecraft.selector.core.WaypointStore.Marker> markers=overlays.waypoints.list();if(markers.isEmpty()){progressLabel.setText("No waypoints to remove");return;}JList<com.minecraft.selector.core.WaypointStore.Marker> list=new JList<>(markers.toArray(new com.minecraft.selector.core.WaypointStore.Marker[0]));list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);list.setSelectedIndex(0);if(JOptionPane.showConfirmDialog(this,new JScrollPane(list),"Remove waypoint",JOptionPane.OK_CANCEL_OPTION)==JOptionPane.OK_OPTION&&list.getSelectedIndex()>=0){overlays.waypoints.remove(list.getSelectedIndex());repaintCanvases();}}
+    private void saveWaypoints(){File file=chooseOutput("Save waypoints","json");if(file!=null)try{overlays.waypoints.save(file);}catch(Exception e){showFileError(e);}}
+    private void loadWaypoints(){JFileChooser chooser=new JFileChooser();if(chooser.showOpenDialog(this)==JFileChooser.APPROVE_OPTION)try{overlays.waypoints.replace(com.minecraft.selector.core.WaypointStore.load(chooser.getSelectedFile()));repaintCanvases();}catch(Exception e){showFileError(e);}}
+    private void trimViewportCache(){if(isDynamicMode&&dynamicRegionManager!=null)dynamicRegionManager.trimViewportCache();else {ViewLayers.clearCache();dynamicMapManager.clear();}repaintCanvases();progressLabel.setText("Viewport cache trimmed");}
+    private void cancelP2Scan(){p2ScanRevision++;if(p2ScanWorker!=null){p2ScanWorker.cancel(true);p2ScanWorker=null;}overlays.oreCounts=java.util.Collections.emptyMap();}
+    private void scanOres(){JFileChooser chooser=new JFileChooser();chooser.setDialogTitle("Ore scan JSON (regex / ids)");if(chooser.showOpenDialog(this)!=JFileChooser.APPROVE_OPTION)return;try{startP2Scan(com.minecraft.selector.core.OverlayScan.load(chooser.getSelectedFile()),null);}catch(Exception e){showFileError(e);}}
+    private void filterChunks(){JTextField time=new JTextField("0"),min=new JTextField(),max=new JTextField();JPanel panel=new JPanel(new GridLayout(3,2,6,6));panel.add(new JLabel("InhabitedTime > ticks (blank = any)"));panel.add(time);panel.add(new JLabel("DataVersion minimum (blank = any)"));panel.add(min);panel.add(new JLabel("DataVersion maximum (blank = any)"));panel.add(max);if(JOptionPane.showConfirmDialog(this,panel,"Suggest selection: AND conditions",JOptionPane.OK_CANCEL_OPTION)!=JOptionPane.OK_OPTION)return;
+        try{startP2Scan(null,new com.minecraft.selector.core.ChunkFilter(time.getText().trim().isEmpty()?null:Long.valueOf(time.getText().trim()),min.getText().trim().isEmpty()?null:Integer.valueOf(min.getText().trim()),max.getText().trim().isEmpty()?null:Integer.valueOf(max.getText().trim())));}catch(Exception e){showFileError(e);}
+    }
+    private void startP2Scan(com.minecraft.selector.core.OverlayScan ore,com.minecraft.selector.core.ChunkFilter filter)throws IOException {
+        File directory=currentDimension==null?lastMcaPath==null?null:new File(lastMcaPath).getParentFile():currentDimension.getRegionDir();if(directory==null)throw new IOException("Load a world or MCA first");
+        final File[] files=lastMcaPath!=null&&currentDimension==null?new File[]{new File(lastMcaPath)}:directory.listFiles((d,n)->n.matches("r\\.-?\\d+\\.-?\\d+\\.mca"));
+        cancelP2Scan();final long revision=p2ScanRevision,generation=viewGeneration;final SelectionCanvas canvas=activeCanvas();final SelectionMath.Bounds before=canvas.getSelectionBounds();final Map<String,Object> beforeShape=canvas.getSelectionShape().json();final int minY=heightRangeSlider.getLowerValue(),maxY=heightRangeSlider.getUpperValue();
+        progressLabel.setText("Scanning chunk NBT (current selection if set, otherwise dimension; up to 65536 chunks); View → Cancel background scan");
+        p2ScanWorker=new SwingWorker<com.minecraft.selector.core.OverlayScan.Result,Void>(){
+            protected com.minecraft.selector.core.OverlayScan.Result doInBackground()throws Exception{return com.minecraft.selector.core.OverlayScan.scan(files,ore,filter,minY,maxY,()->isCancelled()||generation!=viewGeneration||revision!=p2ScanRevision,before);}
+            protected void done(){if(isCancelled()||generation!=viewGeneration||revision!=p2ScanRevision)return;try{com.minecraft.selector.core.OverlayScan.Result result=get();
+                if(ore!=null){if(minY!=heightRangeSlider.getLowerValue()||maxY!=heightRangeSlider.getUpperValue()){progressLabel.setText("Import Y changed while scanning; run ore scan again");return;}overlays.oreCounts=java.util.Collections.unmodifiableMap(result.counts);overlays.ore=true;JCheckBoxMenuItem item=previewItems.get("ore");if(item!=null)item.setSelected(true);}
+                else if(!result.suggested.isEmpty()){if(canvas!=activeCanvas()||!java.util.Objects.equals(before,canvas.getSelectionBounds())||!beforeShape.equals(canvas.getSelectionShape().json())){progressLabel.setText("Selection changed while filtering; run suggestion again");return;}canvas.setSelectionShape(result.suggested,true);jumpTo(result.suggested.bounds().center());}
+                progressLabel.setText("Scan: "+result.scanned+" chunks, "+result.failed+" unreadable; "+(ore!=null?result.counts.size()+" ore chunks":result.suggested.boxes().size()+" matching chunks"));repaintCanvases();
+            }catch(Exception e){showFileError(e);}finally{p2ScanWorker=null;}}
+        };p2ScanWorker.execute();
     }
 }
