@@ -19,8 +19,8 @@ java -jar target/minecraft-map-selector-1.0.0.jar --world-path /path/to/world --
 - 地图和 `int[]` 高度缓存一起生成、发布和淘汰；悬停只读取内存。高度为所画非空气顶块的世界 Y，水/树叶/模组方块同样参与取顶。
 - 按存档实际 section Y 扫描，支持负 Y 和扩展高度，不截断到 vanilla 范围。图片像素循环同步写入高度，取高不再读 MCA。
 - `View → Hide Nether roof` 默认开启：在 DIM-1 / the_nether 中跳过基岩顶床及其连续天花板，显示洞内表面。取消可查看顶床及顶床上建筑。检测 y>=32 的 bedrock 作为顶床；非基岩模组天花板或基岩装饰可关闭此选项。
-- 未新增 biome、透明水穿透或等高线模式，保留原有邻列高度差明暗。
-- 地图缓存不受导入 Y 范围滑块限制。原有导入滑块边界仍为 -64..365；扩展世界的导入范围是另一个限制，本次只扩展地图取高。
+- 默认保留云端的邻列高度差明暗；View 菜单可显式启用透明水、洞底、资源驱动的 biome 颜色及等高线等数据叠层。
+- 使用云端右侧 Import Y 三滑块（下限、上限、紫色兴趣带上沿）与 ColumnCache 实时换带；选择拟合和预设可原子扩展 Y 范围。
 
 ## 无头 CLI
 
@@ -73,6 +73,27 @@ java -Djava.awt.headless=true -jar minecraft-map-selector-1.0.0.jar \
 
 俯视用模型的水平投影覆盖率与下层合成：薄但完整的 slab/carpet/关闭活板门不会因体积小而穿透；侧半砖、楼梯、打开活板门、压力板和透明纹理按实际或近似覆盖显示。雪层 1..8 层对应 70%..100% 白色覆盖。Yuushya showblock 会读取 NBT 的可见关联 BlockState；LittleTiles/FramedBlocks 可识别材料引用，复杂动态/压缩几何仍近似或降级。每格只输出一个地图像素，任意模型越界、材质 UV、游戏光照/biome tint 尚非游戏级渲染。
 
-GUI 右侧只有一个 **Import Y** 竖向双滑块：上 thumb = 最高 Y、下 thumb = 最低 Y，拖动中不重渲，松手后 250ms 防抖触发一次整幅重渲。同一对值既决定回传 Blender 的 minY/maxY，也决定预览的 Y 带：带内从顶向下取可见表面，带里没有方块的列透明，所以把上 thumb 压到地面以下就能直接看地下结构。滑条坐标轴按传入的高度范围自动留边（不需要数字输入框，值画在 thumb 旁），不再有旧的固定 -64..365 截断。上界裁剪不会关闭下界的自动去顶床，AUTO 与 View→Hide Nether roof 仍决定下界行为；鼠标高度仍来自当前图片缓存。底部滚动日志显示世界解析、各资源包提取、region 扫描和渲染阶段；启动加载时进度条先用不定百分比，能计算区块百分比后切换实际进度。
+GUI 右侧保留云端 **Import Y** 竖向三滑块：绿色 = 最低 Y、橙色 = 最高 Y、紫色 = 兴趣带上沿。拖动时优先用 ColumnCache 实时重合成，缓存不可用时才回落到临时裁剪或防抖重渲。同一对值既决定回传 Blender 的 minY/maxY，也决定预览的 Y 带：带内从顶向下取可见表面，带里没有方块的列透明，所以把上 thumb 压到地面以下就能直接看地下结构。滑条坐标轴按传入的高度范围自动留边（不需要数字输入框，值画在 thumb 旁），不再有旧的固定 -64..365 截断。上界裁剪不会关闭下界的自动去顶床，AUTO 与 View→Hide Nether roof 仍决定下界行为；鼠标高度仍来自当前图片缓存。底部滚动日志显示世界解析、各资源包提取、region 扫描和渲染阶段；启动加载时进度条先用不定百分比，能计算区块百分比后切换实际进度。
 
 拖 Y 带时会走**逐列层缓存**：第一次拖动会先在后台把当前视图的每个 region 整列扫一遍（含每列的方块层栈，相邻同方块同色压成一段，约 5 段/列、31MB/region，缓存个数按堆内存自适应），之后两个方向换带都只做内存重合成 —— 实测 64 区块重合成+出图约 13ms（整 region 约 200ms），建立约 137ms（整 region 约 2.2s）。缓存没就绪或对不上的情况自动回落到原来的防抖全量渲染；下界的自动去顶床（AUTO 下的下界维度）依赖扫描窗口本身，那类 region 不缓存，仍走全量渲染。重合成用的是同一套出图代码，像素与全量渲染逐点一致（见 ColumnCacheTest）。
+
+
+### 选择功能 P0–P2（合入云端 UI）
+
+- 右键拖动替换一个包含端点的 AABB；Alt/Ctrl 右拖也只替换。Shift 保持正方形，边/角可调整；Selection 菜单支持坐标编辑、16/512 对齐、撤销和选择视口。
+- Chunk paint / Circle / Add box 不在 GUI 显示或派发。旧预设形状加载为其联合 AABB；形状模型、CLI 验证和可选多框元数据仍保留。Blender 当前导入根对象的单个 AABB。
+- Enter 确认并显示导入范围与容量；Esc 清除、Ctrl+Z 撤销、Ctrl+A 选择视口、Ctrl+Shift+C 复制坐标。Alt+方向键扩展，Ctrl+Alt+方向键收缩，Shift 步长为 16。
+- Space 从已加载列拟合 Import Y（跳过水/玻璃）；Shift+Space 使用不透明策略；中键设下限。拟合、悬停和覆盖统计只读内存，换高度带或拼图后仍保留方块状态、生物群系、空列与缺块数据。
+- Navigate 菜单提供出生点/玩家/选区跳转、Go to、缩放和航点；File 菜单支持预设、航点、视图 PNG、最近世界及文件拖放。View 菜单提供资源覆盖、可选叠层、小地图、HUD、矿物扫描和缓存整理。
+- 云端棋盘背景、紫色兴趣区域、竖向高度轴和工具栏外观保留；等高线、夜景、缺块着色、比例尺、小地图与 HUD 默认关闭。
+
+```bash
+# 无界面测试（含 P0–P2、云端 ColumnCache 和合并集成回归）
+mvn -Djava.awt.headless=true clean package
+# 校验导入坐标协议；失败退出码为 1
+java -Djava.awt.headless=true -jar target/minecraft-map-selector-1.0.0.jar \
+  --validate-selection coordinates.json --max-columns 1048576
+# 启动时灌入选区；可选元数据不改变根 AABB 协议
+java -jar target/minecraft-map-selector-1.0.0.jar --world-path /path/to/world \
+  --min-x -16 --max-x 15 --min-z -16 --max-z 15 --multi-box --include-waypoints
+```

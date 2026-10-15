@@ -14,6 +14,7 @@ final class JarModelColors {
         final String source;
         Surface(Color color, String source) { this.color=color; this.source=source; }
     }
+    final BiomeColors biomes=new BiomeColors();
     private final Map<String,JsonNode> json = new TreeMap<>();
     private final Map<String,Color> textures = new TreeMap<>();
     private final Map<String,Model> models = new HashMap<>();
@@ -23,13 +24,13 @@ final class JarModelColors {
         JsonNode elements;
     }
     JarModelColors copy() {
-        JarModelColors result=new JarModelColors();result.json.putAll(json);result.textures.putAll(textures);return result;
+        JarModelColors result=new JarModelColors();result.biomes.merge(biomes);result.json.putAll(json);result.textures.putAll(textures);return result;
     }
     void addArchive(String path) throws IOException {
         merge(ResourceArchiveCache.assets(ResourceArchiveCache.index(path)));
     }
     void merge(ResourceArchiveCache.Assets archive) {
-        json.putAll(archive.json);textures.putAll(archive.textures);models.clear();
+        biomes.merge(archive.biomes);json.putAll(archive.json);textures.putAll(archive.textures);models.clear();
     }
     static Color average(BufferedImage image) {
         long r=0,g=0,b=0,a=0;

@@ -21,6 +21,8 @@ public class BlockColors {
     // Atomically publish an immutable color source with its own cache.
     // In-flight renders retain their palette and cannot repopulate a newer cache.
     public static final class Palette {
+        private String fingerprint="builtin-only";
+        public String fingerprint() {return fingerprint;}
         private final Map<String, Color> extractedColors;
         private final MinecraftResourceExtractor resources;
         private final Map<String, Appearance> surfaces = new ConcurrentHashMap<>();
@@ -30,6 +32,7 @@ public class BlockColors {
         private Palette(Map<String, Color> colors,MinecraftResourceExtractor resources) {
             extractedColors = java.util.Collections.unmodifiableMap(new HashMap<>(colors));this.resources=resources==null?null:resources.snapshot();
         }
+        Color biomeColor(Color base,String biome,String block,int mode) {return resources==null?base:resources.biomeColors().apply(base,biome,block,mode);}
         public Color getBlockColor(String blockId) { return appearance(blockId,java.util.Collections.emptyMap()).color; }
         public Appearance appearance(String id,Map<String,String> props) {
             if(id==null || id.isEmpty()) return new Appearance(new Color(128,128,128),"unknown");
@@ -341,7 +344,9 @@ public class BlockColors {
                 extractor=new MinecraftResourceExtractor();extractor.addArchives(paths,progress);
                 synchronized(preparedResources) {preparedResources.put(key.toString(),extractor);}
             } else progress.onProgress(paths.size(),paths.size(),"Reusing resource colors (unchanged resource fingerprints)");
-            return new Palette(java.util.Collections.emptyMap(),paths.isEmpty()?null:extractor);
+            Palette loaded=new Palette(java.util.Collections.emptyMap(),paths.isEmpty()?null:extractor);
+            try {byte[] digest=java.security.MessageDigest.getInstance("SHA-256").digest(key.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));StringBuilder hex=new StringBuilder();for(byte b:digest) hex.append(String.format(java.util.Locale.ROOT,"%02x",b&255));loaded.fingerprint=hex.toString();}catch(java.security.NoSuchAlgorithmException e) {throw new IllegalStateException(e);}
+            return loaded;
         } catch(java.io.IOException e) {
             com.minecraft.selector.utils.LogManager.getInstance().error("Resource loading failed: "+e.getMessage(),"Resources",e);
             throw new IllegalArgumentException("Cannot initialize resource stack",e);
