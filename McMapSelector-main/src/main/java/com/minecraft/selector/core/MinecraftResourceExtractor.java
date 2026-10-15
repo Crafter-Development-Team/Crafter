@@ -12,6 +12,7 @@ public class MinecraftResourceExtractor {
     private MinecraftResourceExtractor(MinecraftResourceExtractor original) {
         assets=original.assets.copy();imported.putAll(original.imported);completed=original.completed;
     }
+    BiomeColors biomeColors() {return assets.biomes;}
     MinecraftResourceExtractor snapshot() {return new MinecraftResourceExtractor(this);}
     private final Map<String,Color> imported = new HashMap<>();
     private boolean completed;

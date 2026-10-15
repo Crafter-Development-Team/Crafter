@@ -83,7 +83,7 @@ class HeightmapTest {
                 out.writeByte(0); break;
             case TAG_List:
                 NBTList list = (NBTList) tag;
-                out.writeByte(10); out.writeInt(list.size());
+                out.writeByte(list.getListType().getId()); out.writeInt(list.size());
                 for (int i = 0; i < list.size(); i++) writePayload(out, list.get(i));
                 break;
             case TAG_Byte: out.writeByte(((Number) value).intValue()); break;
@@ -194,7 +194,7 @@ class HeightmapTest {
             MapCanvas canvas = new MapCanvas();
             canvas.setSize(512, 512);
             canvas.setImage(image); canvas.setWorldCoordinateMapping(-512, -512, 1);
-            assertEquals("X: -512  Y: -113  Z: -512", canvas.getHoverText(new Point(0, 0)));
+            assertEquals("X: -512  Y: -113  Z: -512  minecraft:stone", canvas.getHoverText(new Point(0, 0)));
             canvas.setZoomLevel(0.5);
             assertTrue(canvas.getHoverText(new Point(-1, -1)).contains("Y: —"));
             canvas.setImage(null);
@@ -216,7 +216,7 @@ class HeightmapTest {
             interior.awaitIdle(5, TimeUnit.SECONDS);
             SwingUtilities.invokeAndWait(() -> {
                 DynamicMapCanvas canvas = reference[0];
-                assertEquals("X: -512  Y: 63  Z: -512", canvas.getHoverText(new Point(400, 300)));
+                assertEquals("X: -512  Y: 63  Z: -512  minecraft:stone", canvas.getHoverText(new Point(400, 300)));
                 // Half a block left must floor into the absent west region, not round to -512.
                 assertTrue(canvas.getHoverText(new Point(399, 300)).contains("X: -513"));
                 assertTrue(canvas.getHoverText(new Point(399, 300)).contains("Y: —"));
@@ -226,7 +226,7 @@ class HeightmapTest {
             roof.awaitIdle(5, TimeUnit.SECONDS);
             SwingUtilities.invokeAndWait(() -> {
                 DynamicMapCanvas canvas = reference[0];
-                assertEquals("X: -512  Y: 127  Z: -512", canvas.getHoverText(new Point(400, 300)));
+                assertEquals("X: -512  Y: 127  Z: -512  minecraft:bedrock", canvas.getHoverText(new Point(400, 300)));
                 canvas.cleanup(); canvas.setRegionManager(null);
                 assertTrue(canvas.getHoverText(new Point(400, 300)).contains("Y: —"));
             });

@@ -20,16 +20,23 @@ public final class ColumnCache {
     private final int[] runBottomY;
     private final int[] runArgb;    // 该段每层自身的颜色
     private final String[] runId;
+    private final String[] runState, runBiome;
+    private final java.util.BitSet loaded;
+    private final PreviewOptions preview;
+    private final String renderKey;
 
-    ColumnCache(int size, int[] offsets, int[] runTopY, int[] runBottomY, int[] runArgb, String[] runId) {
+    ColumnCache(int size, int[] offsets, int[] runTopY, int[] runBottomY, int[] runArgb, String[] runId, String[] runState, String[] runBiome, java.util.BitSet loaded, PreviewOptions preview, String renderKey) {
         this.size = size;
         this.offsets = offsets;
         this.runTopY = runTopY;
         this.runBottomY = runBottomY;
         this.runArgb = runArgb;
         this.runId = runId;
+        this.runState=runState;this.runBiome=runBiome;this.loaded=loaded;
+        this.preview=preview;this.renderKey=renderKey;
     }
 
+    public PreviewOptions getPreviewOptions() {return preview;}
     public int getSize() { return size; }
 
     /** 缓存里的段总数（大致反映内存占用）。 */
@@ -51,6 +58,7 @@ public final class ColumnCache {
                     int high = clipY != null ? Math.min(yTop, clipY) : yTop;
                     int low = clipMinY != null ? Math.max(yBottom, clipMinY) : yBottom;
                     if (low > high) continue;                        // 整段都在带顶之上
+                    if(preview.transparentWater && PreviewOptions.water(runId[run])) continue;
                     int argb = runArgb[run];
                     double layerAlpha = ((argb >>> 24) & 0xFF) / 255.0;
                     if (topRun < 0) { topRun = run; topY = high; }
@@ -109,6 +117,7 @@ public final class ColumnCache {
                     int high = clipY != null ? Math.min(yTop, clipY) : yTop;
                     int low = clipMinY != null ? Math.max(yBottom, clipMinY) : yBottom;
                     if (low > high) continue;
+                    if(preview.transparentWater && PreviewOptions.water(runId[run])) continue;
                     int argb = runArgb[run];
                     double layerAlpha = ((argb >>> 24) & 0xFF) / 255.0;
                     if (topRun < 0) { topRun = run; topY = high; }
@@ -145,7 +154,29 @@ public final class ColumnCache {
         int[] baseColors = new int[size * size];
         byte[] highlight = highlightTop != null ? new byte[size * size] : null;
         toArrays(clipY, clipMinY, highlightTop, heights, baseColors, highlight);
-        return MapRenderer.renderArrays(size, size, heights, baseColors, highlight);
+        RenderedMap image=MapRenderer.renderArrays(size, size, heights, baseColors, highlight);
+        copyMetadataTo(image,clipY,clipMinY);
+        return image;
+    }
+
+    /** Attach selection data without changing cloud pixels, shading, or highlight masks. */
+    private void copyMetadataTo(RenderedMap image,Integer top,Integer bottom) {
+        image.setRenderKey(renderKey+"|band="+bottom+":"+top);
+        for(int col=loaded.nextSetBit(0);col>=0;col=loaded.nextSetBit(col+1)) {
+            int opaque=RenderedMap.NO_HEIGHT,dry=RenderedMap.NO_HEIGHT,visible=-1;
+            for(int run=offsets[col];run<offsets[col+1];run++) {
+                int high=top==null?runTopY[run]:Math.min(top,runTopY[run]);
+                int low=bottom==null?runBottomY[run]:Math.max(bottom,runBottomY[run]);
+                if(high<low) continue;
+                if(opaque==RenderedMap.NO_HEIGHT) opaque=high;
+                if(dry==RenderedMap.NO_HEIGHT&&!PreviewOptions.fitTransparent(runId[run])) dry=high;
+                if(visible<0&&(!preview.transparentWater||!PreviewOptions.water(runId[run]))) visible=run;
+                if(visible>=0&&dry!=RenderedMap.NO_HEIGHT) break;
+            }
+            int x=col%size,z=col/size;
+            image.setColumnMetadata(x,z,visible<0?null:runBiome[visible],opaque,dry);
+            if(visible>=0) image.setBlockAt(x,z,runState[visible]);
+        }
     }
 
     private static final Color EMPTY_COLOR = new Color(0, 0, 0, 0);
@@ -161,12 +192,17 @@ public final class ColumnCache {
         int[] bottomY = new int[COLUMNS * 2];
         int[] argb = new int[COLUMNS * 2];
         String[] id = new String[COLUMNS * 2];
+        String[] state = new String[COLUMNS * 2], biome = new String[COLUMNS * 2];
         int total;
 
         /** 按自上而下的顺序喂入一层的可见方块；相邻同方块同色会自动并成一段。 */
         void addLayer(int index, int y, int layerArgb, String layerId) {
+            addLayer(index,y,layerArgb,layerId,layerId.indexOf(':')<0?"minecraft:"+layerId:layerId,null);
+        }
+        void addLayer(int index, int y, int layerArgb, String layerId, String layerState, String layerBiome) {
             if (runs[index] > 0 && lastY[index] == y + 1 && lastArgb[index] == layerArgb
-                && lastId[index] != null && lastId[index].equals(layerId)) {
+                && lastId[index] != null && lastId[index].equals(layerId)
+                && java.util.Objects.equals(state[total-1],layerState) && java.util.Objects.equals(biome[total-1],layerBiome)) {
                 bottomY[total - 1] = y;
             } else {
                 if (total == topY.length) grow(total + 1);
@@ -177,6 +213,7 @@ public final class ColumnCache {
             }
             argb[total - 1] = layerArgb;
             id[total - 1] = layerId;
+            state[total-1]=layerState;biome[total-1]=layerBiome;
             lastArgb[index] = layerArgb;
             lastId[index] = layerId;
             lastY[index] = y;
@@ -188,6 +225,7 @@ public final class ColumnCache {
             bottomY = java.util.Arrays.copyOf(bottomY, capacity);
             argb = java.util.Arrays.copyOf(argb, capacity);
             id = java.util.Arrays.copyOf(id, capacity);
+            state=java.util.Arrays.copyOf(state,capacity);biome=java.util.Arrays.copyOf(biome,capacity);
         }
     }
 
@@ -196,8 +234,12 @@ public final class ColumnCache {
         private final int size;
         private final int regionSize;
         private final ChunkColumns[][] chunks;
+        private final PreviewOptions preview;
+        private final String renderKey;
 
-        Builder(int regionSize) {
+        Builder(int regionSize) {this(regionSize,PreviewOptions.DEFAULT,"synthetic");}
+        Builder(int regionSize,PreviewOptions preview,String renderKey) {
+            this.preview=preview;this.renderKey=renderKey;
             this.regionSize = regionSize;
             this.size = regionSize * 16;
             this.chunks = new ChunkColumns[regionSize][regionSize];
@@ -229,7 +271,8 @@ public final class ColumnCache {
             int[] runTopY = new int[total];
             int[] runBottomY = new int[total];
             int[] runArgb = new int[total];
-            String[] runId = new String[total];
+            String[] runId = new String[total], runState=new String[total], runBiome=new String[total];
+            java.util.BitSet loaded=new java.util.BitSet(columns);
             for (int chunkZ = 0; chunkZ < regionSize; chunkZ++) {
                 for (int chunkX = 0; chunkX < regionSize; chunkX++) {
                     ChunkColumns chunk = chunks[chunkZ][chunkX];
@@ -240,18 +283,20 @@ public final class ColumnCache {
                             int local = localZ * 16 + localX;
                             int column = (chunkZ * 16 + localZ) * size + (chunkX * 16 + localX);
                             int target = offsets[column];
+                            loaded.set(column);
                             for (int i = 0; i < chunk.runs[local]; i++) {
                                 runTopY[target + i] = chunk.topY[source + i];
                                 runBottomY[target + i] = chunk.bottomY[source + i];
                                 runArgb[target + i] = chunk.argb[source + i];
                                 runId[target + i] = chunk.id[source + i];
+                                runState[target+i]=chunk.state[source+i];runBiome[target+i]=chunk.biome[source+i];
                             }
                             source += chunk.runs[local];
                         }
                     }
                 }
             }
-            return new ColumnCache(size, offsets, runTopY, runBottomY, runArgb, runId);
+            return new ColumnCache(size, offsets, runTopY, runBottomY, runArgb, runId, runState, runBiome, loaded, preview, renderKey);
         }
     }
 }

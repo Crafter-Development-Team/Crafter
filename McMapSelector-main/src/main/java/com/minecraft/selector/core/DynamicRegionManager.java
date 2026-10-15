@@ -32,10 +32,12 @@ public class DynamicRegionManager {
     private final TileRenderer tileRenderer;
     private final Object stateLock = new Object();
     private final Map<Point, Long> failedUntil = new HashMap<>();
-    private Set<Point> desiredRegions = Collections.emptySet();
+    private volatile Set<Point> desiredRegions = Collections.emptySet();
     private long generation = 0;
     private volatile boolean closed;
     private final MapRenderer.SurfaceMode mode;
+    private final PreviewOptions preview;
+    public PreviewOptions getPreviewOptions() {return preview;}
     /** 当前 Y 带：可运行时改，新的瓦片用新带渲染 */
     private volatile Integer clipY, clipMinY;
     /** 兴趣带上沿：上界与它之间若有方块，画布会叠紫棋盘标出来 */
@@ -147,6 +149,8 @@ public class DynamicRegionManager {
             lastAccessTime = System.currentTimeMillis();
             return image; 
         }
+        /** Overview sampling must not refresh the viewport LRU access order. */
+        public BufferedImage peekImage() { return image; }
         public int getHeightAt(int x, int z) {
             return RenderedMap.heightAt(image, x, z);
         }
@@ -177,12 +181,19 @@ public class DynamicRegionManager {
     }
 
     public DynamicRegionManager(String savePath, File regionDir, MapRenderer.SurfaceMode mode) {
-        this(savePath,regionDir,mode,null,null);
+        this(savePath,regionDir,mode,null,(Integer)null);
     }
     public DynamicRegionManager(String savePath,File regionDir,MapRenderer.SurfaceMode mode,Integer clipY) {
-        this(savePath,regionDir,mode,clipY,null);
+        this(savePath,regionDir,mode,clipY,(Integer)null);
     }
     public DynamicRegionManager(String savePath,File regionDir,MapRenderer.SurfaceMode mode,Integer clipY,Integer clipMinY) {
+        this(savePath,regionDir,mode,clipY,clipMinY,PreviewOptions.DEFAULT);
+    }
+    public DynamicRegionManager(String savePath,File regionDir,MapRenderer.SurfaceMode mode,Integer clipY,PreviewOptions preview) {
+        this(savePath,regionDir,mode,clipY,null,preview);
+    }
+    public DynamicRegionManager(String savePath,File regionDir,MapRenderer.SurfaceMode mode,Integer clipY,Integer clipMinY,PreviewOptions preview) {
+        this.preview=Objects.requireNonNull(preview);
         this.savePath = savePath;
         this.regionDir = regionDir;
         this.mode = mode;
@@ -200,7 +211,7 @@ public class DynamicRegionManager {
             File file = new File(regionDir, String.format("r.%d.%d.mca", coordinate.x, coordinate.y));
             // Independent progress counters per render: a shared MapRenderer was
             // concurrently resetting counters and scheduling blocking waiter tasks.
-            MapRenderer local = new MapRenderer(2, null, this.mode,this.clipY,this.clipMinY,tilePalette);
+            MapRenderer local = new MapRenderer(2, null, this.mode,this.clipY,this.clipMinY,tilePalette,preview);
             try { return local.renderToPng(local.getTopBlocks(file.getAbsolutePath(),32,1),1); }
             finally { local.shutdown(); }
         };
@@ -217,6 +228,7 @@ public class DynamicRegionManager {
         this.regionDir = regionDir;
         this.logManager = LogManager.getInstance();
         this.mode = MapRenderer.SurfaceMode.AUTO;
+        this.preview = PreviewOptions.DEFAULT;
         this.tileRenderer = tileRenderer;
         this.loadingExecutor = (ThreadPoolExecutor) Executors.newFixedThreadPool(3);
         this.cacheExecutor = Executors.newSingleThreadExecutor(r -> {
@@ -328,7 +340,7 @@ public class DynamicRegionManager {
         try {
             cacheExecutor.execute(() -> {
                 final BlockColors.Palette palette = BlockColors.snapshot();
-                MapRenderer local = new MapRenderer(2, null, mode, (Integer) null, (Integer) null);
+                MapRenderer local = new MapRenderer(2, null, mode, null, null, palette,preview);
                 ColumnCache cache;
                 try {
                     cache = local.scanRegion(key, 32);
@@ -386,6 +398,9 @@ public class DynamicRegionManager {
     /**
      * 更新视口，加载/卸载相应区域
      */
+    private final java.util.concurrent.atomic.AtomicLong cacheHits=new java.util.concurrent.atomic.AtomicLong(),cacheMisses=new java.util.concurrent.atomic.AtomicLong();
+    public String hudMetrics(){long hit=cacheHits.get(),miss=cacheMisses.get();return "regions "+loadedRegions.size()+"/"+availableRegions.size()+", viewport "+desiredRegions.size()+", hits "+(hit+miss==0?"—":String.format(java.util.Locale.ROOT,"%.0f%%",100.0*hit/(hit+miss)));}
+    public void trimViewportCache(){synchronized(stateLock){for(Point p:new java.util.ArrayList<>(loadedRegions.keySet()))if(!desiredRegions.contains(p)){loadedRegions.remove(p);notifyRegionUnloaded(p);}}}
     public void updateViewport(Rectangle worldViewport) {
         if (worldViewport == null || worldViewport.width <= 0 || worldViewport.height <= 0 || closed) return;
         // Rectangle bounds are half-open; use long arithmetic before addition.
@@ -407,7 +422,7 @@ public class DynamicRegionManager {
             if (closed) return;
             desiredRegions = new HashSet<>(candidates);
             unloadUnneededRegions(desiredRegions);
-            for (Point point : candidates) startLoadingRegion(point);
+            for (Point point : candidates) {if(loadedRegions.containsKey(point))cacheHits.incrementAndGet();else cacheMisses.incrementAndGet();startLoadingRegion(point);}
             notifyViewportProgress();
         }
     }
@@ -547,7 +562,16 @@ public class DynamicRegionManager {
                     } catch (Exception error) {
                         failedUntil.put(regionCoord, System.currentTimeMillis()+5000);
                         notifyLoadingFailed(regionCoord,error);
-                    } finally { loadingRegions.remove(regionCoord, this);notifyViewportProgress(); }
+                    } finally {
+                        loadingRegions.remove(regionCoord, this);
+                        notifyViewportProgress();
+                        // Cache completion may have raced this reload: its refresh was
+                        // skipped while loadingRegions still contained this task. The
+                        // direct scan carries no purple mask, even if its band matches.
+                        CacheEntry cached;
+                        synchronized (bandCaches) { cached=bandCaches.get(regionFile(regionCoord).getAbsolutePath()); }
+                        if(cached!=null && cached.palette==BlockColors.snapshot()) requestTileRefresh(regionCoord);
+                    }
                 }
             }
         };

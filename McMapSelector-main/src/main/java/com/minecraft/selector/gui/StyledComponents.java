@@ -506,6 +506,15 @@ public class StyledComponents {
             }
         }
 
+        /** Apply a fitted import range once, retaining extended world heights. */
+        public void setSelectedRange(int lower,int upper) {
+            if(lower>upper) throw new IllegalArgumentException("Minimum Y must not exceed maximum Y");
+            minValue=Math.min(minValue,lower);maxValue=Math.max(maxValue,upper);
+            boolean changed=lowerValue!=lower||upperValue!=upper;
+            lowerValue=lower;upperValue=upper;repaint();
+            if(changed) fireChangeEvent();
+        }
+
         public void setRange(int min, int max) {
             this.minValue = min;
             this.maxValue = max;
@@ -739,6 +748,15 @@ public class StyledComponents {
             highlightValue = hl;
             repaint();
             fireChangeEvent();
+        }
+
+        /** Apply selection/preset bounds atomically using the cloud height-axis control. */
+        public void setSelectedRange(int lower,int upper) {
+            if(lower>upper) throw new IllegalArgumentException("Minimum Y must not exceed maximum Y");
+            minValue=Math.min(minValue,lower);maxValue=Math.max(maxValue,upper);
+            boolean changed=lowerValue!=lower||upperValue!=upper;
+            lowerValue=lower;upperValue=upper;highlightValue=Math.max(highlightValue,upper);repaint();
+            if(changed) fireChangeEvent();
         }
 
         /** 扩大/移动坐标轴模型范围（不是取值）。 */

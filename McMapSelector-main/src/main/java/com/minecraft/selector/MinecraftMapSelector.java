@@ -4,6 +4,8 @@ import com.minecraft.selector.core.MapRenderer;
 import com.minecraft.selector.core.BlockColors;
 import com.minecraft.selector.core.ResourceOptions;
 import com.minecraft.selector.core.RenderedMap;
+import com.minecraft.selector.core.SelectionSeed;
+import com.minecraft.selector.gui.SelectionMath;
 import com.minecraft.selector.gui.MinecraftMapGUI;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -22,12 +24,21 @@ import java.util.stream.Collectors;
 public class MinecraftMapSelector {
     
     public static void main(String[] args) {
+        for(String arg:args)if("--validate-selection".equals(arg)) {System.exit(com.minecraft.selector.core.SelectionValidator.run(args,System.out,System.err));return;}
+        final boolean multiBox=java.util.Arrays.asList(args).contains("--multi-box");
+        final boolean includeWaypoints=java.util.Arrays.asList(args).contains("--include-waypoints");
+        args=java.util.Arrays.stream(args).filter(a->!a.equals("--multi-box")&&!a.equals("--include-waypoints")).toArray(String[]::new);
         System.out.println("Minecraft地图选择器 - Java版本");
         System.out.println("接收到的参数数量: " + args.length);
         for (int i = 0; i < args.length; i++) {
             System.out.println("参数[" + i + "]: " + args[i]);
         }
 
+        SelectionMath.Bounds parsedSelection=null;
+        try {parsedSelection=SelectionSeed.parse(args);}
+        catch(IllegalArgumentException e) {System.err.println("Ignoring invalid selection seed: "+e.getMessage());}
+        final SelectionMath.Bounds initialSelection=parsedSelection;
+        args=SelectionSeed.withoutFlags(args);
         ResourceOptions.setLaunch(ResourceOptions.parse(args));
         args=ResourceOptions.withoutResourceFlags(args);
 
@@ -78,16 +89,16 @@ public class MinecraftMapSelector {
             System.out.println("启动图形界面...");
             javax.swing.SwingUtilities.invokeLater(() -> {
                 try {
-                    new MinecraftMapGUI().setVisible(true);
+                    MinecraftMapGUI gui=new MinecraftMapGUI();gui.setSelectionExportOptions(multiBox,includeWaypoints);gui.setInitialSelectionSeed(initialSelection);gui.setVisible(true);
                 } catch (Exception e) {
                     System.err.println("启动GUI失败: " + e.getMessage());
                     e.printStackTrace();
                     showUsage();
                 }
             });
-        } else if (worldPath != null && outputFile != null) {
+        } else if (worldPath != null) {
             // Blender集成模式，启动GUI但自动加载世界
-            System.out.println("启动Blender集成模式...");
+            System.out.println(outputFile==null?"启动世界预览...":"启动Blender集成模式...");
             System.out.printf("世界路径: %s\n", worldPath);
             System.out.printf("输出文件: %s\n", outputFile);
             if (jarPath != null) {
@@ -97,7 +108,7 @@ public class MinecraftMapSelector {
             javax.swing.SwingUtilities.invokeLater(() -> {
                 try {
                     MinecraftMapGUI gui = new MinecraftMapGUI(worldPath, outputFile, jarPath, minY, maxY);
-                    gui.setVisible(true);
+                    gui.setSelectionExportOptions(multiBox,includeWaypoints);gui.setInitialSelectionSeed(initialSelection);gui.setVisible(true);
                 } catch (Exception e) {
                     System.err.println("启动Blender集成模式失败: " + e.getMessage());
                     e.printStackTrace();
@@ -599,6 +610,10 @@ public class MinecraftMapSelector {
         System.out.println("  --jar-path <jar> --mods-dir <dir> --mod-jar <jar> --resource-pack <zip>");
         System.out.println("  --render-y <Y> 以指定 Y 为顶层向下渲染；默认 AUTO");
         System.out.println("  --no-auto-resources 禁用资源自动发现；每张图另存 .png.colors.json 命中统计");
+        System.out.println("Blender GUI: --world-path <world> --output-file <coordinates.json> [--min-y Y --max-y Y]");
+        System.out.println("预设选区: --min-x X --max-x X --min-z Z --max-z Z (四项必须同时提供)");
+        System.out.println("--multi-box 附加 boxes 列表；--include-waypoints 显式附加 POI；根坐标始终是包围盒");
+        System.out.println("无界面 CI: --validate-selection coordinates.json --max-columns N (退出码 0/1)");
         System.out.println("命令行选项:");
         System.out.println("  <mca文件路径>        必需，.mca区域文件路径");
         System.out.println("  [输出JSON文件路径]   可选，默认为<区域名>_map_<时间戳>.json");

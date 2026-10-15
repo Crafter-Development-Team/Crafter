@@ -22,6 +22,9 @@ public class MapRenderer {
      * 存储方块信息的内部类，包含方块ID和高度
      */
     public static class BlockInfo {
+        private String biome;
+        private int opaqueHeight=RenderedMap.NO_HEIGHT, dryHeight=RenderedMap.NO_HEIGHT;
+        public String getBiome() {return biome;}
         private final String blockId;
         private final int height;
         private final Map<String,String> properties;
@@ -49,14 +52,23 @@ public class MapRenderer {
         public Map<String,String> getProperties() {return properties;}
         public Color getSurfaceColor() {return surfaceColor;}
 
-        @Override
-        public String toString() {
-            return blockId + "@" + height;
+        public String formatState() {
+            String id=blockId.indexOf(':')<0?"minecraft:"+blockId:blockId;
+            if(properties.isEmpty()) return id;
+            StringBuilder out=new StringBuilder(id).append('[');
+            for(Map.Entry<String,String> e:new TreeMap<>(properties).entrySet()) {
+                if(out.charAt(out.length()-1)!='[') out.append(',');
+                out.append(e.getKey()).append('=').append(e.getValue());
+            }
+            return out.append(']').toString();
         }
+        @Override public String toString() {return formatState()+"@"+height;}
     }
     
     public enum SurfaceMode { AUTO, TOP, NETHER_INTERIOR }
     public static final BlockInfo EMPTY = new BlockInfo("air", RenderedMap.NO_HEIGHT);
+    public static final BlockInfo LOADED_EMPTY=new BlockInfo("air",RenderedMap.NO_HEIGHT);
+    private final PreviewOptions preview;
     private final SurfaceMode surfaceMode;
     private final BlockColors.Palette scanPalette;
     private final Integer clipY;
@@ -103,13 +115,20 @@ public class MapRenderer {
         this(maxWorkers,progressCallback,surfaceMode,clipY,BlockColors.snapshot());
     }
     public MapRenderer(int maxWorkers,ProgressCallback progressCallback,SurfaceMode surfaceMode,Integer clipY,BlockColors.Palette palette) {
-        this(maxWorkers,progressCallback,surfaceMode,clipY,null,palette);
+        this(maxWorkers,progressCallback,surfaceMode,clipY,null,palette,PreviewOptions.DEFAULT);
     }
     public MapRenderer(int maxWorkers,ProgressCallback progressCallback,SurfaceMode surfaceMode,Integer clipY,Integer clipMinY) {
         this(maxWorkers,progressCallback,surfaceMode,clipY,clipMinY,BlockColors.snapshot());
     }
     /** clipY=扫描上界, clipMinY=扫描下界(含)；两者为 null 表示该侧不裁剪。 */
     public MapRenderer(int maxWorkers,ProgressCallback progressCallback,SurfaceMode surfaceMode,Integer clipY,Integer clipMinY,BlockColors.Palette palette) {
+        this(maxWorkers,progressCallback,surfaceMode,clipY,clipMinY,palette,PreviewOptions.DEFAULT);
+    }
+    public MapRenderer(int maxWorkers,ProgressCallback callback,SurfaceMode mode,Integer top,BlockColors.Palette palette,PreviewOptions preview) {
+        this(maxWorkers,callback,mode,top,null,palette,preview);
+    }
+    public MapRenderer(int maxWorkers,ProgressCallback progressCallback,SurfaceMode surfaceMode,Integer clipY,Integer clipMinY,BlockColors.Palette palette,PreviewOptions preview) {
+        this.preview=Objects.requireNonNull(preview);
         this.clipY=clipY;this.clipMinY=clipMinY;this.scanPalette=Objects.requireNonNull(palette);
         if (maxWorkers < 1) throw new IllegalArgumentException("maxWorkers must be positive");
         this.surfaceMode = Objects.requireNonNull(surfaceMode);
@@ -118,6 +137,7 @@ public class MapRenderer {
         this.executorService = Executors.newFixedThreadPool(maxWorkers);
     }
 
+    public String cacheKey() {return preview.cacheKey()+"|surface="+surfaceMode+"|top="+clipY+"|bottom="+clipMinY+"|resources="+scanPalette.fingerprint();}
     /**
      * 渲染区域文件为顶部方块数据
      */
@@ -248,13 +268,13 @@ public class MapRenderer {
      */
     public ColumnCache scanRegion(String mcaFilePath,int regionSize) throws IOException {
         if(regionSize<1||regionSize>32) throw new IllegalArgumentException("regionSize must be 1..32");
-        if(surfaceMode==SurfaceMode.NETHER_INTERIOR || (surfaceMode==SurfaceMode.AUTO && isNetherRegion(mcaFilePath))) return null;
+        if(preview.cave || surfaceMode==SurfaceMode.NETHER_INTERIOR || (surfaceMode==SurfaceMode.AUTO && isNetherRegion(mcaFilePath))) return null;
 
         long start=System.currentTimeMillis();
         Region region = Region.fromFile(mcaFilePath);
         List<int[]> populatedChunks=new ArrayList<>();
         for(int x=0;x<regionSize;x++) for(int z=0;z<regionSize;z++) if(region.chunkExists(x,z)) populatedChunks.add(new int[]{x,z});
-        ColumnCache.Builder builder=new ColumnCache.Builder(regionSize);
+        ColumnCache.Builder builder=new ColumnCache.Builder(regionSize,preview,cacheKey());
         if(populatedChunks.isEmpty()) return builder.build();
 
         int batchSize=Math.max(1,populatedChunks.size()/maxWorkers);
@@ -311,7 +331,8 @@ public class MapRenderer {
         }
         // 有方块实体的区块，颜色跟坐标有关，不能按方块实例缓存
         final boolean entities=chunk.hasBlockEntities();
-        final Map<Block,Integer> memo=entities?null:new IdentityHashMap<>();
+        final Map<Block,Integer> memo=entities||preview.biomeMode!=0?null:new IdentityHashMap<>();
+        final Map<Block,String> states=new IdentityHashMap<>();
         for(int z=0;z<16;z++) {
             for(int x=0;x<16;x++) {
                 int column=z*16+x;
@@ -331,11 +352,13 @@ public class MapRenderer {
                             Color associated=entities?BlockEntityColors.resolve(blockId,chunk.getBlockEntity(x,worldY,z),scanPalette):null;
                             Color color=associated!=null?associated:surfaceColor(blockId,block.getProperties(),scanPalette);
                             if(associated!=null) scanPalette.recordAssociated(blockId);
+                            color=scanPalette.biomeColor(color,chunk.getBiome(x,worldY,z),blockId,preview.biomeMode);
                             argb=color.getRGB();
                             if(memo!=null) memo.put(block,argb);
                         }
                         if(((argb>>>24)&0xFF)==0) continue; // 全透明的层本来就不进层栈
-                        columns.addLayer(column,(int)bottom+y,argb,blockId);
+                        String state=states.computeIfAbsent(block,b->new BlockInfo(b.getId(),0,b.getProperties(),null).formatState());
+                        columns.addLayer(column,(int)bottom+y,argb,blockId,state,chunk.getBiome(x,(int)bottom+y,z));
                     }
                 }
             }
@@ -450,7 +473,7 @@ public class MapRenderer {
     private BlockInfo[][] processChunk(Chunk chunk, Set<String> localFoundBlocks,
                                        int sampleInterval, boolean hideRoof) {
         BlockInfo[][] columns = new BlockInfo[16][16];
-        for (BlockInfo[] row : columns) Arrays.fill(row, EMPTY);
+        for (BlockInfo[] row : columns) Arrays.fill(row, LOADED_EMPTY);
         List<Chunk.Section> sections = chunk.getSections();
         sections.sort(Comparator.comparingInt(Chunk.Section::getY).reversed());
         Set<Chunk.Section> airSections = new HashSet<>();
@@ -465,7 +488,17 @@ public class MapRenderer {
         for (int z = 0; z < 16; z += sampleInterval) {
             for (int x = 0; x < 16; x += sampleInterval) {
                 BlockInfo top = findSurface(chunk, sections, airSections, x, z, hideRoof && hasRoofCandidate);
-                if (top != EMPTY) localFoundBlocks.add(top.getBlockId());
+                if(top!=EMPTY) {
+                    top.biome=chunk.getBiome(x,top.height,z);
+                    int[] fit=fitHeights(chunk,sections,x,z,hideRoof&&hasRoofCandidate,top.height);
+                    top.opaqueHeight=fit[0];top.dryHeight=fit[1];
+                    localFoundBlocks.add(top.getBlockId());
+                } else {
+                    String biome=chunk.getBiome(x,clipY==null?(sections.isEmpty()?0:sections.get(0).getY()*16):clipY,z);
+                    int[] fit=fitHeights(chunk,sections,x,z,hideRoof&&hasRoofCandidate,RenderedMap.NO_HEIGHT);
+                    if(biome==null&&fit[0]==RenderedMap.NO_HEIGHT) top=LOADED_EMPTY;
+                    else {top=new BlockInfo("air",RenderedMap.NO_HEIGHT);top.biome=biome;top.opaqueHeight=fit[0];top.dryHeight=fit[1];}
+                }
                 // Color and Y always refer to the same sample (GUI uses interval 1).
                 for (int dz = z; dz < Math.min(16, z + sampleInterval); dz++)
                     for (int dx = x; dx < Math.min(16, x + sampleInterval); dx++) columns[dz][dx] = top;
@@ -505,6 +538,7 @@ public class MapRenderer {
                 Block block=section.getBlock(x,y,z);String id=block.getId();int worldY=(int)bottom+y;
                 if(bandTop!=null && worldY>bandTop) continue;
                 if(bandBottom!=null && worldY<bandBottom) break; // 到 Y 带底部，本列更低的层不再参与合成
+                if(preview.transparentWater && PreviewOptions.water(id)) continue;
                 if(BlockColors.isAirBlock(id)) {if(roofFound) cavityFound=true;continue;}
                 if(hideRoof && !roofFound && worldY>=32 && "bedrock".equals(id)) roofFound=true;
                 if(!roofFound && ordinaryAlpha<0.995) {
@@ -526,7 +560,46 @@ public class MapRenderer {
 
     private BlockInfo findSurface(Chunk chunk,List<Chunk.Section> sections,Set<Chunk.Section> airSections,
                                   int x,int z,boolean hideRoof) {
+        if(preview.cave) return caveSurface(chunk,sections,x,z);
         return scanColumn(chunk,sections,airSections,x,z,hideRoof,clipY,clipMinY).composite();
+    }
+    /** Locate a roofed air pocket below the selected ceiling; dim sky-exposed floors. */
+    private BlockInfo caveSurface(Chunk chunk,List<Chunk.Section> sections,int x,int z) {
+        boolean roof=false,air=false;Integer previous=null;
+        BlockInfo sky=EMPTY;
+        for(Chunk.Section section:sections) {
+            long bottom=(long)section.getY()*16;
+            if(bottom<=Integer.MIN_VALUE||bottom+15>Integer.MAX_VALUE) throw new IllegalArgumentException("Section Y out of range");
+            for(int local=15;local>=0;local--) {
+                int y=(int)bottom+local;
+                Block above=section.getBlock(x,local,z);
+                if(clipY!=null&&y>clipY) {if(!BlockColors.isAirBlock(above.getId())) {roof=true;air=false;}else if(roof) air=true;previous=y;continue;}
+                if(clipMinY!=null&&y<clipMinY) break;
+                if(previous!=null&&(long)previous-y>1&&roof) air=true;previous=y;
+                Block b=section.getBlock(x,local,z);
+                if(BlockColors.isAirBlock(b.getId())) {if(roof) air=true;continue;}
+                if(preview.transparentWater&&PreviewOptions.water(b.getId())) continue;
+                Layer l=layer(chunk,b,x,y,z);
+                if(l.color.getAlpha()==0) continue;
+                if(sky==EMPTY) sky=new BlockInfo(b.getId(),y,b.getProperties(),new Color(l.color.getRed()/3,l.color.getGreen()/3,l.color.getBlue()/3));
+                if(roof&&air) return new BlockInfo(b.getId(),y,b.getProperties(),l.color);
+                roof=true;
+            }
+        }
+        return sky;
+    }
+    /** Two independent fit policies, read once with each column and cached with the tile. */
+    private int[] fitHeights(Chunk chunk,List<Chunk.Section> sections,int x,int z,boolean hideRoof,int displayY) {
+        int opaque=RenderedMap.NO_HEIGHT,dry=RenderedMap.NO_HEIGHT;
+        for(Chunk.Section section:sections) for(int local=15;local>=0;local--) {
+            long y=(long)section.getY()*16+local;
+            if(clipMinY!=null&&y<clipMinY || clipY!=null&&y>clipY || (hideRoof||preview.cave)&&y>displayY) continue;
+            Block b=section.getBlock(x,local,z);String id=b.getId();
+            if(BlockColors.isAirBlock(id)) continue;
+            if(opaque==RenderedMap.NO_HEIGHT) opaque=(int)y;
+            if(!PreviewOptions.fitTransparent(id)) {dry=(int)y;return new int[]{opaque,dry};}
+        }
+        return new int[]{opaque,dry};
     }
     static final class Layer {
         final Block block;final int y;final Color color;
@@ -536,6 +609,7 @@ public class MapRenderer {
         Color associated=BlockEntityColors.resolve(block.getId(),chunk.getBlockEntity(x,y,z),scanPalette);
         Color color=associated==null?surfaceColor(block.getId(),block.getProperties(),scanPalette):associated;
         if(associated!=null) scanPalette.recordAssociated(block.getId());
+        color=scanPalette.biomeColor(color,chunk.getBiome(x,y,z),block.getId(),preview.biomeMode);
         return new Layer(block,y,color);
     }
     /** Projection opacity describes horizontal coverage, not occupied volume. */
@@ -642,6 +716,16 @@ public class MapRenderer {
 
         // 第二趟：描边 + 写像素（与缓存路径共用同一套规则）
         RenderedMap image = renderArrays(width, height, heights, baseColors);
+        image.setRenderKey(cacheKey());
+        Map<String,Map<Map<String,String>,String>> states=new HashMap<>();
+        for(int z=0;z<height;z++) for(int x=0;x<width;x++) {
+            BlockInfo b=topBlocks[z][x];
+            if(b!=null&&b!=EMPTY) image.setColumnMetadata(x,z,b.biome,b.opaqueHeight,b.dryHeight);
+            if(b!=null&&b.height!=RenderedMap.NO_HEIGHT&&!BlockColors.isAirBlock(b.blockId)) {
+                String state=states.computeIfAbsent(b.blockId,id->new HashMap<>()).computeIfAbsent(b.properties,props->b.formatState());
+                image.setBlockAt(x,z,state);
+            }
+        }
 
         if (errorCount.get() > 0) {
             System.out.println("\n注意：处理过程中有 " + errorCount.get() + " 个像素出现错误");

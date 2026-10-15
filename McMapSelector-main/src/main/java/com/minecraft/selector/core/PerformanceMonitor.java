@@ -18,6 +18,7 @@ public class PerformanceMonitor {
     
     private PerformanceMonitor() {}
     
+    public static String heapHud(){Runtime r=Runtime.getRuntime();return "heap "+((r.totalMemory()-r.freeMemory())/(1024*1024))+"/"+(r.maxMemory()/(1024*1024))+" MiB";}
     public static PerformanceMonitor getInstance() {
         return INSTANCE;
     }

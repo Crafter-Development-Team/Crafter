@@ -35,6 +35,7 @@ final class ResourceArchiveCache {
     static final class Assets {
         final Map<String,JsonNode> json=new HashMap<>();
         final Map<String,Color> textures=new HashMap<>();
+        final BiomeColors biomes=new BiomeColors();
     }
     private static <T> Map<String,FutureTask<T>> cache(final int limit) {
         return new LinkedHashMap<String,FutureTask<T>>(16,0.75f,true) {
@@ -60,7 +61,35 @@ final class ResourceArchiveCache {
         BasicFileAttributes a=Files.readAttributes(file,BasicFileAttributes.class);
         Object changed="";
         try {changed=Files.getAttribute(file,"unix:ctime");} catch(UnsupportedOperationException | IllegalArgumentException ignored) {}
-        return file+"|"+a.size()+"|"+a.lastModifiedTime()+"|"+a.fileKey()+"|"+changed;
+        return file+"|"+a.size()+"|"+a.lastModifiedTime()+"|"+a.fileKey()+"|"+changed+"|"+directoryHash(file);
+    }
+    /** File times can collide on fast rewrites. Hash ZIP metadata, without decoding assets.
+     * Cached index/JSON/PNG snapshots are still reused; only central-directory bytes are read.
+     */
+    private static String directoryHash(Path path) throws IOException {
+        try {
+            MessageDigest digest=MessageDigest.getInstance("SHA-256");
+            try(RandomAccessFile file=new RandomAccessFile(path.toFile(),"r")) {
+                long length=file.length();int tailSize=(int)Math.min(length,65557L);
+                byte[] tail=new byte[tailSize];file.seek(length-tailSize);file.readFully(tail);
+                java.nio.ByteBuffer b=java.nio.ByteBuffer.wrap(tail).order(java.nio.ByteOrder.LITTLE_ENDIAN);
+                for(int i=tailSize-22;i>=0;i--) {
+                    if(b.getInt(i)!=0x06054b50 || i+22+(b.getShort(i+20)&0xffff)!=tailSize) continue;
+                    long size=b.getInt(i+12)&0xffffffffL,offset=b.getInt(i+16)&0xffffffffL;
+                    if(size==0xffffffffL||offset==0xffffffffL||(b.getShort(i+10)&0xffff)==0xffff) break; // ZIP64: use standard library below
+                    if(offset+size>length-tailSize+i) throw new IOException("Invalid ZIP directory: "+path);
+                    file.seek(offset);byte[] bytes=new byte[8192];
+                    while(size>0) {int n=file.read(bytes,0,(int)Math.min(size,bytes.length));if(n<0) throw new EOFException("Truncated ZIP directory");digest.update(bytes,0,n);size-=n;}
+                    return hex(digest.digest());
+                }
+            }
+            // ZIP64 archives and nonstandard layouts retain Java's ZIP parser semantics.
+            try(ZipFile zip=new ZipFile(path.toFile())) {
+                Enumeration<? extends ZipEntry> entries=zip.entries();
+                while(entries.hasMoreElements()) {ZipEntry e=entries.nextElement();digest.update((e.getName()+"|"+e.getCrc()+"|"+e.getSize()+"\n").getBytes("UTF-8"));}
+            }
+            return hex(digest.digest());
+        } catch(NoSuchAlgorithmException e) {throw new IOException(e);}
     }
     static Index index(String path) throws IOException {
         String key=fileKey(path);
@@ -92,6 +121,7 @@ final class ResourceArchiveCache {
         return cached(ASSETS,index.fingerprint,() -> {
             Assets result=new Assets();
             try(ZipFile zip=new ZipFile(index.path)) {
+                result.biomes.read(zip);
                 for(String name:index.entries) {
                     if(Thread.currentThread().isInterrupted()) throw new IOException("Resource loading interrupted");
                     ZipEntry entry=zip.getEntry(name);
