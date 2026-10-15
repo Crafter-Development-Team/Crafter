@@ -66,7 +66,7 @@ public class MapCanvas extends JPanel implements SelectionCanvas {
             else if(selecting) updateSelection(hoverPoint);
         }
     }
-    public void resetSelection() {gestures.cancel();resetPosCorner();selecting=false;resizeHandle=HANDLE_NONE;applyBounds(null,false);selectionHistory.clear();}
+    public void resetSelection() {overlays.resetSelectionTool();gestures.cancel();resetPosCorner();selecting=false;resizeHandle=HANDLE_NONE;applyBounds(null,false);selectionHistory.clear();}
     public void nudgeSelection(int direction,boolean shrink,int step) {
         SelectionMath.Bounds b=getSelectionBounds();if(b==null) return;
         SelectionMath.Bounds next=SelectionMath.nudge(b,direction,shrink,step);
@@ -86,7 +86,7 @@ public class MapCanvas extends JPanel implements SelectionCanvas {
 
     private ViewOverlays overlays=new ViewOverlays();
     private Point pos1,corner1,corner2;
-    public void setOverlays(ViewOverlays value) {overlays=value;repaint();}
+    public void setOverlays(ViewOverlays value) {overlays=value;overlays.resetSelectionTool();repaint();}
     public void resetPosCorner() {pos1=null;corner1=null;corner2=null;}
     private void posClick(Point world) {
         if(world==null) return;
@@ -199,7 +199,9 @@ public class MapCanvas extends JPanel implements SelectionCanvas {
                 squareGesture=e.isShiftDown();
                 hoverPoint=e.getPoint();
                 if(overlays.minimap&&SwingUtilities.isLeftMouseButton(e)&&minimap.contains(e.getPoint())) {Point target=minimap.worldAt(e.getPoint());if(target!=null)jumpToWorldCoordinate(target);return;}
-                if(gestures.press(e,screenToWorldCoordinates(e.getPoint()),thisCanvas(),overlays.selectionMode,snapMode,overlays.addBoxMode))return;
+                // Special-shape gestures stay implemented, but are not dispatched by the GUI.
+                overlays.resetSelectionTool();
+                gestures.cancel();
                 if(SwingUtilities.isMiddleMouseButton(e)) {
                     int[] xyz=getHoverCoordinates();
                     if(importFloorListener!=null) importFloorListener.accept(xyz==null?RenderedMap.NO_HEIGHT:xyz[1]);
@@ -1032,7 +1034,7 @@ public class MapCanvas extends JPanel implements SelectionCanvas {
     /**
      * 清除选择矩形
      */
-    public void clearSelection() {gestures.cancel();
+    public void clearSelection() {overlays.resetSelectionTool();gestures.cancel();
         resetPosCorner();
         if(hasValidSelection) selectionHistory.remember(getSelectionBounds(),selectionShape);
         selectionStart = null;

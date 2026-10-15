@@ -7,6 +7,8 @@ public final class ViewOverlays {
     public boolean contours,night,markers=true,scaleBar=true,gaps=true,posMode;
     public boolean minimap,hud,ore,addBoxMode;
     public String selectionMode="Box";
+    /** Importers currently consume one inclusive AABB; keep special tools dormant. */
+    public void resetSelectionTool() {selectionMode="Box";addBoxMode=false;}
     public final com.minecraft.selector.core.WaypointStore waypoints=new com.minecraft.selector.core.WaypointStore();
     public java.util.Map<Point,Long> oreCounts=java.util.Collections.emptyMap();
     public String hudText="";

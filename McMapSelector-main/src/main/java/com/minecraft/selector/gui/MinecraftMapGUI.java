@@ -692,10 +692,8 @@ public class MinecraftMapGUI extends JFrame {
         addMenuItem(selectionMenu,"Fit Import Y (opaque water/glass)",e->autoFitImportY(true),null,"Shift+Space on map");
         addMenuItem(selectionMenu,"Copy coordinates",e->copyCoordinates(),null,"Ctrl+Shift+C on map");
         addMenuItem(selectionMenu,"Confirm selection…",e->confirmSelection(),null,"Enter on map");
-        JMenu tools=new JMenu("Selection tool");ButtonGroup group=new ButtonGroup();
-        for(String tool:new String[]{"Box","Chunk paint","Circle"}){JRadioButtonMenuItem item=new JRadioButtonMenuItem(tool,"Box".equals(tool));group.add(item);tools.add(item);item.addActionListener(e->{overlays.selectionMode=tool;overlays.posMode=false;JCheckBoxMenuItem pos=previewItems.get("pos");if(pos!=null)pos.setSelected(false);if(!"Box".equals(tool)){overlays.addBoxMode=false;JCheckBoxMenuItem add=previewItems.get("addbox");if(add!=null)add.setSelected(false);}progressLabel.setText(selectionToolHint(tool));});}selectionMenu.add(tools);
-        addPreviewItem(selectionMenu,"Add box (Alt+RMB)","addbox",false);
-        previewItems.get("addbox").setToolTipText("Sticky append: plain right-drag adds another AABB. Also: Alt+RMB or Ctrl+RMB (Linux WM often steals Alt).");
+        // Box is the only supported import selection; no one-item tool submenu.
+        overlays.resetSelectionTool();
         addMenuItem(selectionMenu,"Suggest selection by chunk metadata…",e->filterChunks(),null,null);
         menuBar.add(selectionMenu);
         JMenu navigate=new JMenu("Navigate");
@@ -1732,7 +1730,7 @@ public class MinecraftMapGUI extends JFrame {
             long generation=viewGeneration;SelectionCanvas canvas=activeCanvas();Map<String,Object> approvedShape=canvas.getSelectionShape().json();
             SelectionStats stats=new SelectionStats(b,minY,maxY);
             String message="Import bounds: "+ClipboardCoords.selection(b,minY,maxY)+"\n"+stats+"\n\n"+
-                (stats.isLarge()?"Large selection: Blender may require substantial memory and time.\n":"")+"Selection shape exports as inclusive union AABB"+(multiBoxExport?" + boxes extras":"")+".\nContinue with this selection?";
+                (stats.isLarge()?"Large selection: Blender may require substantial memory and time.\n":"")+"Export uses a single inclusive AABB. All blocks within these bounds are imported.\nContinue with this selection?";
             int result=JOptionPane.showConfirmDialog(this,message,"Confirm import selection",JOptionPane.OK_CANCEL_OPTION,stats.isLarge()?JOptionPane.WARNING_MESSAGE:JOptionPane.QUESTION_MESSAGE);
             if(result!=JOptionPane.OK_OPTION) {progressLabel.setText("Confirmation cancelled; selection kept");return;}
             if(generation!=viewGeneration||canvas!=activeCanvas()||!approvedShape.equals(canvas.getSelectionShape().json())||!b.equals(canvas.getSelectionBounds())||minY!=heightRangeSlider.getLowerValue()||maxY!=heightRangeSlider.getUpperValue()) {
@@ -2347,7 +2345,7 @@ public class MinecraftMapGUI extends JFrame {
                 @Override public void onSelectionConfirmed(int minX,int minZ,int maxX,int maxZ) {handleSelectionConfirmation(new SelectionMath.Bounds(minX,minZ,maxX,maxZ));}
             });
             configureCanvas(dynamicMapCanvas);
-            dynamicMapCanvas.restoreSelectionBounds(mapCanvas.getSelectionBounds());if(!mapCanvas.getSelectionShape().isEmpty())dynamicMapCanvas.setSelectionShape(mapCanvas.getSelectionShape(),false);
+            dynamicMapCanvas.restoreSelectionBounds(mapCanvas.getSelectionBounds());
 
             // 替换地图显示组件
             Container parent = mapCanvas.getParent();
@@ -2394,7 +2392,7 @@ public class MinecraftMapGUI extends JFrame {
             
             // 清理动态组件
             if (dynamicMapCanvas != null) {
-                mapCanvas.restoreSelectionBounds(dynamicMapCanvas.getSelectionBounds());if(!dynamicMapCanvas.getSelectionShape().isEmpty())mapCanvas.setSelectionShape(dynamicMapCanvas.getSelectionShape(),false);
+                mapCanvas.restoreSelectionBounds(dynamicMapCanvas.getSelectionBounds());
                 dynamicMapCanvas.cleanup();
                 
                 // 替换回原来的地图画布
@@ -2476,17 +2474,11 @@ public class MinecraftMapGUI extends JFrame {
     }
 
     private void repaintCanvases() {if(mapCanvas!=null) mapCanvas.repaint();if(dynamicMapCanvas!=null) dynamicMapCanvas.repaint();}
-    private String selectionToolHint(String tool){
-        if("Box".equals(tool))return overlays.addBoxMode
-            ?"Box + Add box ON: right-drag appends AABB (Alt/Ctrl+RMB also). Export uses union AABB."
-            :"Box: right drag replaces; Alt/Ctrl+right drag or Selection→Add box appends. Export uses union AABB.";
-        if("Chunk paint".equals(tool))return "Chunk paint: right drag paints 16×16; Shift+right drag erases. Export uses union AABB.";
-        return tool+": right drag; Shift+paint erases. Export uses union AABB.";
-    }
     private void addPreviewItem(JMenu menu,String title,String command,boolean selected) {
         JCheckBoxMenuItem item=new JCheckBoxMenuItem(title,selected);previewItems.put(command,item);menu.add(item);item.addActionListener(e->togglePreview(command));
     }
     private void togglePreview(String command) {
+        overlays.resetSelectionTool();
         boolean render=false;
         switch(command) {
             case "water":preview=new PreviewOptions(!preview.transparentWater,preview.cave,preview.biomeMode);render=true;break;
@@ -2502,10 +2494,9 @@ public class MinecraftMapGUI extends JFrame {
             case "hud":overlays.hud=!overlays.hud;break;
             case "ore":overlays.ore=!overlays.ore;break;
             case "pos":overlays.selectionMode="Box";overlays.posMode=!overlays.posMode;overlays.addBoxMode=false;mapCanvas.resetPosCorner();if(dynamicMapCanvas!=null) dynamicMapCanvas.resetPosCorner();break;
-            case "addbox":overlays.addBoxMode=!overlays.addBoxMode;overlays.selectionMode="Box";overlays.posMode=false;JCheckBoxMenuItem posItem=previewItems.get("pos");if(posItem!=null)posItem.setSelected(false);progressLabel.setText(selectionToolHint("Box"));break;
         }
-        String[] commands={"water","cave","night","contours","markers","gaps","scale","pos","addbox"};
-        boolean[] states={preview.transparentWater,preview.cave,overlays.night,overlays.contours,overlays.markers,overlays.gaps,overlays.scaleBar,overlays.posMode,overlays.addBoxMode};
+        String[] commands={"water","cave","night","contours","markers","gaps","scale","pos"};
+        boolean[] states={preview.transparentWater,preview.cave,overlays.night,overlays.contours,overlays.markers,overlays.gaps,overlays.scaleBar,overlays.posMode};
         for(int i=0;i<commands.length;i++) if(previewItems.containsKey(commands[i])) previewItems.get(commands[i]).setSelected(states[i]);
         if(biomeMenu!=null) biomeMenu.setText("Biomes: "+new String[]{"Surface","Tint composite","Biome overlay"}[preview.biomeMode]);
         if(render) {if(heightDebounce!=null) heightDebounce.stop();resetSurfaceView();}else repaintCanvases();
@@ -2549,6 +2540,7 @@ public class MinecraftMapGUI extends JFrame {
             boolean dimensionChanged=target!=null&&(currentDimension==null||!target.getId().equals(currentDimension.getId()));
             if(target!=null) switchDimension(target);
             // Restore the values immediately, including dimensions with no nearby cached tile.
+            overlays.resetSelectionTool();
             activeCanvas().restoreSelectionBounds(preset.bounds);
             if(preset.minY!=null) heightRangeSlider.setSelectedRange(preset.minY,preset.maxY);
             pendingPreset=preset;
@@ -2567,10 +2559,12 @@ public class MinecraftMapGUI extends JFrame {
         else if(mapCanvas.getImage()==null) return;
         SelectionPreset preset=pendingPreset;pendingPreset=null;
         activeCanvas().restoreSelectionBounds(preset.bounds);
-        if(!preset.shape.isEmpty())activeCanvas().setSelectionShape(preset.shape,false);
+        // Legacy shapes retain their file/model data, but the active selection is their union AABB.
+        overlays.resetSelectionTool();
         overlays.waypoints.replace(preset.waypoints);
         if(preset.minY!=null) heightRangeSlider.setSelectedRange(preset.minY,preset.maxY);
         jumpTo(preset.bounds.center());updateSelectionStats();
+        if(!preset.shape.isEmpty()) progressLabel.setText("Legacy preset shape loaded as a single inclusive AABB (including gaps and corners)");
     }
     private void exportView() {
         File file=chooseOutput("Export current map view","png");if(file==null) return;
@@ -2636,7 +2630,7 @@ public class MinecraftMapGUI extends JFrame {
             protected com.minecraft.selector.core.OverlayScan.Result doInBackground()throws Exception{return com.minecraft.selector.core.OverlayScan.scan(files,ore,filter,minY,maxY,()->isCancelled()||generation!=viewGeneration||revision!=p2ScanRevision,before);}
             protected void done(){if(isCancelled()||generation!=viewGeneration||revision!=p2ScanRevision)return;try{com.minecraft.selector.core.OverlayScan.Result result=get();
                 if(ore!=null){if(minY!=heightRangeSlider.getLowerValue()||maxY!=heightRangeSlider.getUpperValue()){progressLabel.setText("Import Y changed while scanning; run ore scan again");return;}overlays.oreCounts=java.util.Collections.unmodifiableMap(result.counts);overlays.ore=true;JCheckBoxMenuItem item=previewItems.get("ore");if(item!=null)item.setSelected(true);}
-                else if(!result.suggested.isEmpty()){if(canvas!=activeCanvas()||!java.util.Objects.equals(before,canvas.getSelectionBounds())||!beforeShape.equals(canvas.getSelectionShape().json())){progressLabel.setText("Selection changed while filtering; run suggestion again");return;}canvas.setSelectionShape(result.suggested,true);jumpTo(result.suggested.bounds().center());}
+                else if(!result.suggested.isEmpty()){if(canvas!=activeCanvas()||!java.util.Objects.equals(before,canvas.getSelectionBounds())||!beforeShape.equals(canvas.getSelectionShape().json())){progressLabel.setText("Selection changed while filtering; run suggestion again");return;}canvas.restoreSelectionBounds(result.suggested.bounds());jumpTo(result.suggested.bounds().center());}
                 progressLabel.setText("Scan: "+result.scanned+" chunks, "+result.failed+" unreadable; "+(ore!=null?result.counts.size()+" ore chunks":result.suggested.boxes().size()+" matching chunks"));repaintCanvases();
             }catch(Exception e){showFileError(e);}finally{p2ScanWorker=null;}}
         };p2ScanWorker.execute();
