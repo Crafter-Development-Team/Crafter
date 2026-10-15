@@ -35,6 +35,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.List;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.concurrent.*;
 import javax.swing.SwingWorker;
 
@@ -94,17 +95,18 @@ public class MinecraftMapGUI extends JFrame {
     private WorldPathResolver.DimensionInfo currentDimension;
     private boolean updatingDimensionDropdown = false;
     private JCheckBox autoLoadCheckbox;
-    private JCheckBoxMenuItem hideNetherRoofCheckbox;
-    private volatile MapRenderer.SurfaceMode surfaceMode = MapRenderer.SurfaceMode.AUTO;
+    private final MapRenderer.SurfaceMode surfaceMode = MapRenderer.SurfaceMode.TOP;
     private volatile long viewGeneration;
     private volatile long colorGeneration;
 
     private void resetSurfaceView() {
-        surfaceMode = hideNetherRoofCheckbox.isSelected() ? MapRenderer.SurfaceMode.AUTO : MapRenderer.SurfaceMode.TOP;
         // Height choices made during preparation apply when the first viewport is created:
         // the debounce must not invalidate the world loading worker.
         if(loadingPanel.getPhase()==LoadingPhasePanel.Phase.PREPARING) return;
-        cancelP2Scan();++viewGeneration;
+        cancelP2Scan();++viewGeneration;++liveGeneration;++cacheBuildGeneration;
+        final ViewRecipe previousView = lastView;
+        lastView=null;
+        synchronized(cacheBuildLock) {cacheBuildInFlight=false;}
         coordDisplayLabel.setText("X: —  Y: —  Z: —");
         dynamicMapManager.clear();
         mapCanvas.setImage(null);
@@ -115,8 +117,8 @@ public class MinecraftMapGUI extends JFrame {
         displayedTop = null;
         displayedBottom = null;
         if (isDynamicMode && dynamicRegionManager != null) {
-            if (dynamicRegionManager.getSurfaceMode() != surfaceMode || !dynamicRegionManager.getPreviewOptions().cacheKey().equals(preview.cacheKey())) {
-                // 去顶开关动了：模式变了，必须重建管理器
+            if (dynamicRegionManager.getSurfaceMode() != surfaceMode || dynamicRegionManager.getSampleInterval() != getLodLevel() || !dynamicRegionManager.getPreviewOptions().cacheKey().equals(preview.cacheKey())) {
+                // LOD 或预览模式变化，需要重建管理器并丢弃旧瓦片。
                 dynamicRegionManager.shutdown();
                 dynamicRegionManager = createDynamicRegionManager();
                 dynamicMapCanvas.setRegionManager(dynamicRegionManager);
@@ -125,6 +127,10 @@ public class MinecraftMapGUI extends JFrame {
                 dynamicRegionManager.setBand(heightRangeSlider.getUpperValue(), heightRangeSlider.getLowerValue());
                 dynamicMapCanvas.repaint();
             }
+        } else if (previousView != null && previousView.paths.length > 1) {
+            renderMultipleMcaFiles(Arrays.asList(previousView.paths), previousView.minRegionX, previousView.minRegionZ, 1);
+        } else if (previousView != null && previousView.paths.length == 1) {
+            renderMap(previousView.paths[0]);
         } else if (lastMcaPath != null) {
             renderMap(lastMcaPath);
         } else if (savePath != null) {
@@ -213,10 +219,12 @@ public class MinecraftMapGUI extends JFrame {
         final int minRegionX, minRegionZ, totalWidth, totalHeight;
         final MapRenderer.SurfaceMode mode;
         final PreviewOptions preview;
+        final int sampleInterval;
         final BlockColors.Palette palette;
 
         ViewRecipe(java.util.List<String> paths, java.util.List<int[]> coords, int minRegionX, int minRegionZ,
-                   int totalWidth, int totalHeight, MapRenderer.SurfaceMode mode, BlockColors.Palette palette,PreviewOptions preview) {
+                   int totalWidth, int totalHeight, MapRenderer.SurfaceMode mode, BlockColors.Palette palette,PreviewOptions preview,int sampleInterval) {
+            this.sampleInterval=sampleInterval;
             this.preview=preview;
             this.paths = paths.toArray(new String[0]);
             this.regionX = new int[coords.size()];
@@ -246,6 +254,10 @@ public class MinecraftMapGUI extends JFrame {
      */
     private boolean resurfaceFromCache(boolean allowBuild) {
         final ViewRecipe recipe = lastView;
+        if (recipe != null && recipe.sampleInterval > 1) {
+            noteLiveDecline("coarse LOD - re-render on band change");
+            return false;
+        }
         if (recipe == null) {
             noteLiveDecline("no view recipe yet");
             return false;
@@ -341,10 +353,11 @@ public class MinecraftMapGUI extends JFrame {
      * 把当前视图用到的 region 扫一遍层缓存（等于一次整列扫描）。渲染一结束就在后台预热，
      * 这样用户开始拖 Y 带时缓存已经在手上，拖动才是真的实时。
      *
-     * <p>force=true 用于调色板换过之后重建；下界去顶这类扫不出缓存的 region 会记住失败，
+     * <p>force=true 用于调色板换过之后重建；洞穴视图这类扫不出缓存的 region 会记住失败，
      * 不会在每次拖动时反复重扫。
      */
     private void ensureColumnCaches(final ViewRecipe recipe, boolean force) {
+        if(recipe.sampleInterval>1) return;
         synchronized (cacheBuildLock) {
             if (cacheBuildInFlight && cacheBuildRecipe == recipe && !force) return;
             if (!force && cacheBuildFailed == recipe) return;
@@ -376,13 +389,13 @@ public class MinecraftMapGUI extends JFrame {
                         renderer.shutdown();
                     }
                     if (cache == null) {
-                        // 下界去顶的 region：判定依赖扫描窗口，不缓存
+                        // 洞穴视图：判定依赖扫描窗口，不缓存
                         synchronized (cacheBuildLock) {
                             if (generation == cacheBuildGeneration) cacheBuildFailed = recipe;
                         }
-                        ybandState("unavailable (nether roof view)");
-                        logManager.info("Y-band cache: skipped (nether roof mode) " + path, "MinecraftMapGUI");
-                        SwingUtilities.invokeLater(() -> progressLabel.setText("Y-band live unavailable (nether roof view)"));
+                        ybandState("unavailable (cave view)");
+                        logManager.info("Y-band cache: skipped (cave mode) " + path, "MinecraftMapGUI");
+                        SwingUtilities.invokeLater(() -> progressLabel.setText("Y-band live unavailable (cave view)"));
                         return;
                     }
                     SwingUtilities.invokeLater(() -> {
@@ -436,7 +449,7 @@ public class MinecraftMapGUI extends JFrame {
             coords.add(new int[]{region.x, region.y});
         }
         ViewRecipe recipe = new ViewRecipe(paths, coords, worldOrigin.x / 512, worldOrigin.y / 512,
-            combinedImage.getWidth(), combinedImage.getHeight(), surfaceMode, BlockColors.snapshot(),preview);
+            combinedImage.getWidth(), combinedImage.getHeight(), surfaceMode, BlockColors.snapshot(),preview,getLodLevel());
         lastView = recipe;
         mapImage = combinedImage;
         sourceTop = top;
@@ -567,6 +580,7 @@ public class MinecraftMapGUI extends JFrame {
      * 只处理上界不变的情形；上界一动必须靠层缓存。返回 true 表示显示图已对应当前这条带。
      */
     private boolean previewFromSource() {
+        if(lastView!=null && lastView.sampleInterval>1) return false;
         RenderedMap source = mapImage instanceof RenderedMap ? (RenderedMap) mapImage : null;
         if (source == null || sourceTop == null || sourceBottom == null) return false;
         final int top = heightRangeSlider.getUpperValue(), bottom = heightRangeSlider.getLowerValue();
@@ -615,9 +629,9 @@ public class MinecraftMapGUI extends JFrame {
      */
     private boolean requestExactWhenReady() {
         ViewRecipe recipe = lastView;
-        if (recipe == null) return false;
+        if (recipe == null || recipe.sampleInterval>1) return false;
         synchronized (cacheBuildLock) {
-            if (cacheBuildFailed == recipe) return false;                 // 这个视图没有缓存可用（下界去顶）
+            if (cacheBuildFailed == recipe) return false;                 // 这个视图没有缓存可用（如洞穴视图）
             if (!cacheBuildInFlight || cacheBuildRecipe != recipe) return false;
         }
         pendingExactRefresh = true;
@@ -857,6 +871,8 @@ public class MinecraftMapGUI extends JFrame {
         };
         lodDropdown = new JComboBox<>(lodOptions);
         lodDropdown.setSelectedIndex(0);
+        lodDropdown.setToolTipText("Preview sampling; >1 gives approximate pixels and hover heights. Auto: 1 / 2 / 4 / 8 by file count.");
+        lodDropdown.addActionListener(e -> resetSurfaceView());
 
         // MCA文件范围下拉框
         mcaRangeDropdown = new JComboBox<>(new String[]{"1x1 (1 file)", "3x3 (9 files)", "5x5 (25 files)", "7x7 (49 files)"});
@@ -872,10 +888,6 @@ public class MinecraftMapGUI extends JFrame {
 
         // 自动加载复选框 - 使用样式化复选框
         autoLoadCheckbox = new JCheckBox("Enable auto-load", true);
-
-        hideNetherRoofCheckbox = new JCheckBoxMenuItem("Hide Nether roof", true);
-        hideNetherRoofCheckbox.setToolTipText("Show the surface below a bedrock ceiling; uncheck to see the roof and builds above it");
-        hideNetherRoofCheckbox.addActionListener(e -> resetSurfaceView());
 
         // 按钮 - 使用新的图标和样式
         // renderButton 已删除
@@ -1063,7 +1075,7 @@ public class MinecraftMapGUI extends JFrame {
     private DynamicRegionManager createDynamicRegionManager() {
         final long request=viewGeneration;
         final DynamicRegionManager manager=new DynamicRegionManager(savePath,getCurrentRegionDir(),surfaceMode,
-            heightRangeSlider.getUpperValue(),heightRangeSlider.getLowerValue(),preview);
+            heightRangeSlider.getUpperValue(),heightRangeSlider.getLowerValue(),preview,getLodLevel());
         showMapLoadingDelayed(request,"Loading visible map regions...");
         manager.addRegionLoadListener(new DynamicRegionManager.RegionLoadListener() {
             public void onRegionLoaded(Point point,DynamicRegionManager.RegionTile tile) {onEdt(()->{if(request==viewGeneration&&manager==dynamicRegionManager) updateSelectionStats();});}
@@ -1195,7 +1207,6 @@ public class MinecraftMapGUI extends JFrame {
         addMenuItem(fileMenu, "Exit", e -> System.exit(0), null, null);
         menuBar.add(fileMenu);
         JMenu viewMenu = new JMenu("View");
-        viewMenu.add(hideNetherRoofCheckbox);
         gridMenuItem=addMenuItem(viewMenu,"Map grid: Off",e->cycleGrid(),null,"G: Off / Chunk / Chunk+Region");
         addPreviewItem(viewMenu,"Transparent water","water",false);
         addPreviewItem(viewMenu,"Cave floor below Top Y","cave",false);
@@ -1267,6 +1278,8 @@ public class MinecraftMapGUI extends JFrame {
         // ── Dimension ──
         bar.add(new JLabel("Dimension:"));
         bar.add(dimensionDropdown);
+        bar.add(new JLabel("LOD:"));
+        bar.add(lodDropdown);
         bar.add(new JSeparator(SwingConstants.VERTICAL));
 
         // ── 操作按钮 ──
@@ -1311,14 +1324,28 @@ public class MinecraftMapGUI extends JFrame {
      * 获取LOD级别
      */
     private int getLodLevel() {
-        String selected = (String) lodDropdown.getSelectedItem();
-        if (selected.contains("1 (")) return 1;
-        if (selected.contains("2 (")) return 2;
-        if (selected.contains("4 (")) return 4;
-        if (selected.contains("8 (")) return 8;
-        return 1; // 默认或自动
+        if(savePath==null) return getLodLevel(1);
+        File[] files=getCurrentRegionDir().listFiles((dir,name) -> name.matches("r\\.-?\\d+\\.-?\\d+\\.mca"));
+        int count=0;
+        if(files!=null) for(File file:files) if(file.length()>0) count++;
+        return getLodLevel(count);
     }
-    
+
+    private int getLodLevel(int fileCount) {
+        return resolveLodLevel((String)lodDropdown.getSelectedItem(),fileCount);
+    }
+
+    // Kept independent of JFrame construction for headless policy regression tests.
+    static int resolveLodLevel(String selected,int fileCount) {
+        if(selected!=null) {
+            if(selected.startsWith("1 (")) return 1;
+            if(selected.startsWith("2 (")) return 2;
+            if(selected.startsWith("4 (")) return 4;
+            if(selected.startsWith("8 (")) return 8;
+        }
+        return fileCount<=1?1:fileCount<=9?2:fileCount<=25?4:8;
+    }
+
     /**
      * 当前维度对应的 region 目录
      */
@@ -1362,7 +1389,7 @@ public class MinecraftMapGUI extends JFrame {
         if (currentDimension != null && dim.getId().equals(currentDimension.getId())) return;
         if (savePath == null) return;
 
-        currentDimension = dim;overlays.dimension=dim.getId();lastMcaPath=null;
+        currentDimension = dim;overlays.dimension=dim.getId();lastMcaPath=null;lastView=null;
         mapCanvas.resetSelection();if(dynamicMapCanvas!=null) dynamicMapCanvas.resetSelection();
         cancelP2Scan();++viewGeneration;
         dynamicMapManager.clear();
@@ -1732,6 +1759,7 @@ displayedTop=null;displayedBottom=null;sourceTop=null;sourceBottom=null;previewC
      * 渲染多个MCA文件
      */
     private void renderMultipleMcaFiles(java.util.List<String> mcaFiles, int startRegionX, int startRegionZ, int gridSize) {
+        final int requestedSampleInterval=getLodLevel(mcaFiles.size());
         showMapLoadingDelayed(viewGeneration,"Loading map regions...");
         final long requestGeneration = viewGeneration;
         final MapRenderer.SurfaceMode requestedMode = surfaceMode;
@@ -1739,6 +1767,7 @@ displayedTop=null;displayedBottom=null;sourceTop=null;sourceBottom=null;previewC
         final Integer requestedTop=heightRangeSlider.getUpperValue();
         final Integer requestedBottom=heightRangeSlider.getLowerValue();
         SwingWorker<BufferedImage, Void> worker = new SwingWorker<BufferedImage, Void>() {
+            private ViewRecipe renderedView;
             @Override
             protected BufferedImage doInBackground() throws Exception {
                 // 创建进度回调
@@ -1806,8 +1835,8 @@ displayedTop=null;displayedBottom=null;sourceTop=null;sourceBottom=null;previewC
                         int[] coord = regionCoords.get(mcaFile);
                         if (coord != null) { viewPaths.add(mcaFile); viewCoords.add(coord); }
                     }
-                    lastView = new ViewRecipe(viewPaths, viewCoords, minRegionX, minRegionZ, totalWidth, totalHeight,
-                        requestedMode, BlockColors.snapshot(),requestedPreview);
+                    renderedView = new ViewRecipe(viewPaths, viewCoords, minRegionX, minRegionZ, totalWidth, totalHeight,
+                        requestedMode, BlockColors.snapshot(),requestedPreview,requestedSampleInterval);
 
                     // 创建大图像
                     RenderedMap combinedImage = new RenderedMap(totalWidth, totalHeight);
@@ -1834,7 +1863,7 @@ displayedTop=null;displayedBottom=null;sourceTop=null;sourceBottom=null;previewC
 
                             // 渲染单个区域：顺带把层缓存建出来，渲染完就能实时换 Y 带
                             MapRenderer.RegionScan scan = renderer.scanRegionBlocks(mcaFile, 32,
-                                requestedTop, requestedBottom, true, highlightBandTop());   // 顺手建缓存 + 兴趣带标记
+                                requestedTop, requestedBottom, true, highlightBandTop(),requestedSampleInterval);   // 顺手建缓存 + 兴趣带标记
                             if (scan.cache != null) stashColumnCache(mcaFile, scan.cache, scan.palette);
                             BufferedImage regionImage = scan.image();
                             if (regionImage != null) {
@@ -1871,6 +1900,7 @@ displayedTop=null;displayedBottom=null;sourceTop=null;sourceBottom=null;previewC
                 try {
                     BufferedImage image = get();
                     if (image != null) {
+                        lastView = renderedView;
                         mapImage = image;
                         sourceTop = requestedTop;
                         sourceBottom = requestedBottom;
@@ -1878,7 +1908,7 @@ displayedTop=null;displayedBottom=null;sourceTop=null;sourceBottom=null;previewC
                         displayedTop = requestedTop;
                         displayedBottom = requestedBottom;
                         displayApproximate = false;
-                        ybandState("rendered - preparing cache");
+                        ybandState(requestedSampleInterval>1?"coarse preview (LOD "+requestedSampleInterval+")":"rendered - preparing cache");
                         mapCanvas.setImage(image); // 手动渲染时不重置视图
                         if (lastView != null) ensureColumnCaches(lastView, false);   // 渲染一结束就在后台预热层缓存
 
@@ -1929,7 +1959,7 @@ displayedTop=null;displayedBottom=null;sourceTop=null;sourceBottom=null;previewC
         cancelP2Scan();++viewGeneration;++colorGeneration;
         if(dynamicRegionManager!=null) {dynamicRegionManager.shutdown();dynamicRegionManager=null;}
         if(isDynamicMode) disableDynamicMode();
-        savePath=null;worldAnchors=WorldAnchors.empty();overlays.anchors=worldAnchors;overlays.dimension="minecraft:overworld";currentDimension=null;availableDimensions=new ArrayList<>();refreshDimensionDropdown();mapCanvas.resetSelection();lastMcaPath=mcaFilePath;currentRegion=null;
+        lastView=null;savePath=null;worldAnchors=WorldAnchors.empty();overlays.anchors=worldAnchors;overlays.dimension="minecraft:overworld";currentDimension=null;availableDimensions=new ArrayList<>();refreshDimensionDropdown();mapCanvas.resetSelection();lastMcaPath=mcaFilePath;currentRegion=null;
         String[] regionParts=new File(mcaFilePath).getName().split("\\.");
         if(regionParts.length==4) try {currentRegion=new Point(Integer.parseInt(regionParts[1]),Integer.parseInt(regionParts[2]));}
         catch(NumberFormatException ignored) {currentRegion=null;}
@@ -1945,6 +1975,7 @@ displayedTop=null;displayedBottom=null;sourceTop=null;sourceBottom=null;previewC
      * 渲染地图
      */
     private void renderMap(String regionPath) {
+        final int requestedSampleInterval=getLodLevel(1);
         final ResourceOptions requestedResources=colorResources.copy();
         final boolean needsResources=regionPath.equals(lastMcaPath) && !regionPath.equals(singleResourcePath);
         final BlockColors.Palette requestedPalette=BlockColors.snapshot();
@@ -1954,6 +1985,7 @@ displayedTop=null;displayedBottom=null;sourceTop=null;sourceBottom=null;previewC
         final Integer requestedTop=heightRangeSlider.getUpperValue();
         final Integer requestedBottom=heightRangeSlider.getLowerValue();
         SwingWorker<BufferedImage, Void> worker = new SwingWorker<BufferedImage, Void>() {
+            private ViewRecipe renderedView;
             private BlockColors.Palette renderedPalette=requestedPalette;
             @Override
             protected BufferedImage doInBackground() throws Exception {
@@ -1983,9 +2015,9 @@ displayedTop=null;displayedBottom=null;sourceTop=null;sourceBottom=null;previewC
                 };
 
                 // 记下这张图的拼法：换 Y 带时用层缓存在内存里重拼
-                lastView = new ViewRecipe(java.util.Collections.singletonList(regionPath),
+                renderedView = new ViewRecipe(java.util.Collections.singletonList(regionPath),
                     java.util.Collections.singletonList(new int[]{0, 0}), 0, 0, 512, 512,
-                    requestedMode, renderedPalette,requestedPreview);
+                    requestedMode, renderedPalette,requestedPreview,requestedSampleInterval);
 
                 // 创建地图渲染器
                 int maxWorkers = Math.min(Runtime.getRuntime().availableProcessors(), 4); // GUI模式使用较少线程
@@ -1994,7 +2026,7 @@ displayedTop=null;displayedBottom=null;sourceTop=null;sourceBottom=null;previewC
                 try {
                     // 渲染区块：顺带把层缓存建出来，渲染完就能实时换 Y 带
                     MapRenderer.RegionScan scan = renderer.scanRegionBlocks(regionPath, 32,
-                        requestedTop, requestedBottom, true, highlightBandTop());
+                        requestedTop, requestedBottom, true, highlightBandTop(),requestedSampleInterval);
                     if (scan.cache != null) stashColumnCache(regionPath, scan.cache, scan.palette);
                     BufferedImage image = scan.image();
 
@@ -2027,6 +2059,7 @@ displayedTop=null;displayedBottom=null;sourceTop=null;sourceBottom=null;previewC
                            || requestedMode!=surfaceMode) {
                             resetSurfaceView();return;
                         }
+                        lastView = renderedView;
                         mapImage = image;
                         sourceTop = requestedTop;
                         sourceBottom = requestedBottom;
@@ -2034,7 +2067,7 @@ displayedTop=null;displayedBottom=null;sourceTop=null;sourceBottom=null;previewC
                         displayedTop = requestedTop;
                         displayedBottom = requestedBottom;
                         displayApproximate = false;
-                        ybandState("rendered - preparing cache");
+                        ybandState(requestedSampleInterval>1?"coarse preview (LOD "+requestedSampleInterval+")":"rendered - preparing cache");
                         mapCanvas.setImage(image); // 手动渲染时不重置视图
                         if (lastView != null) ensureColumnCaches(lastView, false);   // 渲染一结束就在后台预热层缓存
 
@@ -2320,6 +2353,7 @@ displayedTop=null;displayedBottom=null;sourceTop=null;sourceBottom=null;previewC
      * 在后台加载区域 - 优化版本 (Java 8兼容)
      */
     private void loadRegionInBackground(int regionX, int regionZ) {
+        final int requestedSampleInterval=getLodLevel();
         final long requestGeneration = viewGeneration;
         final File requestedRegionDir = getCurrentRegionDir();
         final MapRenderer.SurfaceMode requestedMode = surfaceMode;
@@ -2360,7 +2394,7 @@ displayedTop=null;displayedBottom=null;sourceTop=null;sourceBottom=null;previewC
             try {
                 // 渲染整个区域 (32x32区块 = 512x512方块)：平移加载时也顺手把该 region 的层缓存建好
                 MapRenderer.RegionScan scan = renderer.scanRegionBlocks(regionPath.getAbsolutePath(), 32,
-                    requestedTop, requestedBottom, true, highlightBandTop());
+                    requestedTop, requestedBottom, true, highlightBandTop(),requestedSampleInterval);
                 if (scan.cache != null) stashColumnCache(regionPath.getAbsolutePath(), scan.cache, scan.palette);
                 BufferedImage regionImage = scan.image();
                 if (regionImage != null) {
@@ -2446,30 +2480,7 @@ displayedTop=null;displayedBottom=null;sourceTop=null;sourceBottom=null;previewC
      * 重新渲染当前视图
      */
     private void reRenderCurrentView() {
-        if(isDynamicMode && dynamicRegionManager!=null) {
-            resetSurfaceView();return;
-        }
-        if (dynamicMapManager == null) return;
-
-        // 清除当前所有区域
-        dynamicMapManager.clear();
-        mapCanvas.setImage(null);
-
-        // 重新启动自动加载
-        if (autoLoadCheckbox.isSelected()) {
-            progressLabel.setText("Re-rendering current view...");
-
-            // 触发视野更新，重新加载区域
-            SwingUtilities.invokeLater(() -> {
-                if (mapCanvas != null) {
-                    // 强制更新视野
-                    mapCanvas.forceViewportUpdate();
-                }
-                progressLabel.setText("Reloading regions...");
-            });
-        } else {
-            progressLabel.setText("Please enable auto-load first");
-        }
+        resetSurfaceView();
     }
 
     /**
@@ -2641,6 +2652,8 @@ displayedTop=null;displayedBottom=null;sourceTop=null;sourceBottom=null;previewC
      * 渲染所有可用的区域
      */
     private void renderAllAvailableRegions() {
+        final File requestedRegionDir=getCurrentRegionDir();
+        final String requestedLod=(String)lodDropdown.getSelectedItem();
         final long requestGeneration = viewGeneration;
         final MapRenderer.SurfaceMode requestedMode = surfaceMode;
         final PreviewOptions requestedPreview=preview;
@@ -2657,10 +2670,11 @@ displayedTop=null;displayedBottom=null;sourceTop=null;sourceBottom=null;previewC
         logManager.info("Start scanning all available regions", "MinecraftMapGUI");
         
         SwingWorker<BufferedImage, Void> worker = new SwingWorker<BufferedImage, Void>() {
+            private ViewRecipe renderedView;
             @Override
             protected BufferedImage doInBackground() throws Exception {
                 // 扫描所有可用的区域文件
-                File regionDir = WorldPathResolver.getOverworldRegionDir(savePath);
+                File regionDir = requestedRegionDir;
                 if (!regionDir.exists()) {
                     logManager.error("Region dir does not exist: " + regionDir.getAbsolutePath(), "MinecraftMapGUI");
                     return null;
@@ -2725,6 +2739,9 @@ displayedTop=null;displayedBottom=null;sourceTop=null;sourceBottom=null;previewC
                         validMcaFiles.size(), totalWidth, totalHeight));
                 });
                 
+                final int requestedSampleInterval=resolveLodLevel(requestedLod,validMcaFiles.size());
+                renderedView=new ViewRecipe(validMcaFiles,coordsOf(validMcaFiles,regionCoords),regionBounds[0],regionBounds[2],
+                    totalWidth,totalHeight,requestedMode,BlockColors.snapshot(),requestedPreview,requestedSampleInterval);
                 // 创建大图像
                 RenderedMap combinedImage = new RenderedMap(totalWidth, totalHeight);
                 Graphics2D g2d = combinedImage.createGraphics();
@@ -2781,9 +2798,10 @@ displayedTop=null;displayedBottom=null;sourceTop=null;sourceBottom=null;previewC
                             });
                             
                             // 渲染单个区域
-                            MapRenderer.BlockInfo[][] topBlocks = renderer.getTopBlocks(mcaFile, 32, 1);
-                            if (topBlocks != null) {
-                                BufferedImage regionImage = renderer.renderToPng(topBlocks, 1);
+                            MapRenderer.RegionScan scan=renderer.scanRegionBlocks(mcaFile,32,requestedTop,requestedBottom,
+                                false,highlightBandTop(),requestedSampleInterval);
+                            if (scan != null) {
+                                BufferedImage regionImage = scan.image();
                                 if (regionImage != null) {
                                     // 计算在大图像中的正确位置
                                     int offsetX = (regionX - regionBounds[0]) * 512;
@@ -2828,7 +2846,7 @@ displayedTop=null;displayedBottom=null;sourceTop=null;sourceBottom=null;previewC
                     BufferedImage result = get();
                     if (result != null) {
                         mapImage = result;
-                        lastView = null; // 全区域渲染的拼法不在 recipe 里，实时路径让位
+                        lastView = renderedView;
                         sourceTop = requestedTop;
                         sourceBottom = requestedBottom;
                         previewCut = false;

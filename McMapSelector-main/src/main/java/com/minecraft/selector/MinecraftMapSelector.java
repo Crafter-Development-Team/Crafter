@@ -620,7 +620,7 @@ public class MinecraftMapSelector {
         System.out.println("  [输出图像文件路径]   可选，默认为<区域名>_map_<时间戳>.png");
         System.out.println("  [线程数]            可选，默认为CPU核心数或8（取较小值）");
         System.out.println("  [区域大小]          可选，以区块为单位，默认32（即32x32区块）");
-        System.out.println("  [表面模式]          最后可选参数 AUTO / TOP / NETHER_INTERIOR，默认 AUTO（下界去顶床）");
+        System.out.println("  [表面模式]          最后可选参数 AUTO / TOP，默认 AUTO（所有维度均取顶部表面）");
         System.out.println("  [采样间隔]          可选，每隔多少个方块采样一次，默认1（全采样）");
         System.out.println();
         System.out.println("示例:");
