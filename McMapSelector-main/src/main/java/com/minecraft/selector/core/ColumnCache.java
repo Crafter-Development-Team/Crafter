@@ -10,8 +10,6 @@ import java.util.Collections;
  * 压制后典型的泥土/石头柱子只剩几段，所以换带时既能精确复现带内的合成结果，
  * 又不会因为逐层保存而爆内存。
  *
- * <p>下界去顶（hideRoof）的列不在这里：那条分支的 roof/cavity 判定依赖扫描窗口本身，
- * {@link MapRenderer#scanRegion} 对这类 region 直接返回 null，由调用方回落到全量渲染。
  */
 public final class ColumnCache {
     private final int size;

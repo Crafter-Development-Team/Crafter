@@ -150,19 +150,19 @@ class BlockColorsTest {
             assertEquals("stone",blocks[0][8].getBlockId());assertEquals(0,map.getHeightAt(8,0));
         } finally {renderer.shutdown();}
     }
-    @Test void explicitSliceKeepsNetherInteriorAndHonoursBandBottom() throws Exception {
+    @Test void explicitSliceUsesTopSurfaceAndHonoursBandBottom() throws Exception {
         HeightmapTest h=new HeightmapTest();h.directory=directory;
         Path path=h.mca("DIM-1/region/r.0.0.mca",h.section(40,true,new String[]{"minecraft:stone"},i->0),
             h.section(7,false,new String[]{"minecraft:bedrock"},i->0),h.section(-8,false,new String[]{"minecraft:dirt"},i->0));
         // Y 带只取 640..650: 天花板在带外, 按普通表面返回带顶那块石头
         MapRenderer band=new MapRenderer(1,null,MapRenderer.SurfaceMode.AUTO,650,640);
-        // 只给上界(无带底): 下界去顶床仍然生效, 返回天花板之下的方块
+        // 只给上界(无带底): 所有维度均返回带内顶部表面
         MapRenderer openBottom=new MapRenderer(1,null,MapRenderer.SurfaceMode.AUTO,650);
         // 上界压到天花板以下: 照常按普通表面取
         MapRenderer below=new MapRenderer(1,null,MapRenderer.SurfaceMode.AUTO,-120);
         try {
             assertEquals(650,band.getTopBlocks(path.toString(),1,1)[0][0].getHeight());
-            assertEquals(-113,openBottom.getTopBlocks(path.toString(),1,1)[0][0].getHeight());
+            assertEquals(650,openBottom.getTopBlocks(path.toString(),1,1)[0][0].getHeight());
             assertEquals(-120,below.getTopBlocks(path.toString(),1,1)[0][0].getHeight());
         } finally {band.shutdown();openBottom.shutdown();below.shutdown();}
     }

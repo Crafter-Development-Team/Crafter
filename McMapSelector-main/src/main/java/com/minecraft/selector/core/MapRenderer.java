@@ -65,7 +65,8 @@ public class MapRenderer {
         @Override public String toString() {return formatState()+"@"+height;}
     }
     
-    public enum SurfaceMode { AUTO, TOP, NETHER_INTERIOR }
+    /** AUTO is a compatibility alias for TOP in every dimension. */
+    public enum SurfaceMode { AUTO, TOP }
     public static final BlockInfo EMPTY = new BlockInfo("air", RenderedMap.NO_HEIGHT);
     public static final BlockInfo LOADED_EMPTY=new BlockInfo("air",RenderedMap.NO_HEIGHT);
     private final PreviewOptions preview;
@@ -73,13 +74,6 @@ public class MapRenderer {
     private final BlockColors.Palette scanPalette;
     private final Integer clipY;
     private final Integer clipMinY;
-
-    public static boolean isNetherRegion(String path) {
-        for (File part = new File(path).getAbsoluteFile(); part != null; part = part.getParentFile()) {
-            if ("DIM-1".equals(part.getName()) || "the_nether".equals(part.getName())) return true;
-        }
-        return false;
-    }
 
     private final ExecutorService executorService;
     private final int maxWorkers;
@@ -144,9 +138,6 @@ public class MapRenderer {
     public BlockInfo[][] getTopBlocks(String mcaFilePath, int regionSize, int sampleInterval) throws IOException {
         if (regionSize < 1 || regionSize > 32 || sampleInterval < 1 || sampleInterval > 16)
             throw new IllegalArgumentException("regionSize must be 1..32 and sampleInterval 1..16");
-        // 上界裁剪不再关闭下界去顶：否则一旦框了 Y 带就永远看不到下界内部。
-        final boolean hideRoof = surfaceMode == SurfaceMode.NETHER_INTERIOR ||
-            (surfaceMode == SurfaceMode.AUTO && isNetherRegion(mcaFilePath));
         com.minecraft.selector.utils.LogManager.getInstance().info("Scanning region: "+new File(mcaFilePath).getName(),"MapRenderer");
         System.out.println("正在处理区域文件: " + mcaFilePath);
         System.out.println("区域大小: " + regionSize + "x" + regionSize + " 区块");
@@ -206,7 +197,7 @@ public class MapRenderer {
             final List<int[]> batch = batches.get(i);
 
             Future<Map<String, BlockInfo[][]>> future = executorService.submit(() ->
-                processChunkBatch(region, batch, batchIndex, sampleInterval, hideRoof)
+                processChunkBatch(region, batch, batchIndex, sampleInterval)
             );
             futures.add(future);
         }
@@ -263,12 +254,11 @@ public class MapRenderer {
     
     /**
      * 扫一个 region，留下每列的可见层（按"无 Y 带"收集），之后换 Y 带只做内存重合成。
-     * 下界去顶的 region（NETHER_INTERIOR，或 AUTO 下的下界路径）返回 null：那条分支的
-     * roof/cavity 判定依赖扫描窗口本身，不能靠过滤层栈复现，调用方回落到全量渲染。
+     * 所有维度使用同样的层缓存；洞穴视图依赖扫描窗口，返回 null 并回落到全量渲染。
      */
     public ColumnCache scanRegion(String mcaFilePath,int regionSize) throws IOException {
         if(regionSize<1||regionSize>32) throw new IllegalArgumentException("regionSize must be 1..32");
-        if(preview.cave || surfaceMode==SurfaceMode.NETHER_INTERIOR || (surfaceMode==SurfaceMode.AUTO && isNetherRegion(mcaFilePath))) return null;
+        if(preview.cave) return null;
 
         long start=System.currentTimeMillis();
         Region region = Region.fromFile(mcaFilePath);
@@ -368,7 +358,7 @@ public class MapRenderer {
 
     /** 一次整列扫描的产物：当前 Y 带的结果 + 换带用的层缓存 + 本次用的调色板。 */
     public static final class RegionScan {
-        public final ColumnCache cache;            // null = 该 region 不可缓存（下界去顶）
+        public final ColumnCache cache;            // null = 不使用层缓存（如洞穴视图或粗 LOD）
         public final BlockColors.Palette palette;
         private final MapRenderer renderer;
         private final BlockInfo[][] blocksFallback;
@@ -418,11 +408,28 @@ public class MapRenderer {
     /** highlightTop 非空时，返回的图会带上"上界之上、highlightTop 之下有方块"的逐像素标记。 */
     public RegionScan scanRegionBlocks(String mcaFilePath,int regionSize,Integer bandTop,Integer bandBottom,
                                        boolean allowCache,Integer highlightTop) throws IOException {
-        ColumnCache cache=allowCache?scanRegion(mcaFilePath,regionSize):null;
+        return scanRegionBlocks(mcaFilePath,regionSize,bandTop,bandBottom,allowCache,highlightTop,1);
+    }
+
+    /** Coarse previews keep pixel and height samples aligned and bypass the full-resolution cache. */
+    public RegionScan scanRegionBlocks(String mcaFilePath,int regionSize,Integer bandTop,Integer bandBottom,
+                                       boolean allowCache,Integer highlightTop,int sampleInterval) throws IOException {
+        if(sampleInterval<1||sampleInterval>16) throw new IllegalArgumentException("sampleInterval must be 1..16");
+        ColumnCache cache=allowCache && sampleInterval==1?scanRegion(mcaFilePath,regionSize):null;
         if(cache==null) {
-            BlockInfo[][] blocks=getTopBlocks(mcaFilePath,regionSize,1);
-            return new RegionScan(null,scanPalette,this,blocks,(RenderedMap)renderToPng(blocks,1),
-                bandTop,bandBottom,highlightTop);
+            BlockInfo[][] blocks=getTopBlocks(mcaFilePath,regionSize,sampleInterval);
+            RenderedMap image=(RenderedMap)renderToPng(blocks,sampleInterval);
+            if(highlightTop!=null && (bandTop==null || highlightTop>bandTop)) {
+                // The purple interest band still uses the same coarse sample grid.
+                MapRenderer above=new MapRenderer(maxWorkers,null,SurfaceMode.TOP,highlightTop,
+                    bandTop==null?null:bandTop+1,scanPalette,new PreviewOptions(false,false,preview.biomeMode));
+                try {
+                    BlockInfo[][] high=above.getTopBlocks(mcaFilePath,regionSize,sampleInterval);
+                    for(int z=0;z<high.length;z++) for(int x=0;x<high[z].length;x++)
+                        image.setHighlighted(x,z,high[z][x]!=null && high[z][x].height!=RenderedMap.NO_HEIGHT);
+                } finally {above.shutdown();}
+            }
+            return new RegionScan(null,scanPalette,this,blocks,image,bandTop,bandBottom,highlightTop);
         }
         return new RegionScan(cache,scanPalette,this,null,null,bandTop,bandBottom,highlightTop);
     }
@@ -431,7 +438,7 @@ public class MapRenderer {
      * 处理一批区块
      */
     private Map<String, BlockInfo[][]> processChunkBatch(Region region, List<int[]> chunkCoords,
-                                                     int threadId, int sampleInterval, boolean hideRoof) {
+                                                     int threadId, int sampleInterval) {
         Map<String, BlockInfo[][]> results = new HashMap<>();
         Set<String> localFoundBlocks = new HashSet<>();
 
@@ -443,7 +450,7 @@ public class MapRenderer {
             try {
                 Chunk chunk = region.getChunk(chunkX, chunkZ);
                 if (chunk != null) {
-                    BlockInfo[][] chunkBlocks = processChunk(chunk, localFoundBlocks, sampleInterval, hideRoof);
+                    BlockInfo[][] chunkBlocks = processChunk(chunk, localFoundBlocks, sampleInterval);
                     results.put(chunkX + "," + chunkZ, chunkBlocks);
                 } else {
                     results.put(chunkX + "," + chunkZ, null);
@@ -471,35 +478,32 @@ public class MapRenderer {
      * 处理单个区块，提取顶部方块 - 优化版
      */
     private BlockInfo[][] processChunk(Chunk chunk, Set<String> localFoundBlocks,
-                                       int sampleInterval, boolean hideRoof) {
+                                       int sampleInterval) {
         BlockInfo[][] columns = new BlockInfo[16][16];
         for (BlockInfo[] row : columns) Arrays.fill(row, LOADED_EMPTY);
         List<Chunk.Section> sections = chunk.getSections();
         sections.sort(Comparator.comparingInt(Chunk.Section::getY).reversed());
         Set<Chunk.Section> airSections = new HashSet<>();
-        boolean hasRoofCandidate = false;
         for (Chunk.Section section : sections) {
             List<Block> palette = section.getPalette();
             if (palette.isEmpty() || palette.stream().allMatch(block -> BlockColors.isAirBlock(block.getId())))
                 airSections.add(section);
-            if (section.getY() >= 2 && palette.stream().anyMatch(block -> "bedrock".equals(block.getId())))
-                hasRoofCandidate = true;
         }
         for (int z = 0; z < 16; z += sampleInterval) {
             for (int x = 0; x < 16; x += sampleInterval) {
-                BlockInfo top = findSurface(chunk, sections, airSections, x, z, hideRoof && hasRoofCandidate);
+                BlockInfo top = findSurface(chunk, sections, airSections, x, z);
                 if(top!=EMPTY) {
                     top.biome=chunk.getBiome(x,top.height,z);
-                    int[] fit=fitHeights(chunk,sections,x,z,hideRoof&&hasRoofCandidate,top.height);
+                    int[] fit=fitHeights(chunk,sections,x,z,top.height);
                     top.opaqueHeight=fit[0];top.dryHeight=fit[1];
                     localFoundBlocks.add(top.getBlockId());
                 } else {
                     String biome=chunk.getBiome(x,clipY==null?(sections.isEmpty()?0:sections.get(0).getY()*16):clipY,z);
-                    int[] fit=fitHeights(chunk,sections,x,z,hideRoof&&hasRoofCandidate,RenderedMap.NO_HEIGHT);
+                    int[] fit=fitHeights(chunk,sections,x,z,RenderedMap.NO_HEIGHT);
                     if(biome==null&&fit[0]==RenderedMap.NO_HEIGHT) top=LOADED_EMPTY;
                     else {top=new BlockInfo("air",RenderedMap.NO_HEIGHT);top.biome=biome;top.opaqueHeight=fit[0];top.dryHeight=fit[1];}
                 }
-                // Color and Y always refer to the same sample (GUI uses interval 1).
+                // Color and Y always refer to the same nearest-neighbor sample.
                 for (int dz = z; dz < Math.min(16, z + sampleInterval); dz++)
                     for (int dx = x; dx < Math.min(16, x + sampleInterval); dx++) columns[dz][dx] = top;
             }
@@ -507,61 +511,40 @@ public class MapRenderer {
         return columns;
     }
 
-    /** 一列的扫描结果：带内收集到的可见层（top→down）+ 下界去顶需要的两个标记。 */
-    private static final class ColumnScan {
-        final List<Layer> ordinary = new ArrayList<>(), interior = new ArrayList<>();
-        boolean roofFound, cavityFound;
-        BlockInfo composite() { return MapRenderer.composite(roofFound ? interior : ordinary); }
-    }
-
     /**
      * 收集一列的可见层。bandTop/bandBottom 为 null 表示该侧不裁。
      * 收集在 alpha 饱和处停止：更深的层改变不了合成结果，这与原来的提前 return 等价。
      */
-    private ColumnScan scanColumn(Chunk chunk,List<Chunk.Section> sections,Set<Chunk.Section> airSections,
-                                  int x,int z,boolean hideRoof,Integer bandTop,Integer bandBottom) {
-        // Discover the Nether ceiling/cavity first in the same descending pass. Keep the
-        // ordinary surface as fallback for columns without ceiling bedrock.
-        ColumnScan out=new ColumnScan();
-        boolean roofFound=false,cavityFound=false;
-        double ordinaryAlpha=0,interiorAlpha=0;
-        long previousBottom=Long.MAX_VALUE;
+    private BlockInfo scanColumn(Chunk chunk,List<Chunk.Section> sections,Set<Chunk.Section> airSections,
+                                  int x,int z,Integer bandTop,Integer bandBottom) {
+        List<Layer> layers=new ArrayList<>();
+        double alpha=0;
         scan:
         for(Chunk.Section section:sections) {
             long bottom=(long)section.getY()*16,top=bottom+15;
             if(bottom<=Integer.MIN_VALUE || top>Integer.MAX_VALUE) throw new IllegalArgumentException("Section Y outside supported world coordinates");
             if(bandBottom!=null && top<bandBottom) break; // sections 已按 Y 降序，更低的整段都在带外
-            if(roofFound && top<previousBottom-1) cavityFound=true;
-            previousBottom=bottom;
-            if(airSections.contains(section)) {if(roofFound) cavityFound=true;continue;}
+            if(airSections.contains(section)) continue;
             for(int y=15;y>=0;y--) {
                 Block block=section.getBlock(x,y,z);String id=block.getId();int worldY=(int)bottom+y;
                 if(bandTop!=null && worldY>bandTop) continue;
                 if(bandBottom!=null && worldY<bandBottom) break; // 到 Y 带底部，本列更低的层不再参与合成
                 if(preview.transparentWater && PreviewOptions.water(id)) continue;
-                if(BlockColors.isAirBlock(id)) {if(roofFound) cavityFound=true;continue;}
-                if(hideRoof && !roofFound && worldY>=32 && "bedrock".equals(id)) roofFound=true;
-                if(!roofFound && ordinaryAlpha<0.995) {
-                    Layer layer=layer(chunk,block,x,worldY,z);if(layer.color.getAlpha()>0) {
-                        out.ordinary.add(layer);ordinaryAlpha+=(1-ordinaryAlpha)*layer.color.getAlpha()/255.0;
-                        if(!hideRoof && ordinaryAlpha>=0.995) break scan;
-                    }
-                } else if(roofFound && cavityFound) {
-                    Layer layer=layer(chunk,block,x,worldY,z);if(layer.color.getAlpha()>0) {
-                        out.interior.add(layer);interiorAlpha+=(1-interiorAlpha)*layer.color.getAlpha()/255.0;
-                        if(interiorAlpha>=0.995) break scan;
-                    }
+                if(BlockColors.isAirBlock(id)) continue;
+                Layer layer=layer(chunk,block,x,worldY,z);
+                if(layer.color.getAlpha()>0) {
+                    layers.add(layer);alpha+=(1-alpha)*layer.color.getAlpha()/255.0;
+                    if(alpha>=0.995) break scan;
                 }
             }
         }
-        out.roofFound=roofFound;out.cavityFound=cavityFound;
-        return out;
+        return composite(layers);
     }
 
     private BlockInfo findSurface(Chunk chunk,List<Chunk.Section> sections,Set<Chunk.Section> airSections,
-                                  int x,int z,boolean hideRoof) {
+                                  int x,int z) {
         if(preview.cave) return caveSurface(chunk,sections,x,z);
-        return scanColumn(chunk,sections,airSections,x,z,hideRoof,clipY,clipMinY).composite();
+        return scanColumn(chunk,sections,airSections,x,z,clipY,clipMinY);
     }
     /** Locate a roofed air pocket below the selected ceiling; dim sky-exposed floors. */
     private BlockInfo caveSurface(Chunk chunk,List<Chunk.Section> sections,int x,int z) {
@@ -589,11 +572,11 @@ public class MapRenderer {
         return sky;
     }
     /** Two independent fit policies, read once with each column and cached with the tile. */
-    private int[] fitHeights(Chunk chunk,List<Chunk.Section> sections,int x,int z,boolean hideRoof,int displayY) {
+    private int[] fitHeights(Chunk chunk,List<Chunk.Section> sections,int x,int z,int displayY) {
         int opaque=RenderedMap.NO_HEIGHT,dry=RenderedMap.NO_HEIGHT;
         for(Chunk.Section section:sections) for(int local=15;local>=0;local--) {
             long y=(long)section.getY()*16+local;
-            if(clipMinY!=null&&y<clipMinY || clipY!=null&&y>clipY || (hideRoof||preview.cave)&&y>displayY) continue;
+            if(clipMinY!=null&&y<clipMinY || clipY!=null&&y>clipY || preview.cave&&y>displayY) continue;
             Block b=section.getBlock(x,local,z);String id=b.getId();
             if(BlockColors.isAirBlock(id)) continue;
             if(opaque==RenderedMap.NO_HEIGHT) opaque=(int)y;

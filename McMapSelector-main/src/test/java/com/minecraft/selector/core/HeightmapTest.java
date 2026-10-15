@@ -129,15 +129,15 @@ class HeightmapTest {
         Path path = mca("DIM-1/region/r.0.0.mca", solid(3, "minecraft:netherrack"),
             section(7, false, new String[]{"minecraft:netherrack", "minecraft:bedrock"}, i -> i / 256 == 15 ? 1 : 0),
             solid(10, "example:roof_build"));
-        assertEquals(63, render(path, MapRenderer.SurfaceMode.AUTO, 1).getHeightAt(0, 0));
+        assertEquals(175, render(path, MapRenderer.SurfaceMode.AUTO, 1).getHeightAt(0, 0));
         assertEquals(175, render(path, MapRenderer.SurfaceMode.TOP, 1).getHeightAt(0, 0));
     }
 
     @Test void raisedNetherRoofAndAllSolidColumns() throws Exception {
         Path path = mca("dimensions/minecraft/the_nether/region/r.0.0.mca", solid(30, "minecraft:bedrock"), solid(-8, "minecraft:stone"));
-        assertEquals(-113, render(path, MapRenderer.SurfaceMode.AUTO, 1).getHeightAt(0, 0));
+        assertEquals(495, render(path, MapRenderer.SurfaceMode.AUTO, 1).getHeightAt(0, 0));
         Path solid = mca("solid.mca", solid(2, "minecraft:bedrock"), solid(1, "minecraft:netherrack"), solid(0, "minecraft:netherrack"));
-        assertEquals(RenderedMap.NO_HEIGHT, render(solid, MapRenderer.SurfaceMode.NETHER_INTERIOR, 1).getHeightAt(0, 0));
+        assertEquals(47, render(solid, MapRenderer.SurfaceMode.AUTO, 1).getHeightAt(0, 0));
     }
 
     @Test void netherWithoutRoofAndEmptySections() throws Exception {
@@ -150,8 +150,47 @@ class HeightmapTest {
     @Test void samplingRetainsPixelHeightAgreement() throws Exception {
         Path path = mca("region/r.0.0.mca", section(0, false, new String[]{"air", "stone"}, i -> i / 256 == i % 16 ? 1 : 0));
         RenderedMap map = render(path, MapRenderer.SurfaceMode.TOP, 4);
+        assertEquals(512, map.getWidth());
+        assertEquals(512, map.getHeight());
         assertEquals(4, map.getHeightAt(7, 0));
         assertEquals(0, map.getHeightAt(3, 3));
+    }
+
+    @Test void coarsePreviewScanBypassesFullResolutionCache() throws Exception {
+        Path path = mca("DIM-1/region/r.0.0.mca", section(0, false,
+            new String[]{"air", "stone"}, i -> i / 256 == i % 16 ? 1 : 0));
+        MapRenderer renderer = new MapRenderer(1, null);
+        try {
+            for(int interval:new int[]{2,4,8}) {
+                MapRenderer.RegionScan scan=renderer.scanRegionBlocks(path.toString(),1,null,null,true,null,interval);
+                assertNull(scan.cache);
+                RenderedMap image=scan.image();
+                assertEquals(16,image.getWidth());assertEquals(16,image.getHeight());
+                assertEquals(0,image.getHeightAt(interval-1,0));
+                assertEquals(interval,image.getHeightAt(interval,0));
+            }
+        } finally {renderer.shutdown();}
+    }
+
+    @Test void dynamicLodSurvivesBandReloads() throws Exception {
+        Path path=mca("region/r.0.0.mca",section(0,false,new String[]{"air","stone"},i -> i/256==i%16?1:0),solid(-1,"dirt"));
+        DynamicRegionManager manager=new DynamicRegionManager(directory.toString(),path.getParent().toFile(),
+            MapRenderer.SurfaceMode.TOP,null,null,PreviewOptions.DEFAULT,4);
+        try {
+            assertEquals(4,manager.getSampleInterval());
+            manager.updateViewport(new java.awt.Rectangle(0,0,16,16));
+            manager.awaitIdle(5,TimeUnit.SECONDS);
+            DynamicRegionManager.RegionTile tile=manager.getLoadedRegion(new Point(0,0));
+            assertNotNull(tile);assertEquals(512,tile.getImage().getWidth());assertEquals(512,tile.getImage().getHeight());
+            assertEquals(4,tile.getHeightAt(7,0));
+            manager.setBand(3,-16,15);
+            manager.awaitIdle(5,TimeUnit.SECONDS);
+            tile=manager.getLoadedRegion(new Point(0,0));
+            assertEquals(-1,tile.getHeightAt(7,0));
+            assertEquals(0,tile.getHeightAt(3,0));
+            RenderedMap image=(RenderedMap)tile.getImage();
+            assertTrue(image.isHighlighted(7,0));assertFalse(image.isHighlighted(3,0));
+        } finally {manager.shutdown();}
     }
 
     @Test void composedMapsRetainHeightsAndHoles() throws Exception {
@@ -204,19 +243,19 @@ class HeightmapTest {
 
     @Test void dynamicHoverUsesNegativeCoordinatesAndTracksDimensionReplacement() throws Exception {
         Path roofPath = mca("DIM-1/region/r.-1.-1.mca", solid(3, "stone"), solid(7, "bedrock"));
-        DynamicRegionManager interior = new DynamicRegionManager(directory.toString(), roofPath.getParent().toFile());
+        DynamicRegionManager automatic = new DynamicRegionManager(directory.toString(), roofPath.getParent().toFile());
         DynamicRegionManager roof = new DynamicRegionManager(directory.toString(), roofPath.getParent().toFile(), MapRenderer.SurfaceMode.TOP);
         DynamicMapCanvas[] reference = new DynamicMapCanvas[1];
         try {
             SwingUtilities.invokeAndWait(() -> {
                 DynamicMapCanvas canvas = new DynamicMapCanvas(); reference[0] = canvas;
-                canvas.setSize(800, 600); canvas.setRegionManager(interior);
+                canvas.setSize(800, 600); canvas.setRegionManager(automatic);
                 assertTrue(canvas.jumpToWorldCoordinate(new Point(-512, -512)));
             });
-            interior.awaitIdle(5, TimeUnit.SECONDS);
+            automatic.awaitIdle(5, TimeUnit.SECONDS);
             SwingUtilities.invokeAndWait(() -> {
                 DynamicMapCanvas canvas = reference[0];
-                assertEquals("X: -512  Y: 63  Z: -512  minecraft:stone", canvas.getHoverText(new Point(400, 300)));
+                assertEquals("X: -512  Y: 127  Z: -512  minecraft:bedrock", canvas.getHoverText(new Point(400, 300)));
                 // Half a block left must floor into the absent west region, not round to -512.
                 assertTrue(canvas.getHoverText(new Point(399, 300)).contains("X: -513"));
                 assertTrue(canvas.getHoverText(new Point(399, 300)).contains("Y: —"));
@@ -231,7 +270,7 @@ class HeightmapTest {
                 assertTrue(canvas.getHoverText(new Point(400, 300)).contains("Y: —"));
             });
         } finally {
-            interior.shutdown(); roof.shutdown();
+            automatic.shutdown(); roof.shutdown();
             if (reference[0] != null) SwingUtilities.invokeAndWait(reference[0]::cleanup);
         }
     }

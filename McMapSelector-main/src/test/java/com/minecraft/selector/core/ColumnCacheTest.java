@@ -190,11 +190,29 @@ class ColumnCacheTest {
         }
     }
 
-    @Test void netherRoofRegionsAreNotCached() throws Exception {
+    @Test void netherRegionsCacheTheActualTopSurface() throws Exception {
         HeightmapTest h = new HeightmapTest(); h.directory = directory;
-        Path path = h.mca("DIM-1/region/r.0.0.mca", h.section(7, true, new String[]{"minecraft:bedrock"}, i -> 0));
-        assertNull(scan(path, MapRenderer.SurfaceMode.AUTO), "下界内部视图的分支判定跟扫描窗口耦合，不缓存");
-        assertNotNull(scan(path, MapRenderer.SurfaceMode.TOP), "TOP 模式没有 roof 分支，仍可缓存");
+        for(String folder:new String[]{"DIM-1","dimensions/minecraft/the_nether"}) {
+            Path path = h.mca(folder+"/region/r.0.0.mca",
+                h.section(7,true,new String[]{"minecraft:bedrock"},i -> 0),
+                h.section(3,true,new String[]{"minecraft:netherrack"},i -> 0));
+            for(MapRenderer.SurfaceMode mode:MapRenderer.SurfaceMode.values()) {
+                ColumnCache cache=scan(path,mode);
+                assertNotNull(cache);
+                for(Integer top:new Integer[]{null,120,100,63}) {
+                    RenderedMap image=cache.toImage(top,null);
+                    assertEquals(top==null?127:top==120?120:63,image.getHeightAt(0,0));
+                    MapRenderer renderer=new MapRenderer(1,null,mode,top);
+                    try {
+                        RenderedMap direct=(RenderedMap)renderer.renderToPng(renderer.getTopBlocks(path.toString(),1,1),1);
+                        for(int z=0;z<16;z++) for(int x=0;x<16;x++) {
+                            assertEquals(direct.getHeightAt(x,z),image.getHeightAt(x,z));
+                            assertEquals(direct.getRGB(x,z),image.getRGB(x,z));
+                        }
+                    } finally {renderer.shutdown();}
+                }
+            }
+        }
     }
 
     private ColumnCache scan(Path path, MapRenderer.SurfaceMode mode) throws Exception {

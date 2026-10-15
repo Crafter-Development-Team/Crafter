@@ -37,6 +37,8 @@ public class DynamicRegionManager {
     private volatile boolean closed;
     private final MapRenderer.SurfaceMode mode;
     private final PreviewOptions preview;
+    private final int sampleInterval;
+    public int getSampleInterval() {return sampleInterval;}
     public PreviewOptions getPreviewOptions() {return preview;}
     /** 当前 Y 带：可运行时改，新的瓦片用新带渲染 */
     private volatile Integer clipY, clipMinY;
@@ -193,6 +195,11 @@ public class DynamicRegionManager {
         this(savePath,regionDir,mode,clipY,null,preview);
     }
     public DynamicRegionManager(String savePath,File regionDir,MapRenderer.SurfaceMode mode,Integer clipY,Integer clipMinY,PreviewOptions preview) {
+        this(savePath,regionDir,mode,clipY,clipMinY,preview,1);
+    }
+    public DynamicRegionManager(String savePath,File regionDir,MapRenderer.SurfaceMode mode,Integer clipY,Integer clipMinY,PreviewOptions preview,int sampleInterval) {
+        if(sampleInterval<1||sampleInterval>16) throw new IllegalArgumentException("sampleInterval must be 1..16");
+        this.sampleInterval=sampleInterval;
         this.preview=Objects.requireNonNull(preview);
         this.savePath = savePath;
         this.regionDir = regionDir;
@@ -211,8 +218,9 @@ public class DynamicRegionManager {
             File file = new File(regionDir, String.format("r.%d.%d.mca", coordinate.x, coordinate.y));
             // Independent progress counters per render: a shared MapRenderer was
             // concurrently resetting counters and scheduling blocking waiter tasks.
-            MapRenderer local = new MapRenderer(2, null, this.mode,this.clipY,this.clipMinY,tilePalette,preview);
-            try { return local.renderToPng(local.getTopBlocks(file.getAbsolutePath(),32,1),1); }
+            Integer top=this.clipY,bottom=this.clipMinY,highlight=this.highlightTop;
+            MapRenderer local = new MapRenderer(2, null, this.mode,top,bottom,tilePalette,preview);
+            try { return local.scanRegionBlocks(file.getAbsolutePath(),32,top,bottom,false,highlight,sampleInterval).image(); }
             finally { local.shutdown(); }
         };
         
@@ -229,6 +237,7 @@ public class DynamicRegionManager {
         this.logManager = LogManager.getInstance();
         this.mode = MapRenderer.SurfaceMode.AUTO;
         this.preview = PreviewOptions.DEFAULT;
+        this.sampleInterval = 1;
         this.tileRenderer = tileRenderer;
         this.loadingExecutor = (ThreadPoolExecutor) Executors.newFixedThreadPool(3);
         this.cacheExecutor = Executors.newSingleThreadExecutor(r -> {
@@ -335,6 +344,7 @@ public class DynamicRegionManager {
 
     /** 瓦片出来之后顺手把该 region 的层缓存建好，下次换带就是内存操作。 */
     private void buildBandCacheAsync(final File file) {
+        if(sampleInterval>1) return; // Coarse Y-band changes must retain the selected sampling.
         final String key = file.getAbsolutePath();
         synchronized (bandCaches) { if (bandCaches.containsKey(key)) return; }
         try {
@@ -350,7 +360,7 @@ public class DynamicRegionManager {
                 } finally {
                     local.shutdown();
                 }
-                if (cache == null) return;   // 下界去顶：不缓存
+                if (cache == null) return;   // 洞穴视图：不缓存
                 synchronized (bandCaches) { bandCaches.put(key, new CacheEntry(cache, palette)); }
                 logManager.info("Y 带缓存就绪: " + file.getName() + "（换带可实时）", "DynamicRegionManager");
                 // 这块瓦片原本可能是读盘渲染的（没有兴趣带掩码）：立刻用缓存重渲一次
