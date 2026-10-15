@@ -1102,10 +1102,15 @@ class VIEW3D_OT_UseCrafterHistoryWorlds(bpy.types.Operator):
                     if not os.path.exists(os.path.join(root, "saves", save)):
                         del json_history_worlds[root][0][save]
                         continue
-                    #加入新找到的save
-                    for save in os.listdir(os.path.join(root, "saves")):
-                        if os.path.isdir(os.path.join(root, "saves", save)):
-                            json_history_worlds[root][0].setdefault(save, {})
+                    save_entry = json_history_worlds[root][0][save]
+                    if isinstance(save_entry, dict):
+                        save_entry.setdefault("settings", [])
+                #加入新找到的save
+                dir_saves = os.path.join(root, "saves")
+                if os.path.exists(dir_saves):
+                    for discovered_save in os.listdir(dir_saves):
+                        if os.path.isdir(os.path.join(dir_saves, discovered_save)):
+                            json_history_worlds[root][0].setdefault(discovered_save, {"settings": []})
             else:
                 dir_versions = dir_root_2_dir_versions(dir_root=root)
                 #添加版本
@@ -1659,7 +1664,14 @@ class VIEW3D_OT_CrafterReloadHistoryWorldsList(bpy.types.Operator):#刷新 历�
                     if len(addon_prefs.History_World_Saves_List) > 0:
                         if addon_prefs.History_World_Saves_List_index < 0 or addon_prefs.History_World_Saves_List_index >= len(addon_prefs.History_World_Saves_List):
                             addon_prefs.History_World_Saves_List_index = 0
-                        for settings in json_history_worlds[addon_prefs.History_World_Roots_List[addon_prefs.History_World_Roots_List_index].name][0][addon_prefs.History_World_Saves_List[addon_prefs.History_World_Saves_List_index].name]["settings"]:
+                        save_entry = json_history_worlds[addon_prefs.History_World_Roots_List[addon_prefs.History_World_Roots_List_index].name][0][addon_prefs.History_World_Saves_List[addon_prefs.History_World_Saves_List_index].name]
+                        settings_list = save_entry.get("settings", []) if isinstance(save_entry, dict) else save_entry
+                        if not isinstance(settings_list, list):
+                            settings_list = []
+                        for settings in settings_list:
+                            if not (isinstance(settings, list) and len(settings) == 2
+                                    and all(isinstance(corner, list) and len(corner) == 3 for corner in settings)):
+                                continue
                             history_world_setting = addon_prefs.History_World_Settings_List.add()
                             history_world_setting.name = f"{settings[0][0]} {settings[0][1]} {settings[0][2]} {settings[1][0]} {settings[1][1]} {settings[1][2]}" 
             else:
