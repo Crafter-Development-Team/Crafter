@@ -28,14 +28,73 @@ public class DynamicRegionManager {
     
     // 线程池
     private final ThreadPoolExecutor loadingExecutor;
+    private final java.util.concurrent.ExecutorService cacheExecutor;   // 层缓存单独一条线程，别拖慢瓦片加载
     private final TileRenderer tileRenderer;
     private final Object stateLock = new Object();
     private final Map<Point, Long> failedUntil = new HashMap<>();
     private Set<Point> desiredRegions = Collections.emptySet();
     private long generation = 0;
     private volatile boolean closed;
+    private final MapRenderer.SurfaceMode mode;
+    /** 当前 Y 带：可运行时改，新的瓦片用新带渲染 */
+    private volatile Integer clipY, clipMinY;
+    /** 每次换带自增：用来丢弃"用旧带算完的"瓦片 */
+    private volatile long bandGeneration;
+
+    // ── 换带性能计数：每次换带一行日志，GUI 收尾再取一次汇总 ──
+    private final java.util.concurrent.atomic.AtomicInteger bandTilesDone = new java.util.concurrent.atomic.AtomicInteger();
+    private volatile int bandTilesPlanned;
+    private final java.util.concurrent.atomic.AtomicInteger bandCacheHits = new java.util.concurrent.atomic.AtomicInteger();
+    private final java.util.concurrent.atomic.AtomicInteger bandCacheMisses = new java.util.concurrent.atomic.AtomicInteger();
+    private final java.util.concurrent.atomic.AtomicLong bandMillis = new java.util.concurrent.atomic.AtomicLong();
+    private final java.util.concurrent.atomic.AtomicLong bandMaxMillis = new java.util.concurrent.atomic.AtomicLong();
+    private final java.util.concurrent.atomic.AtomicInteger bandFrames = new java.util.concurrent.atomic.AtomicInteger();
+    private final java.util.concurrent.atomic.AtomicLong bandFrameWorst = new java.util.concurrent.atomic.AtomicLong();
+    private final java.util.concurrent.atomic.AtomicLong bandFrameTotal = new java.util.concurrent.atomic.AtomicLong();
+    private volatile long bandFrameStartedAt;
+
+    /** 拖动结束时取一次汇总并清零；没有数据返回 null。 */
+    public String takeBandStats() {
+        int frames = bandFrames.getAndSet(0);
+        if (frames == 0) return null;
+        String text = String.format("%d 帧, 平均 %d ms, 最大 %d ms",
+            frames, bandFrameTotal.getAndSet(0) / frames, bandFrameWorst.getAndSet(0));
+        bandFrameWorst.set(0);
+        return text;
+    }
+
+    /** 记一块瓦片的耗时；返回 true 表示这一帧的所有瓦片都完成了。 */
+    private boolean countBandTile(long millis, boolean cacheHit, long expectedBand) {
+        if (expectedBand != bandGeneration) return false;   // 属于已被取代的那一帧
+        bandMillis.addAndGet(millis);
+        bandMaxMillis.accumulateAndGet(millis, Math::max);
+        if (cacheHit) bandCacheHits.incrementAndGet(); else bandCacheMisses.incrementAndGet();
+        int done = bandTilesDone.incrementAndGet();
+        int planned = bandTilesPlanned;
+        if (planned <= 0 || done < planned) return false;
+        long frameMillis = System.currentTimeMillis() - bandFrameStartedAt;
+        bandFrames.incrementAndGet();
+        bandFrameTotal.addAndGet(frameMillis);
+        bandFrameWorst.accumulateAndGet(frameMillis, Math::max);
+        String line = String.format("换带 %d 块: 整帧 %d ms（单块最大 %d ms, 缓存命中 %d, 缺缓存重载 %d）",
+            done, frameMillis, bandMaxMillis.get(), bandCacheHits.get(), bandCacheMisses.get());
+        logManager.info(line, "DynamicRegionManager");
+        YbandLog.write(line);
+        return true;
+    }
+    /** 每个 region 的层缓存（换带时内存重合成，不再读盘） */
+    private static final int BAND_CACHE_LIMIT =
+        Math.max(1, Math.min(8, (int) (Runtime.getRuntime().maxMemory() / (64L * 1024 * 1024))));
+    private static final class CacheEntry {
+        final ColumnCache cache; final BlockColors.Palette palette;
+        CacheEntry(ColumnCache cache, BlockColors.Palette palette) { this.cache = cache; this.palette = palette; }
+    }
+    private final Map<String, CacheEntry> bandCaches = new java.util.LinkedHashMap<String, CacheEntry>(8, 0.75f, true) {
+        @Override protected boolean removeEldestEntry(Map.Entry<String, CacheEntry> eldest) { return size() > BAND_CACHE_LIMIT; }
+    };
     private volatile long progressRevision;
     public long getProgressRevision() {return progressRevision;}
+    public MapRenderer.SurfaceMode getSurfaceMode() {return mode;}
     private static final int MAX_REQUIRED_REGIONS = 64;
 
     interface TileRenderer { BufferedImage render(Point coordinate) throws Exception; }
@@ -100,21 +159,30 @@ public class DynamicRegionManager {
     }
 
     public DynamicRegionManager(String savePath, File regionDir, MapRenderer.SurfaceMode mode) {
-        this(savePath,regionDir,mode,null);
+        this(savePath,regionDir,mode,null,null);
     }
     public DynamicRegionManager(String savePath,File regionDir,MapRenderer.SurfaceMode mode,Integer clipY) {
+        this(savePath,regionDir,mode,clipY,null);
+    }
+    public DynamicRegionManager(String savePath,File regionDir,MapRenderer.SurfaceMode mode,Integer clipY,Integer clipMinY) {
         this.savePath = savePath;
         this.regionDir = regionDir;
+        this.mode = mode;
+        this.clipY = clipY;
+        this.clipMinY = clipMinY;
         this.logManager = LogManager.getInstance();
         this.loadingExecutor = (ThreadPoolExecutor) Executors.newFixedThreadPool(3, r -> {
             Thread t = new Thread(r, "map-region-loader"); t.setDaemon(true); return t;
+        });
+        this.cacheExecutor = Executors.newSingleThreadExecutor(r -> {
+            Thread t = new Thread(r, "map-region-band-cache"); t.setDaemon(true); return t;
         });
         final BlockColors.Palette tilePalette=BlockColors.snapshot();
         this.tileRenderer = coordinate -> {
             File file = new File(regionDir, String.format("r.%d.%d.mca", coordinate.x, coordinate.y));
             // Independent progress counters per render: a shared MapRenderer was
             // concurrently resetting counters and scheduling blocking waiter tasks.
-            MapRenderer local = new MapRenderer(2, null, mode,clipY,tilePalette);
+            MapRenderer local = new MapRenderer(2, null, this.mode,this.clipY,this.clipMinY,tilePalette);
             try { return local.renderToPng(local.getTopBlocks(file.getAbsolutePath(),32,1),1); }
             finally { local.shutdown(); }
         };
@@ -130,9 +198,117 @@ public class DynamicRegionManager {
         this.savePath = regionDir.getAbsolutePath();
         this.regionDir = regionDir;
         this.logManager = LogManager.getInstance();
+        this.mode = MapRenderer.SurfaceMode.AUTO;
         this.tileRenderer = tileRenderer;
         this.loadingExecutor = (ThreadPoolExecutor) Executors.newFixedThreadPool(3);
+        this.cacheExecutor = Executors.newSingleThreadExecutor(r -> {
+            Thread t = new Thread(r, "map-region-band-cache"); t.setDaemon(true); return t;
+        });
         scanAvailableRegions();
+    }
+
+    /**
+     * 换 Y 带：已加载的瓦片优先用层缓存内存重合成（不再读盘），没缓存的才回落到重新加载。
+     * 每块瓦片一个任务，完成一块就通知画布重绘一块。
+     */
+    public void setBand(Integer clipY, Integer clipMinY) {
+        this.clipY = clipY;
+        this.clipMinY = clipMinY;
+        long band = ++bandGeneration;
+        java.util.List<Point> coords;
+        synchronized (stateLock) {
+            if (closed) return;
+            // 只重合成"当前视口要的"瓦片；LRU 里那些看不见的等它们被再次需要时自然会用新带
+            coords = new ArrayList<>();
+            for (Point coord : loadedRegions.keySet()) if (desiredRegions.contains(coord)) coords.add(coord);
+        }
+        // 重置这一帧的计数
+        bandTilesDone.set(0);
+        bandTilesPlanned = coords.size();
+        bandCacheHits.set(0);
+        bandCacheMisses.set(0);
+        bandMillis.set(0);
+        bandMaxMillis.set(0);
+        bandFrameStartedAt = System.currentTimeMillis();
+        for (Point coord : coords) {
+            final long expected = band;
+            try {
+                loadingExecutor.execute(() -> rerenderTileForBand(coord, expected));
+            } catch (java.util.concurrent.RejectedExecutionException ignored) {
+                return;
+            }
+        }
+    }
+
+    private File regionFile(Point coord) {
+        return new File(regionDir, String.format("r.%d.%d.mca", coord.x, coord.y));
+    }
+
+    private void rerenderTileForBand(Point coord, long expectedBand) {
+        if (expectedBand != bandGeneration) return;   // 已被更新的带取代：别白算
+        final long requestGeneration = generation;
+        final Integer top = clipY, bottom = clipMinY;
+        final String key = regionFile(coord).getAbsolutePath();
+        final long started = System.currentTimeMillis();
+        CacheEntry entry;
+        synchronized (bandCaches) { entry = bandCaches.get(key); }
+        BufferedImage image = null;
+        if (entry != null && entry.palette == BlockColors.snapshot()) {
+            try {
+                // 数组快路径出图：不建 BlockInfo、不建 MapRenderer（一帧垃圾量从几百 MB 降到几 MB）
+                image = entry.cache.toImage(top, bottom);
+            } catch (Exception error) {
+                logManager.warn("换带重合成失败，回落重载: " + key + " - " + error.getMessage(), "DynamicRegionManager");
+                image = null;
+            }
+        }
+        boolean frameDone = countBandTile(System.currentTimeMillis() - started, image != null, expectedBand);
+        if (image == null) {
+            // 没有缓存（或颜色资源换了）：删掉瓦片走正常加载（要读盘，慢，这里记一笔）
+            if (expectedBand == bandGeneration) {
+                logManager.info("换带缺缓存，重载瓦片: r." + coord.x + "." + coord.y + ".mca", "DynamicRegionManager");
+                YbandLog.write("换带缺缓存，重载瓦片: r." + coord.x + "." + coord.y + ".mca");
+            }
+            synchronized (stateLock) {
+                if (closed) return;
+                failedUntil.remove(coord);
+                startLoadingRegion(coord, true);   // 保留旧瓦片，新图算好再替换（不闪 Loading 占位）
+            }
+            return;
+        }
+        RegionTile tile = new RegionTile(new Point(coord), image);
+        synchronized (stateLock) {
+            // 期间又换过带：这块交给更新的那次任务，别用旧带覆盖
+            if (closed || generation != requestGeneration || expectedBand != bandGeneration) return;
+            loadedRegions.put(coord, tile);
+        }
+        // 一帧只通知一次画布重绘（8 块瓦片 = 1 次 repaint，而不是 8 次）
+        if (frameDone) notifyRegionLoaded(coord, tile);
+    }
+
+    /** 瓦片出来之后顺手把该 region 的层缓存建好，下次换带就是内存操作。 */
+    private void buildBandCacheAsync(final File file) {
+        final String key = file.getAbsolutePath();
+        synchronized (bandCaches) { if (bandCaches.containsKey(key)) return; }
+        try {
+            cacheExecutor.execute(() -> {
+                final BlockColors.Palette palette = BlockColors.snapshot();
+                MapRenderer local = new MapRenderer(2, null, mode, (Integer) null, (Integer) null);
+                ColumnCache cache;
+                try {
+                    cache = local.scanRegion(key, 32);
+                } catch (Exception error) {
+                    logManager.warn("层缓存建立失败: " + key + " - " + error.getMessage(), "DynamicRegionManager");
+                    return;
+                } finally {
+                    local.shutdown();
+                }
+                if (cache == null) return;   // 下界去顶：不缓存
+                synchronized (bandCaches) { bandCaches.put(key, new CacheEntry(cache, palette)); }
+                logManager.info("Y 带缓存就绪: " + file.getName() + "（换带可实时）", "DynamicRegionManager");
+            });
+        } catch (java.util.concurrent.RejectedExecutionException ignored) {
+        }
     }
 
     /**
@@ -295,9 +471,16 @@ public class DynamicRegionManager {
     /**
      * 开始加载区域
      */
-    private void startLoadingRegion(Point regionCoord) {
+    private void startLoadingRegion(Point regionCoord) { startLoadingRegion(regionCoord, false); }
+
+    /**
+     * replaceExisting=true 时允许在"已有旧瓦片"的情况下重载（换带缺缓存用）：
+     * 旧图继续显示，新图算好再替换，用户不会看到 Loading 闪烁。
+     */
+    private void startLoadingRegion(Point regionCoord, boolean replaceExisting) {
         // Called under stateLock: register before execute, publish only the current task.
-        if (closed || loadedRegions.containsKey(regionCoord) || loadingRegions.containsKey(regionCoord)) return;
+        if (closed || loadingRegions.containsKey(regionCoord)) return;
+        if (!replaceExisting && loadedRegions.containsKey(regionCoord)) return;
         Long retry = failedUntil.get(regionCoord);
         if (retry != null && retry > System.currentTimeMillis()) return;
         final long requestGeneration = generation;
@@ -315,6 +498,7 @@ public class DynamicRegionManager {
                             // Keep current view + a bounded warm cache when browsing.
                             while (loadedRegions.size() > 96) unloadLeastRecentlyUsed();
                             notifyRegionLoaded(regionCoord, tile);
+                            buildBandCacheAsync(regionFile(regionCoord));   // 顺手建层缓存，换带才实时
                         } else if (tile == null) {
                             failedUntil.put(regionCoord, System.currentTimeMillis()+5000);
                             notifyLoadingFailed(regionCoord,new IllegalStateException("Region renderer returned no image"));
@@ -470,6 +654,8 @@ public class DynamicRegionManager {
             clearAllLoadedRegions();
             listeners.clear();
             loadingExecutor.shutdownNow();
+            cacheExecutor.shutdownNow();
+            synchronized (bandCaches) { bandCaches.clear(); }
         }
         // Do not await termination on Swing's EDT (dimension changes/window close).
     }

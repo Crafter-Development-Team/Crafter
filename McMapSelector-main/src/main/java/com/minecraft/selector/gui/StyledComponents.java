@@ -514,7 +514,264 @@ public class StyledComponents {
             repaint();
         }
     }
-    
+
+    /**
+     * 竖向双滑块：世界 Y 向上增长，上 thumb = 上限（Top Y），下 thumb = 下限（Bottom Y）。
+     * 拖动过程中只重绘，松手才发出 change 事件，由外部防抖决定何时整幅重渲。
+     */
+    public static class VerticalRangeSlider extends JPanel {
+        private int minValue;
+        private int maxValue;
+        private int lowerValue;
+        private int upperValue;
+        private boolean draggingLower;
+        private boolean draggingUpper;
+        private boolean syncing;
+        private boolean notifying;
+        private final int THUMB_SIZE = 13;
+        private final int TRACK_WIDTH = 6;
+        private final java.util.List<ChangeListener> listeners = new java.util.ArrayList<>();
+        private final java.util.List<ChangeListener> liveListeners = new java.util.ArrayList<>();
+
+        public VerticalRangeSlider(int min, int max, int lower, int upper) {
+            this.minValue = min;
+            this.maxValue = Math.max(min + 1, max);
+            this.lowerValue = Math.max(this.minValue, Math.min(Math.min(lower, upper), this.maxValue));
+            this.upperValue = Math.max(this.lowerValue, Math.min(Math.max(lower, upper), this.maxValue));
+            setPreferredSize(new Dimension(104, 420));
+            setOpaque(false);
+            setToolTipText("Upper handle = top Y, lower handle = bottom Y");
+
+            addMouseListener(new MouseAdapter() {
+                @Override
+                public void mousePressed(MouseEvent e) {
+                    handleMousePressed(e);
+                }
+
+                @Override
+                public void mouseReleased(MouseEvent e) {
+                    boolean moved = draggingLower || draggingUpper;
+                    draggingLower = false;
+                    draggingUpper = false;
+                    setCursor(Cursor.getDefaultCursor());
+                    // 拖动中不通知外部：整幅重渲只在松手后触发一次
+                    if (moved) fireChangeEvent();
+                }
+            });
+
+            addMouseMotionListener(new MouseMotionAdapter() {
+                @Override
+                public void mouseDragged(MouseEvent e) {
+                    handleMouseDragged(e);
+                }
+
+                @Override
+                public void mouseMoved(MouseEvent e) {
+                    updateCursor(e);
+                }
+            });
+        }
+
+        public void addChangeListener(ChangeListener listener) {
+            listeners.add(listener);
+        }
+
+        /** 拖动过程中的每次取值变化都会回调（只用于廉价的即时反馈，重活留给 change）。 */
+        public void addLiveListener(ChangeListener listener) {
+            liveListeners.add(listener);
+        }
+
+        private void fireChangeEvent() {
+            if (syncing) return;
+            syncing = true;
+            try {
+                ChangeEvent event = new ChangeEvent(this);
+                for (ChangeListener listener : listeners) listener.stateChanged(event);
+            } finally {
+                syncing = false;
+            }
+        }
+
+        private void fireLiveEvent() {
+            if (notifying) return;
+            notifying = true;
+            try {
+                ChangeEvent event = new ChangeEvent(this);
+                for (ChangeListener listener : liveListeners) listener.stateChanged(event);
+            } finally {
+                notifying = false;
+            }
+        }
+
+        // ── 几何 ──
+        private double span() { return Math.max(1, (double) maxValue - minValue); }
+        private int trackTop() { return THUMB_SIZE / 2; }
+        private int trackHeight() { return Math.max(1, getHeight() - THUMB_SIZE); }
+        private int trackX() { return Math.max(0, (getWidth() - TRACK_WIDTH) / 2); }
+
+        private int valueToY(int value) {
+            double ratio = (maxValue - (double) value) / span();
+            return trackTop() + (int) Math.round(ratio * trackHeight());
+        }
+
+        private int yToValue(int y) {
+            double ratio = Math.max(0, Math.min(1, (y - trackTop()) / (double) trackHeight()));
+            return (int) Math.round(maxValue - ratio * span());
+        }
+
+        // ── 交互 ──
+        private void handleMousePressed(MouseEvent e) {
+            int y = e.getY();
+            int lowerY = valueToY(lowerValue);
+            int upperY = valueToY(upperValue);
+            int hit = THUMB_SIZE / 2 + 3;
+            if (Math.abs(y - lowerY) <= hit && Math.abs(y - lowerY) <= Math.abs(y - upperY)) {
+                draggingLower = true;
+            } else if (Math.abs(y - upperY) <= hit) {
+                draggingUpper = true;
+            } else if (Math.abs(y - lowerY) <= Math.abs(y - upperY)) {
+                draggingLower = true;
+                updateLower(y);
+            } else {
+                draggingUpper = true;
+                updateUpper(y);
+            }
+        }
+
+        private void handleMouseDragged(MouseEvent e) {
+            if (draggingLower) updateLower(e.getY());
+            else if (draggingUpper) updateUpper(e.getY());
+        }
+
+        private void updateLower(int y) {
+            int value = Math.max(minValue, Math.min(yToValue(y), upperValue));
+            if (value != lowerValue) {
+                lowerValue = value;
+                repaint();
+                fireLiveEvent();
+            }
+        }
+
+        private void updateUpper(int y) {
+            int value = Math.min(maxValue, Math.max(yToValue(y), lowerValue));
+            if (value != upperValue) {
+                upperValue = value;
+                repaint();
+                fireLiveEvent();
+            }
+        }
+
+        private void updateCursor(MouseEvent e) {
+            int y = e.getY();
+            int hit = THUMB_SIZE / 2 + 3;
+            boolean onThumb = Math.abs(y - valueToY(lowerValue)) <= hit || Math.abs(y - valueToY(upperValue)) <= hit;
+            setCursor(onThumb ? Cursor.getPredefinedCursor(Cursor.HAND_CURSOR) : Cursor.getDefaultCursor());
+        }
+
+        // ── 取值 ──
+        public int getLowerValue() { return lowerValue; }
+        public int getUpperValue() { return upperValue; }
+
+        public void setLowerValue(int value) {
+            int next = Math.max(minValue, Math.min(value, upperValue));
+            if (next != lowerValue) {
+                lowerValue = next;
+                repaint();
+                fireChangeEvent();
+            }
+        }
+
+        public void setUpperValue(int value) {
+            int next = Math.min(maxValue, Math.max(value, lowerValue));
+            if (next != upperValue) {
+                upperValue = next;
+                repaint();
+                fireChangeEvent();
+            }
+        }
+
+        /** 同时设置两端，只发一次 change（启动灌初值时用）。 */
+        public void setValues(int lower, int upper) {
+            int lo = Math.max(minValue, Math.min(Math.min(lower, upper), maxValue));
+            int hi = Math.max(lo, Math.min(Math.max(lower, upper), maxValue));
+            if (lo == lowerValue && hi == upperValue) return;
+            lowerValue = lo;
+            upperValue = hi;
+            repaint();
+            fireChangeEvent();
+        }
+
+        /** 扩大/移动坐标轴模型范围（不是取值）。 */
+        public void setRange(int min, int max) {
+            if (max <= min) return;
+            minValue = min;
+            maxValue = max;
+            lowerValue = Math.max(min, Math.min(lowerValue, max));
+            upperValue = Math.max(lowerValue, Math.min(upperValue, max));
+            repaint();
+        }
+
+        @Override
+        protected void paintComponent(Graphics g) {
+            Graphics2D g2d = (Graphics2D) g.create();
+            g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+
+            Container parent = getParent();
+            g2d.setColor(parent != null ? parent.getBackground() : Color.WHITE);
+            g2d.fillRect(0, 0, getWidth(), getHeight());
+
+            int x = trackX();
+            int top = trackTop();
+            int height = trackHeight();
+            int lowerY = valueToY(lowerValue);
+            int upperY = valueToY(upperValue);
+
+            g2d.setColor(Color.LIGHT_GRAY);
+            g2d.fillRoundRect(x, top, TRACK_WIDTH, height, TRACK_WIDTH, TRACK_WIDTH);
+
+            // 选中区间（下限→上限）
+            g2d.setColor(UIThemeManager.ThemeColors.PRIMARY_BLUE);
+            g2d.fillRoundRect(x, Math.min(lowerY, upperY), TRACK_WIDTH,
+                              Math.max(1, Math.abs(lowerY - upperY)), TRACK_WIDTH, TRACK_WIDTH);
+
+            // 每 64 一格刻度
+            g2d.setColor(new Color(255, 255, 255, 140));
+            for (int value = minValue; value <= maxValue; value += 64) {
+                int tickY = valueToY(value);
+                g2d.drawLine(x, tickY, x + TRACK_WIDTH, tickY);
+            }
+
+            drawThumb(g2d, x, lowerY, UIThemeManager.ThemeColors.MINECRAFT_GREEN);
+            drawThumb(g2d, x, upperY, UIThemeManager.ThemeColors.WARNING_ORANGE);
+
+            g2d.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 11));
+            FontMetrics fm = g2d.getFontMetrics();
+            g2d.setColor(Color.DARK_GRAY);
+            drawValue(g2d, fm, x, upperY, upperValue);
+            drawValue(g2d, fm, x, lowerY, lowerValue);
+
+            g2d.dispose();
+        }
+
+        private void drawThumb(Graphics2D g2d, int trackX, int y, Color color) {
+            int px = trackX + TRACK_WIDTH / 2 - THUMB_SIZE / 2;
+            int py = y - THUMB_SIZE / 2;
+            g2d.setColor(color);
+            g2d.fillOval(px, py, THUMB_SIZE, THUMB_SIZE);
+            g2d.setColor(Color.WHITE);
+            g2d.drawOval(px, py, THUMB_SIZE, THUMB_SIZE);
+        }
+
+        private void drawValue(Graphics2D g2d, FontMetrics fm, int trackX, int y, int value) {
+            String text = String.valueOf(value);
+            int tx = trackX - 6 - fm.stringWidth(text);
+            if (tx < 2) tx = trackX + TRACK_WIDTH + 6;
+            int ty = Math.max(fm.getAscent(),
+                              Math.min(getHeight() - fm.getDescent(), y + fm.getAscent() / 2 - 1));
+            g2d.drawString(text, tx, ty);
+        }
+    }
+
     /**
      * 创建带动画效果的按钮
      */

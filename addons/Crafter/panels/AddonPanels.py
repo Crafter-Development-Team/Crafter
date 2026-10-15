@@ -95,7 +95,11 @@ class VIEW3D_PT_CrafterMaterials(bpy.types.Panel):
         col_Materials_List_ops.operator("crafter.open_materials",icon="FILE_FOLDER",text="")
         col_Materials_List_ops.operator("crafter.reload_all",icon="FILE_REFRESH",text="")
 
-        box_main.operator("crafter.load_material",text="Load")
+        row_load_material = box_main.row(align=True)
+        row_load_material.operator("crafter.load_material",text="Load")
+        op_reload_material = row_load_material.operator("crafter.load_material",text="Reload",icon="FILE_REFRESH")
+        op_reload_material.force_reload = True
+        box_main.prop(addon_prefs, "Search_PBR_On_Load")
         
         box_other = box.box()
         row_PBR_Parser = box_other.row()

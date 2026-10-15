@@ -1,6 +1,7 @@
 import bpy
 import os
 import bmesh
+import struct
 # 在上方定义，避免循环import
 def ui_item(self, context: bpy.types.Context):
     addon_prefs = context.preferences.addons[__addon_name__].preferences
@@ -12,6 +13,192 @@ from ..config import __addon_name__
 from ....common.i18n.i18n import i18n
 from bpy.props import *
 
+# ==================== 物品贴图尺寸 ====================
+
+def read_image_size(path):
+    '''
+    只读文件头拿图片的像素尺寸（PNG / JPEG），失败返回 (0, 0)。
+    目的是在文件浏览器里刚选中文件时就能显示尺寸，不必真把图加载进 Blender
+    （bpy.data.images.load 会留下数据块，且 HD 贴图很慢）。
+    '''
+    if not path or not os.path.isfile(path):
+        return (0, 0)
+    try:
+        with open(path, "rb") as f:
+            head = f.read(32)
+            # PNG: 8 字节签名 + 4 字节长度 + "IHDR" + 宽4 + 高4（大端）
+            if head[:8] == b"\x89PNG\r\n\x1a\n" and head[12:16] == b"IHDR":
+                width, height = struct.unpack(">II", head[16:24])
+                return (int(width), int(height))
+            # JPEG: 扫段找到 SOFn，段内是 精度1 + 高2 + 宽2（大端）
+            if head[:2] == b"\xff\xd8":
+                f.seek(2)
+                while True:
+                    marker = f.read(2)
+                    if len(marker) < 2 or marker[0] != 0xFF:
+                        return (0, 0)
+                    code = marker[1]
+                    if code == 0xFF:            # 填充字节，回退一步重读
+                        f.seek(-1, 1)
+                        continue
+                    if code == 0x01 or 0xD0 <= code <= 0xD9:
+                        continue                # 无长度字段的标记
+                    size_bytes = f.read(2)
+                    if len(size_bytes) < 2:
+                        return (0, 0)
+                    seg_len = struct.unpack(">H", size_bytes)[0]
+                    if code in (0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7,
+                                0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF):
+                        body = f.read(5)
+                        if len(body) < 5:
+                            return (0, 0)
+                        height, width = struct.unpack(">HH", body[1:5])
+                        return (int(width), int(height))
+                    f.seek(seg_len - 2, 1)
+    except Exception:
+        return (0, 0)
+    return (0, 0)
+
+
+def common_divisors(width, height):
+    '''
+    宽高公约数里大于 1 的那些（从小到大）；宽或高 <= 1 时返回空
+    '''
+    try:
+        width = int(width)
+        height = int(height)
+    except Exception:
+        return []
+    if width <= 1 or height <= 1:
+        return []
+    return [d for d in range(2, min(width, height) + 1)
+            if width % d == 0 and height % d == 0]
+
+
+def item_image_size(op):
+    '''
+    操作符当前选中文件的实际像素尺寸（只读文件头，不把图加载进 Blender）；读不出返回 (0, 0)
+    '''
+    return read_image_size(getattr(op, "filepath", ""))
+
+
+def item_base_size(op):
+    '''
+    参与细分的基准尺寸：自定义尺寸且有 X/Y 时用 X/Y，否则用图片实际尺寸。
+    X/Y 会在选中文件时自动填成图片尺寸；万一没填上（读不出文件头等），这里仍按图片
+    实际尺寸走，和旧行为一致，不会因为默认值把网格切错。
+    注意：属性回调里的 self 是 RNA 包装、没有实例方法，所以尺寸口径都写在这里。
+    '''
+    if op.custome_size and op.width > 0 and op.height > 0:
+        return (int(op.width), int(op.height))
+    width, height = item_image_size(op)
+    if width > 0 and height > 0:
+        return (width, height)
+    return (0, 0)
+
+
+def item_current_divisor(op):
+    '''
+    当前生效的约数：选的值不是当前尺寸的公约数（或 <= 1）时按"不除"处理
+    '''
+    divisor = item_selected_divisor()
+    if divisor <= 1:
+        return 1
+    base_width, base_height = item_base_size(op)
+    if base_width <= 0 or base_height <= 0:
+        return divisor          # 拿不到基准尺寸就不拦，execute 那边会按图片尺寸除
+    if base_width % divisor or base_height % divisor:
+        return 1
+    return divisor
+
+
+# "可选的约数"菜单里最多列几个
+max_divisor_hint = 8
+
+# 约数的选择状态（模块级）：文件浏览器里点菜单项没法直接改"正在等待的那个操作符实例"的
+# 属性，所以菜单项调用 crafter.set_item_divisor 写这里，操作符的 draw/execute 都读它。
+# valid 是当前图片的可选约数 [(约数, 结果宽, 结果高)]，导入操作符每次重绘时刷新。
+item_divisor_state = {"value": 1, "valid": []}
+
+
+def item_selected_divisor():
+    '''
+    当前选中的原始约数（未校验），读模块级状态
+    '''
+    try:
+        return int(item_divisor_state["value"])
+    except Exception:
+        return 1
+
+
+def item_divisor_label():
+    '''
+    面板上显示的当前约数文字
+    '''
+    divisor = item_selected_divisor()
+    return "1（不除）" if divisor <= 1 else str(divisor)
+
+
+def update_item_size(op, context):
+    '''X/Y 被改了就把约数退回"不除"，免得留下除不尽的选项'''
+    item_divisor_state["value"] = 1
+
+
+def update_item_file_size(op, context):
+    '''
+    文件浏览器里选中文件后：把 X/Y 填成图片的实际像素尺寸，并打开自定义尺寸。
+    读不出尺寸就什么都不动（细分时按图片实际尺寸兜底）。
+    '''
+    width, height = item_image_size(op)
+    if width <= 0 or height <= 0:
+        return
+    op.width = width
+    op.height = height
+    item_divisor_state["value"] = 1
+    op.custome_size = True
+
+
+# ==================== 约数下拉菜单 ====================
+
+class VIEW3D_OT_CrafterSetItemDivisor(bpy.types.Operator):
+    '''把物品导入的约数设成 divisor（由约数菜单的条目调用）'''
+    bl_idname = "crafter.set_item_divisor"
+    bl_label = "Set Item Divisor"
+    bl_description = "设置物品导入时 X / Y 要除以的约数"
+    bl_options = {'INTERNAL'}
+
+    divisor: IntProperty(name="约数",
+                         default=1,
+                         min=1)#type: ignore
+
+    def execute(self, context):
+        item_divisor_state["value"] = max(1, int(self.divisor))
+        return {'FINISHED'}
+
+
+class CRAFTER_MT_item_divisor(bpy.types.Menu):
+    '''
+    约数下拉：条目按当前图片真正的公约数动态列出，条目本身是按钮。
+    （不能用动态枚举：Blender 会把 items=回调 的条目名显示成乱码，按钮文字一直正常）
+    '''
+    bl_idname = "CRAFTER_MT_item_divisor"
+    bl_label = "约数"
+
+    def draw(self, context):
+        layout = self.layout
+        current = item_selected_divisor()
+
+        def add_entry(value, text):
+            kwargs = {"text": text}
+            if value == current:
+                kwargs["icon"] = 'CHECKMARK'
+            layout.operator("crafter.set_item_divisor", **kwargs).divisor = value
+
+        add_entry(1, "1（不除）")
+        for divisor, width, height in item_divisor_state.get("valid", []):
+            # 约数与尺寸之间空两格（约数位数不同，两格看着更分得开）
+            add_entry(divisor, f"{divisor}  {width} x {height}")
+
 # ==================== 导入物体 ====================
 
 
@@ -21,16 +208,21 @@ class VIEW3D_OT_CrafterImportItem(bpy.types.Operator):#导入物体
     bl_description = "Import Minecraft item"
     bl_options = {'REGISTER', 'UNDO'}
     
+    # 注意：属性回调（update）拿到的 self 是 RNA 包装、没有实例方法，所以一律挂模块级函数
     filepath: StringProperty(name="dir item",
-                              subtype='FILE_PATH')#type: ignore
+                              subtype='FILE_PATH',
+                              update=update_item_file_size)#type: ignore
     custome_size: BoolProperty(name="Custome Size",
-                               default=False)#type: ignore
+                               default=True)#type: ignore
+    # X/Y 是细分用的尺寸；0 = 还没定，这时按图片实际尺寸走（选中文件会自动填成图片尺寸）
     width: IntProperty(name="X",
-                       default=16,
-                       min=1)#type: ignore
+                       default=0,
+                       min=0,
+                       update=update_item_size)#type: ignore
     height: IntProperty(name="Y",
-                         default=16,
-                         min=1)#type: ignore
+                         default=0,
+                         min=0,
+                         update=update_item_size)#type: ignore
     load_material: BoolProperty(name="加载材质",
                                 default=True)#type: ignore
 
@@ -43,13 +235,28 @@ class VIEW3D_OT_CrafterImportItem(bpy.types.Operator):#导入物体
         # 手动弹出文件选择器
         context.window_manager.fileselect_add(self)
         return {'RUNNING_MODAL'}
+
     def draw(self, context):
         layout = self.layout
         layout.prop(self, "load_material")
         layout.prop(self, "custome_size")
         if self.custome_size:
-            layout.prop(self, "width")
-            layout.prop(self, "height")
+            row_size = layout.row(align=True)
+            row_size.prop(self, "width")
+            row_size.prop(self, "height")
+        # 图片实际尺寸放在约数上面（选中文件时自动读出来）
+        image_width, image_height = item_image_size(self)
+        if image_width > 0 and image_height > 0:
+            layout.label(text=f"图片实际尺寸: {image_width} x {image_height}", icon="IMAGE_DATA")
+        # 约数是下拉菜单（Menu + 按钮条目）：条目按当前图片真正的公约数动态生成。
+        # 顺带把可选约数刷进模块级状态，菜单照着列。
+        base_width, base_height = item_base_size(self)
+        valid = common_divisors(base_width, base_height)[:max_divisor_hint]
+        item_divisor_state["valid"] = [(d, base_width // d, base_height // d) for d in valid]
+        layout.menu("CRAFTER_MT_item_divisor", text=f"约数: {item_divisor_label()}")
+        if base_width > 0 and base_height > 0:
+            divisor = item_current_divisor(self)
+            layout.label(text=f"细分尺寸: {base_width // divisor} x {base_height // divisor}")
     def execute(self, context: bpy.types.Context):
         dir_item = self.filepath
         addon_prefs = context.preferences.addons[__addon_name__].preferences
@@ -90,12 +297,14 @@ class VIEW3D_OT_CrafterImportItem(bpy.types.Operator):#导入物体
         bm = bmesh.new()
         bm.from_mesh(mesh)
 
-        # 获取图像尺寸
-        if self.custome_size:
-            width = self.width
-            height = self.height
-        else:
-            width, height = image_item.size
+        # 细分尺寸：自定义尺寸有 X/Y 就用 X/Y（选中文件时会自动填成图片尺寸），
+        # 否则用图片实际尺寸；约数在这里统一生效（64x64 除 4 → 16x16）
+        base_width, base_height = item_base_size(self)
+        if base_width <= 0 or base_height <= 0:
+            base_width, base_height = image_item.size
+        divisor = item_current_divisor(self)
+        width = max(1, int(base_width) // divisor)
+        height = max(1, int(base_height) // divisor)
         cuts_x = width - 1
         cuts_y = height - 1
 
@@ -106,6 +315,17 @@ class VIEW3D_OT_CrafterImportItem(bpy.types.Operator):#导入物体
         bm.edges.ensure_lookup_table()
         horizontal_edges, vertical_edges = get_boundary_edges_sorted(bm)
         bmesh.ops.subdivide_edges(bm, edges=vertical_edges, cuts=cuts_y, use_grid_fill=True)
+
+        # 模板是 XY 平面上的 1x1 方片（X 对应图片宽、Y 对应图片高，UV 铺满 0..1）。
+        # 长宽比不为 1:1 时按图片比例拉伸网格：短边保持原尺寸，长边拉长，
+        # 否则 16:9 之类的贴图会被压成正方形。
+        if width > 0 and height > 0 and width != height:
+            stretch = max(width, height) / min(width, height)
+            for vert in bm.verts:
+                if width > height:
+                    vert.co.x *= stretch
+                else:
+                    vert.co.y *= stretch
 
         # 更新网格并释放资源
         bm.to_mesh(mesh)
@@ -123,14 +343,15 @@ class VIEW3D_OT_CrafterImportItem(bpy.types.Operator):#导入物体
             bpy.ops.object.select_all(action='DESELECT')
             object_item.select_set(True)
             context.view_layer.objects.active = object_item
-            if "C-PBR_Parser" in bpy.data.node_groups:
-                # C-PBR_Parser 节点组存在 → 使用提取的加载函数（直接调用，不经过操作符）
-                # 该函数会在同目录查找 _n.png / _s.png / _a.png 作为 PBR 贴图
-                from .LoadMaterial import load_material_for_object
+            # 工程里已有一套同库的材质节点组 → 直接复用，只给这个物品挂材质
+            # （load_material_for_object 会在同目录查找 _n.png / _s.png / _a.png 作为 PBR 贴图）
+            from .LoadMaterial import can_reuse_material_setup, load_material_for_object
+            reusable, _reason = can_reuse_material_setup(context)
+            if reusable:
                 load_material_for_object(context, object_item)
             else:
-                # 没有 C-PBR_Parser → 走原有的操作符加载流程
-                bpy.ops.crafter.load_material()
+                # 没加载过 / 换了材质库 / 缺件 → 走操作符，那里重加载后再统一加载
+                bpy.ops.crafter.load_material(from_import=True)
 
         return  {'FINISHED'}
         

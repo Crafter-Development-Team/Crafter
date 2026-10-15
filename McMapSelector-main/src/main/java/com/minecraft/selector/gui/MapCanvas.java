@@ -12,7 +12,7 @@ import javax.swing.Timer;
  * 地图画布组件
  * 用于显示和交互Minecraft地图
  */
-public class MapCanvas extends JPanel {
+public class MapCanvas extends JPanel implements Scrollable {
 
     // 缩放限制常量
     private static final double MIN_SCALE = 0.1;
@@ -106,10 +106,28 @@ public class MapCanvas extends JPanel {
     
     public MapCanvas() {
         setPreferredSize(new Dimension(800, 600));
-        setBackground(Color.WHITE);
+        setBackground(CheckerBackground.DARK);
         
         setupMouseListeners();
     }
+
+    // 画布始终铺满视口：空地由自己画棋盘，不留滚动面板的底色边
+    @Override
+    public Dimension getPreferredScrollableViewportSize() { return getPreferredSize(); }
+
+    @Override
+    public int getScrollableUnitIncrement(Rectangle visibleRect, int orientation, int direction) { return 16; }
+
+    @Override
+    public int getScrollableBlockIncrement(Rectangle visibleRect, int orientation, int direction) {
+        return orientation == SwingConstants.HORIZONTAL ? visibleRect.width : visibleRect.height;
+    }
+
+    @Override
+    public boolean getScrollableTracksViewportWidth() { return true; }
+
+    @Override
+    public boolean getScrollableTracksViewportHeight() { return true; }
     
     private void setupMouseListeners() {
         MouseAdapter mouseHandler = new MouseAdapter() {
@@ -544,6 +562,9 @@ public class MapCanvas extends JPanel {
         g2d.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_SPEED);
         g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_OFF);
         
+        // 空地先铺棋盘底：图案固定在屏幕坐标上，拖动/缩放地图时不动
+        CheckerBackground.paint(g2d, getWidth(), getHeight());
+        
         if (image != null) {
             // 绘制图像
             int scaledWidth = (int) (image.getWidth() * scale);
@@ -594,7 +615,7 @@ public class MapCanvas extends JPanel {
             }
         } else {
             // 没有图像时显示提示
-            g2d.setColor(Color.GRAY);
+            g2d.setColor(new Color(0xCCCCCC));
             String message = "No map image loaded";
             FontMetrics fm = g2d.getFontMetrics();
             int x = (getWidth() - fm.stringWidth(message)) / 2;

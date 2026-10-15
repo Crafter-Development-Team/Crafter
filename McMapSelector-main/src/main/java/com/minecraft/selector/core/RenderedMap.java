@@ -27,6 +27,17 @@ public final class RenderedMap extends BufferedImage {
         heights[z * getWidth() + x] = height;
     }
 
+    /** 供增量裁剪就地改写高度（GUI 的 Y 带实时路径用）。 */
+    public void putHeightAt(int x, int z, int height) {
+        setHeightAt(x, z, height);
+    }
+
+    /** 一次性写入整幅高度（长度必须等于 width*height，行优先）。 */
+    public void putHeights(int[] source) {
+        if (source.length != heights.length) throw new IllegalArgumentException("heights length mismatch");
+        System.arraycopy(source, 0, heights, 0, heights.length);
+    }
+
     public static int heightAt(BufferedImage image, int x, int z) {
         return image instanceof RenderedMap ? ((RenderedMap) image).getHeightAt(x, z) : NO_HEIGHT;
     }

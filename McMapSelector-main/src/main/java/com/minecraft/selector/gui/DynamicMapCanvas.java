@@ -89,6 +89,9 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
     // 状态
     private boolean showGrid = false;
     private boolean showLoadingIndicator = true;
+    /** 加载指示的延迟阈值：短于它就别闪（换带时的短暂重载不该糊一片 Loading） */
+    private static final long LOADING_INDICATOR_DELAY_MS = 400;
+    private final java.util.Map<Point, Long> loadingSince = new java.util.concurrent.ConcurrentHashMap<>();
     private Rectangle lastViewport = new Rectangle();
     
     // 防抖相关
@@ -99,7 +102,7 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
     public DynamicMapCanvas() {
         this.logManager = LogManager.getInstance();
         
-        setBackground(Color.BLACK);
+        setBackground(CheckerBackground.DARK);
         setPreferredSize(new Dimension(800, 600));
         
         addComponentListener(new java.awt.event.ComponentAdapter() {
@@ -563,6 +566,9 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
         g2d.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_SPEED);
         g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_OFF);
         
+        // 空地先铺棋盘底：图案固定在屏幕坐标上，拖动/缩放地图时不动
+        CheckerBackground.paint(g2d, getWidth(), getHeight());
+        
         try {
             if (regionManager != null) {
                 drawRegions(g2d);
@@ -609,7 +615,9 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
                     
                 } else if (availableRegions.contains(regionCoord)) {
                     if (regionManager.isRegionLoading(regionCoord)) {
-                        // 绘制加载中的区域
+                        // 绘制加载中的区域：没超过阈值就什么都不画（旧瓦片/棋盘保持不动）
+                        long since = loadingSince.computeIfAbsent(regionCoord, k -> System.currentTimeMillis());
+                        if (System.currentTimeMillis() - since < LOADING_INDICATOR_DELAY_MS) continue;
                         g2d.setColor(LOADING_COLOR);
                         g2d.fillRect(screenX, screenY, screenWidth, screenHeight);
                         
@@ -623,7 +631,9 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
                             g2d.drawString(text, textX, textY);
                         }
                     } else {
-                        // 绘制未加载但可用的区域
+                        // 绘制未加载但可用的区域：同样延迟
+                        long since = loadingSince.computeIfAbsent(regionCoord, k -> System.currentTimeMillis());
+                        if (System.currentTimeMillis() - since < LOADING_INDICATOR_DELAY_MS) continue;
                         g2d.setColor(LOADING_COLOR);
                         g2d.fillRect(screenX, screenY, screenWidth, screenHeight);
                         
@@ -748,11 +758,13 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
     // RegionLoadListener 实现
     @Override
     public void onRegionLoaded(Point regionCoord, RegionTile tile) {
+        loadingSince.remove(regionCoord);
         SwingUtilities.invokeLater(() -> { refreshHover(); repaint(); });
     }
     
     @Override
     public void onRegionUnloaded(Point regionCoord) {
+        loadingSince.remove(regionCoord);
         SwingUtilities.invokeLater(() -> { refreshHover(); repaint(); });
     }
     
@@ -763,6 +775,7 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
     
     @Override
     public void onLoadingFailed(Point regionCoord, Exception error) {
+        loadingSince.remove(regionCoord);
         SwingUtilities.invokeLater(() -> { refreshHover(); repaint(); });
         logManager.error("Region load failed: r." + regionCoord.x + "." + regionCoord.y + ".mca", "DynamicMapCanvas", error);
     }

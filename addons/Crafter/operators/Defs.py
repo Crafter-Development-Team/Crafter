@@ -821,10 +821,10 @@ def add_node_moving_texture(node_tex, nodes, links, list_info_moving, parent=Non
     dir_mcmeta = os.path.join(bpy.path.abspath(dir_image), fuq_bl_dot_number(node_tex.image.name) + ".mcmeta")
 
     if len(list_info_moving) > 0:
-        if list_info_moving[0] == None:
-            row_base = 1
-        else:
-            row_base = list_info_moving[0][1][0]
+        # list_info_moving[0][1] 是动画信息 [row, frametime, ...]；为 None 的条目（"复用某个
+        # 节点的输出"那种）拿不到 row，退回 1，别当成可下标的对象
+        info_base = None if list_info_moving[0] is None else list_info_moving[0][1]
+        row_base = info_base[0] if info_base is not None else 1
     else:
         row_base = None
 
@@ -1412,13 +1412,38 @@ def add_node_pbr(location_base_tex, y_subtract, dir, nodes, links, list_info_mov
     else:
         return None
 
-def load_normal_and_PBR(node_tex_base, nodes, links, parent=None):
+def reuse_moving_info_entry(node_tex):
+    '''
+    取贴图节点"已有的动态纹理"信息条目，格式与 add_node_moving_texture 的返回值一致：
+        [动态纹理_尾节点, [row, frametime, frames, list_frames, interpolate]]
+    row 从尾节点的 "row" 输入读回（它就等于原始 info[0]，见 add_node_moving_texture 结尾）；
+    动画参数填占位值：这个条目只会被取 [1][0] 当 row_base，不参与新贴图的动画参数比对。
+    node_tex: 贴图节点；不是由 Crafter-动态纹理_尾 驱动的返回 None
+    '''
+    info = node_moving_tex_info(node_tex)
+    node_from = info[1] if info[0] else None
+    if node_from is None or getattr(node_from, "node_tree", None) is None:
+        return None
+    if not node_from.node_tree.name.startswith("Crafter-动态纹理_尾"):
+        return None
+    try:
+        row = float(node_from.inputs["row"].default_value)
+    except Exception:
+        return None
+    return [node_from, [row, 1, 1, [[0, 1]], False]]
+
+
+def load_normal_and_PBR(node_tex_base, nodes, links, parent=None, want_normal=True, want_pbr=True, keep_moving_texture=False):
     '''
     以基础色节点添加法向贴图节点和PBR贴图节点、连接并添加动态纹理节点
     node_tex_base: 基础色节点
     nodes: 目标材质节点组
     links:目标材质连接组
     parent: 新建节点(含动态纹理帧)要挂到的父帧（overlay 帧），None 表示不挂
+    want_normal / want_pbr: 去同目录找哪几类贴图（False = 这类不建节点，返回 None）
+    keep_moving_texture: 基础色已经由动态纹理驱动时复用既有那份、不再新建一份。
+                        补缺加载会带着已有的基础色再走一遍，不能给它叠第二份动态纹理帧。
+    return: (法向节点, PBR节点)，没建的、或同目录没找到的为 None
     '''
     node_tex_normal = None
     node_tex_PBR = None
@@ -1438,23 +1463,30 @@ def load_normal_and_PBR(node_tex_base, nodes, links, parent=None):
             dir_a = None
         
         list_info_moving = []
-        info_moving_tex = add_node_moving_texture(node_tex_base, nodes, links, list_info_moving, parent=parent)
-        list_info_moving.append(info_moving_tex)
+        if keep_moving_texture:
+            # 基础色已经由动态纹理驱动 → 直接把既有那份的信息当首项，不再给它建第二份。
+            # 新贴图是静态图时会照常拿到"UV缩放"节点（row_base 取自既有帧），动画不会跑偏。
+            entry_existing = reuse_moving_info_entry(node_tex_base)
+            if entry_existing is not None:
+                list_info_moving.append(entry_existing)
+        if not list_info_moving:
+            info_moving_tex = add_node_moving_texture(node_tex_base, nodes, links, list_info_moving, parent=parent)
+            list_info_moving.append(info_moving_tex)
 
-        node_tex_normal = None
-        node_tex_PBR = None
         location_base_tex = node_tex_base.location
 
-        node_tex_normal = add_node_pbr(location_base_tex, 300, dir_n, nodes, links, list_info_moving, parent=parent)
-        # 有 _a 用 _a，否则用 _s：缺哪个都不能把已经建好的那张覆盖成 None
-        if dir_s is not None:
-            node_pbr_s = add_node_pbr(location_base_tex, 600, dir_s, nodes, links, list_info_moving, parent=parent)
-            if node_pbr_s is not None:
-                node_tex_PBR = node_pbr_s
-        if dir_a is not None:
-            node_pbr_a = add_node_pbr(location_base_tex, 600, dir_a, nodes, links, list_info_moving, parent=parent)
-            if node_pbr_a is not None:
-                node_tex_PBR = node_pbr_a
+        if want_normal:
+            node_tex_normal = add_node_pbr(location_base_tex, 300, dir_n, nodes, links, list_info_moving, parent=parent)
+        if want_pbr:
+            # 有 _a 用 _a，否则用 _s：缺哪个都不能把已经建好的那张覆盖成 None
+            if dir_s is not None:
+                node_pbr_s = add_node_pbr(location_base_tex, 600, dir_s, nodes, links, list_info_moving, parent=parent)
+                if node_pbr_s is not None:
+                    node_tex_PBR = node_pbr_s
+            if dir_a is not None:
+                node_pbr_a = add_node_pbr(location_base_tex, 600, dir_a, nodes, links, list_info_moving, parent=parent)
+                if node_pbr_a is not None:
+                    node_tex_PBR = node_pbr_a
 
     return node_tex_normal, node_tex_PBR
 

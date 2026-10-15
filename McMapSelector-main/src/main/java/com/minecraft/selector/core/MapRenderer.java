@@ -32,7 +32,10 @@ public class MapRenderer {
         }
         public BlockInfo(String blockId,int height,Map<String,String> properties,Color surfaceColor) {
             this.blockId=blockId;this.height=height;
-            this.properties=Collections.unmodifiableMap(new HashMap<>(properties));this.surfaceColor=surfaceColor;
+            // 空属性是常态（缓存路径每个像素一个 BlockInfo）：别为它复制 HashMap
+            this.properties=properties.isEmpty()?Collections.emptyMap()
+                :Collections.unmodifiableMap(new HashMap<>(properties));
+            this.surfaceColor=surfaceColor;
         }
 
         public String getBlockId() {
@@ -57,6 +60,7 @@ public class MapRenderer {
     private final SurfaceMode surfaceMode;
     private final BlockColors.Palette scanPalette;
     private final Integer clipY;
+    private final Integer clipMinY;
 
     public static boolean isNetherRegion(String path) {
         for (File part = new File(path).getAbsoluteFile(); part != null; part = part.getParentFile()) {
@@ -99,7 +103,14 @@ public class MapRenderer {
         this(maxWorkers,progressCallback,surfaceMode,clipY,BlockColors.snapshot());
     }
     public MapRenderer(int maxWorkers,ProgressCallback progressCallback,SurfaceMode surfaceMode,Integer clipY,BlockColors.Palette palette) {
-        this.clipY=clipY;this.scanPalette=Objects.requireNonNull(palette);
+        this(maxWorkers,progressCallback,surfaceMode,clipY,null,palette);
+    }
+    public MapRenderer(int maxWorkers,ProgressCallback progressCallback,SurfaceMode surfaceMode,Integer clipY,Integer clipMinY) {
+        this(maxWorkers,progressCallback,surfaceMode,clipY,clipMinY,BlockColors.snapshot());
+    }
+    /** clipY=扫描上界, clipMinY=扫描下界(含)；两者为 null 表示该侧不裁剪。 */
+    public MapRenderer(int maxWorkers,ProgressCallback progressCallback,SurfaceMode surfaceMode,Integer clipY,Integer clipMinY,BlockColors.Palette palette) {
+        this.clipY=clipY;this.clipMinY=clipMinY;this.scanPalette=Objects.requireNonNull(palette);
         if (maxWorkers < 1) throw new IllegalArgumentException("maxWorkers must be positive");
         this.surfaceMode = Objects.requireNonNull(surfaceMode);
         this.maxWorkers = maxWorkers;
@@ -113,8 +124,9 @@ public class MapRenderer {
     public BlockInfo[][] getTopBlocks(String mcaFilePath, int regionSize, int sampleInterval) throws IOException {
         if (regionSize < 1 || regionSize > 32 || sampleInterval < 1 || sampleInterval > 16)
             throw new IllegalArgumentException("regionSize must be 1..32 and sampleInterval 1..16");
-        final boolean hideRoof = clipY==null && (surfaceMode == SurfaceMode.NETHER_INTERIOR ||
-            (surfaceMode == SurfaceMode.AUTO && isNetherRegion(mcaFilePath)));
+        // 上界裁剪不再关闭下界去顶：否则一旦框了 Y 带就永远看不到下界内部。
+        final boolean hideRoof = surfaceMode == SurfaceMode.NETHER_INTERIOR ||
+            (surfaceMode == SurfaceMode.AUTO && isNetherRegion(mcaFilePath));
         com.minecraft.selector.utils.LogManager.getInstance().info("Scanning region: "+new File(mcaFilePath).getName(),"MapRenderer");
         System.out.println("正在处理区域文件: " + mcaFilePath);
         System.out.println("区域大小: " + regionSize + "x" + regionSize + " 区块");
@@ -230,6 +242,160 @@ public class MapRenderer {
     }
     
     /**
+     * 扫一个 region，留下每列的可见层（按"无 Y 带"收集），之后换 Y 带只做内存重合成。
+     * 下界去顶的 region（NETHER_INTERIOR，或 AUTO 下的下界路径）返回 null：那条分支的
+     * roof/cavity 判定依赖扫描窗口本身，不能靠过滤层栈复现，调用方回落到全量渲染。
+     */
+    public ColumnCache scanRegion(String mcaFilePath,int regionSize) throws IOException {
+        if(regionSize<1||regionSize>32) throw new IllegalArgumentException("regionSize must be 1..32");
+        if(surfaceMode==SurfaceMode.NETHER_INTERIOR || (surfaceMode==SurfaceMode.AUTO && isNetherRegion(mcaFilePath))) return null;
+
+        long start=System.currentTimeMillis();
+        Region region = Region.fromFile(mcaFilePath);
+        List<int[]> populatedChunks=new ArrayList<>();
+        for(int x=0;x<regionSize;x++) for(int z=0;z<regionSize;z++) if(region.chunkExists(x,z)) populatedChunks.add(new int[]{x,z});
+        ColumnCache.Builder builder=new ColumnCache.Builder(regionSize);
+        if(populatedChunks.isEmpty()) return builder.build();
+
+        int batchSize=Math.max(1,populatedChunks.size()/maxWorkers);
+        List<Future<Map<String,ColumnCache.ChunkColumns>>> futures=new ArrayList<>();
+        for(int i=0;i<populatedChunks.size();i+=batchSize) {
+            final List<int[]> batch=populatedChunks.subList(i,Math.min(populatedChunks.size(),i+batchSize));
+            futures.add(executorService.submit(() -> {
+                Map<String,ColumnCache.ChunkColumns> results=new HashMap<>();
+                for(int[] coord:batch) {
+                    if(Thread.currentThread().isInterrupted()) break;
+                    try {
+                        Chunk chunk=region.getChunk(coord[0],coord[1]);
+                        results.put(coord[0]+","+coord[1],chunk==null?null:scanChunkColumns(chunk));
+                    } catch(Exception e) {
+                        throw new IllegalStateException("Cannot read chunk "+coord[0]+","+coord[1],e);
+                    }
+                }
+                return results;
+            }));
+        }
+        for(Future<Map<String,ColumnCache.ChunkColumns>> future:futures) {
+            try {
+                for(Map.Entry<String,ColumnCache.ChunkColumns> entry:future.get().entrySet()) {
+                    String[] coords=entry.getKey().split(",");
+                    builder.put(Integer.parseInt(coords[0]),Integer.parseInt(coords[1]),entry.getValue());
+                }
+            } catch(InterruptedException interrupted) {
+                for(Future<?> pending:futures) pending.cancel(true);
+                Thread.currentThread().interrupt();
+                throw new IOException("Region scan cancelled",interrupted);
+            } catch(Exception e) {
+                for(Future<?> pending:futures) pending.cancel(true);
+                throw new IOException("Cannot scan region "+mcaFilePath,e);
+            }
+        }
+        ColumnCache cache=builder.build();
+        System.out.println("层缓存建立完成: "+new File(mcaFilePath).getName()+" 段数="+cache.getRunCount()
+            +" 耗时="+((System.currentTimeMillis()-start)/1000.0)+"秒");
+        return cache;
+    }
+
+    /**
+     * 一个区块的 16x16 列，整列收集（不设 Y 带、也不在饱和处提前退出），
+     * 供任意 Y 带事后重合成。同一 Block 实例的颜色只解析一次。
+     */
+    private ColumnCache.ChunkColumns scanChunkColumns(Chunk chunk) {
+        ColumnCache.ChunkColumns columns=new ColumnCache.ChunkColumns();
+        List<Chunk.Section> sections=chunk.getSections();
+        sections.sort(Comparator.comparingInt(Chunk.Section::getY).reversed());
+        Set<Chunk.Section> airSections=new HashSet<>();
+        for(Chunk.Section section:sections) {
+            List<Block> palette=section.getPalette();
+            if(palette.isEmpty()||palette.stream().allMatch(block->BlockColors.isAirBlock(block.getId()))) airSections.add(section);
+        }
+        // 有方块实体的区块，颜色跟坐标有关，不能按方块实例缓存
+        final boolean entities=chunk.hasBlockEntities();
+        final Map<Block,Integer> memo=entities?null:new IdentityHashMap<>();
+        for(int z=0;z<16;z++) {
+            for(int x=0;x<16;x++) {
+                int column=z*16+x;
+                for(Chunk.Section section:sections) {
+                    if(airSections.contains(section)) continue;
+                    long bottom=(long)section.getY()*16;
+                    if(bottom<=Integer.MIN_VALUE || bottom+15>Integer.MAX_VALUE) throw new IllegalArgumentException("Section Y outside supported world coordinates");
+                    for(int y=15;y>=0;y--) {
+                        Block block=section.getBlock(x,y,z);
+                        String blockId=block.getId();
+                        if(BlockColors.isAirBlock(blockId)) continue;
+                        int argb;
+                        Integer cached=memo==null?null:memo.get(block);
+                        if(cached!=null) argb=cached;
+                        else {
+                            int worldY=(int)bottom+y;
+                            Color associated=entities?BlockEntityColors.resolve(blockId,chunk.getBlockEntity(x,worldY,z),scanPalette):null;
+                            Color color=associated!=null?associated:surfaceColor(blockId,block.getProperties(),scanPalette);
+                            if(associated!=null) scanPalette.recordAssociated(blockId);
+                            argb=color.getRGB();
+                            if(memo!=null) memo.put(block,argb);
+                        }
+                        if(((argb>>>24)&0xFF)==0) continue; // 全透明的层本来就不进层栈
+                        columns.addLayer(column,(int)bottom+y,argb,blockId);
+                    }
+                }
+            }
+        }
+        return columns;
+    }
+
+    /** 一次整列扫描的产物：当前 Y 带的结果 + 换带用的层缓存 + 本次用的调色板。 */
+    public static final class RegionScan {
+        public final ColumnCache cache;            // null = 该 region 不可缓存（下界去顶）
+        public final BlockColors.Palette palette;
+        private final MapRenderer renderer;
+        private final BlockInfo[][] blocksFallback;
+        private final RenderedMap imageFallback;
+        private final Integer bandTop, bandBottom;
+        private BlockInfo[][] blocks;
+        private RenderedMap image;
+
+        RegionScan(ColumnCache cache, BlockColors.Palette palette, MapRenderer renderer,
+                   BlockInfo[][] blocksFallback, RenderedMap imageFallback, Integer bandTop, Integer bandBottom) {
+            this.cache = cache;
+            this.palette = palette;
+            this.renderer = renderer;
+            this.blocksFallback = blocksFallback;
+            this.imageFallback = imageFallback;
+            this.bandTop = bandTop;
+            this.bandBottom = bandBottom;
+        }
+
+        /** 逐列的 BlockInfo（测试/兼容用，按需构造）。 */
+        public BlockInfo[][] topBlocks() {
+            if (blocks == null) blocks = cache != null ? cache.topBlocks(bandTop, bandBottom) : blocksFallback;
+            return blocks;
+        }
+
+        /** 出图：有缓存走数组快路径（不建 BlockInfo），否则用刚才那次带状渲染的结果。 */
+        public RenderedMap image() {
+            if (image == null) {
+                image = cache != null ? cache.toImage(bandTop, bandBottom)
+                    : (imageFallback != null ? imageFallback : (RenderedMap) renderer.renderToPng(blocksFallback, 1));
+            }
+            return image;
+        }
+    }
+
+    /**
+     * 扫一次，同时给出当前 Y 带的出图数据和层缓存 —— 让 GUI 渲染完就具备实时换带的能力，
+     * 不必再单独扫一遍。allowCache=false 或该 region 不可缓存时，退回原来的带状扫描。
+     */
+    public RegionScan scanRegionBlocks(String mcaFilePath,int regionSize,Integer bandTop,Integer bandBottom,
+                                       boolean allowCache) throws IOException {
+        ColumnCache cache=allowCache?scanRegion(mcaFilePath,regionSize):null;
+        if(cache==null) {
+            BlockInfo[][] blocks=getTopBlocks(mcaFilePath,regionSize,1);
+            return new RegionScan(null,scanPalette,this,blocks,(RenderedMap)renderToPng(blocks,1),bandTop,bandBottom);
+        }
+        return new RegionScan(cache,scanPalette,this,null,null,bandTop,bandBottom);
+    }
+
+    /**
      * 处理一批区块
      */
     private Map<String, BlockInfo[][]> processChunkBatch(Region region, List<int[]> chunkCoords,
@@ -299,41 +465,61 @@ public class MapRenderer {
         return columns;
     }
 
-    private BlockInfo findSurface(Chunk chunk,List<Chunk.Section> sections,Set<Chunk.Section> airSections,
-                                  int x,int z,boolean hideRoof) {
+    /** 一列的扫描结果：带内收集到的可见层（top→down）+ 下界去顶需要的两个标记。 */
+    private static final class ColumnScan {
+        final List<Layer> ordinary = new ArrayList<>(), interior = new ArrayList<>();
+        boolean roofFound, cavityFound;
+        BlockInfo composite() { return MapRenderer.composite(roofFound ? interior : ordinary); }
+    }
+
+    /**
+     * 收集一列的可见层。bandTop/bandBottom 为 null 表示该侧不裁。
+     * 收集在 alpha 饱和处停止：更深的层改变不了合成结果，这与原来的提前 return 等价。
+     */
+    private ColumnScan scanColumn(Chunk chunk,List<Chunk.Section> sections,Set<Chunk.Section> airSections,
+                                  int x,int z,boolean hideRoof,Integer bandTop,Integer bandBottom) {
         // Discover the Nether ceiling/cavity first in the same descending pass. Keep the
         // ordinary surface as fallback for columns without ceiling bedrock.
-        List<Layer> ordinary=new ArrayList<>(), interior=new ArrayList<>();
+        ColumnScan out=new ColumnScan();
         boolean roofFound=false,cavityFound=false;
         double ordinaryAlpha=0,interiorAlpha=0;
         long previousBottom=Long.MAX_VALUE;
+        scan:
         for(Chunk.Section section:sections) {
             long bottom=(long)section.getY()*16,top=bottom+15;
             if(bottom<=Integer.MIN_VALUE || top>Integer.MAX_VALUE) throw new IllegalArgumentException("Section Y outside supported world coordinates");
+            if(bandBottom!=null && top<bandBottom) break; // sections 已按 Y 降序，更低的整段都在带外
             if(roofFound && top<previousBottom-1) cavityFound=true;
             previousBottom=bottom;
             if(airSections.contains(section)) {if(roofFound) cavityFound=true;continue;}
             for(int y=15;y>=0;y--) {
                 Block block=section.getBlock(x,y,z);String id=block.getId();int worldY=(int)bottom+y;
-                if(clipY!=null && worldY>clipY) continue;
+                if(bandTop!=null && worldY>bandTop) continue;
+                if(bandBottom!=null && worldY<bandBottom) break; // 到 Y 带底部，本列更低的层不再参与合成
                 if(BlockColors.isAirBlock(id)) {if(roofFound) cavityFound=true;continue;}
                 if(hideRoof && !roofFound && worldY>=32 && "bedrock".equals(id)) roofFound=true;
                 if(!roofFound && ordinaryAlpha<0.995) {
                     Layer layer=layer(chunk,block,x,worldY,z);if(layer.color.getAlpha()>0) {
-                        ordinary.add(layer);ordinaryAlpha+=(1-ordinaryAlpha)*layer.color.getAlpha()/255.0;
-                        if(!hideRoof && ordinaryAlpha>=0.995) return composite(ordinary);
+                        out.ordinary.add(layer);ordinaryAlpha+=(1-ordinaryAlpha)*layer.color.getAlpha()/255.0;
+                        if(!hideRoof && ordinaryAlpha>=0.995) break scan;
                     }
                 } else if(roofFound && cavityFound) {
                     Layer layer=layer(chunk,block,x,worldY,z);if(layer.color.getAlpha()>0) {
-                        interior.add(layer);interiorAlpha+=(1-interiorAlpha)*layer.color.getAlpha()/255.0;
-                        if(interiorAlpha>=0.995) return composite(interior);
+                        out.interior.add(layer);interiorAlpha+=(1-interiorAlpha)*layer.color.getAlpha()/255.0;
+                        if(interiorAlpha>=0.995) break scan;
                     }
                 }
             }
         }
-        return composite(roofFound?interior:ordinary);
+        out.roofFound=roofFound;out.cavityFound=cavityFound;
+        return out;
     }
-    private static final class Layer {
+
+    private BlockInfo findSurface(Chunk chunk,List<Chunk.Section> sections,Set<Chunk.Section> airSections,
+                                  int x,int z,boolean hideRoof) {
+        return scanColumn(chunk,sections,airSections,x,z,hideRoof,clipY,clipMinY).composite();
+    }
+    static final class Layer {
         final Block block;final int y;final Color color;
         Layer(Block block,int y,Color color) {this.block=block;this.y=y;this.color=color;}
     }
@@ -409,31 +595,26 @@ public class MapRenderer {
 
         // 预处理所有方块ID及其颜色，避免在循环中重复查找
         final BlockColors.Palette renderPalette = scanPalette;
-        
-        // 创建RGBA图像
-        RenderedMap image = new RenderedMap(width, height);
-        int[] pixels = new int[width * height];
-
-        // 高度差阈值和最大值
-        final int HEIGHT_DIFF_THRESHOLD = 3;
-        final int MAX_HEIGHT_DIFF = 50;
-        final int[][] directions = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
         final Color ERROR_COLOR = new Color(255, 0, 255, 255);
         final AtomicInteger errorCount = new AtomicInteger(0);
 
         // 并行处理每一行
+        // 第一趟：从 BlockInfo 抽出「高度 + 基色」两个数组（之后不再需要 BlockInfo）
+        final int[] heights = new int[width * height];
+        final int[] baseColors = new int[width * height];
         IntStream.range(0, height).parallel().forEach(i -> {
             for (int j = 0; j < width; j++) {
+                int index = i * width + j;
                 try {
                     BlockInfo currentBlock = topBlocks[i][j];
                     String blockId = currentBlock != null ? currentBlock.getBlockId() : null;
                     int currentHeight = currentBlock != null && !BlockColors.isAirBlock(blockId)
                         ? currentBlock.getHeight() : RenderedMap.NO_HEIGHT;
-                    image.setHeightAt(j, i, currentHeight);
+                    heights[index] = currentHeight;
 
                     Color baseColor;
                     if (currentHeight == RenderedMap.NO_HEIGHT) {
-                        baseColor = new Color(0, 0, 0, 0);
+                        baseColor = TRANSPARENT;
                     } else if (blockId == null) {
                         baseColor = ERROR_COLOR;
                         errorCount.incrementAndGet();
@@ -441,52 +622,17 @@ public class MapRenderer {
                         baseColor=currentBlock.getSurfaceColor()!=null?currentBlock.getSurfaceColor():
                             surfaceColor(blockId,currentBlock.getProperties(),renderPalette);
                     }
-
-                    // 检查相邻像素的高度差
-                    boolean shouldDrawEdge = false;
-                    int maxHeightDiff = 0;
-
-                    for (int[] dir : directions) {
-                        int ni = i + dir[0];
-                        int nj = j + dir[1];
-
-                        if (ni >= 0 && ni < height && nj >= 0 && nj < width) {
-                            BlockInfo neighborBlock = topBlocks[ni][nj];
-                            if (currentHeight == RenderedMap.NO_HEIGHT || neighborBlock == null ||
-                                BlockColors.isAirBlock(neighborBlock.getBlockId()) ||
-                                neighborBlock.getHeight() == RenderedMap.NO_HEIGHT) continue;
-                            int neighborHeight = neighborBlock.getHeight();
-
-                            int heightDiff = (int) Math.min(Integer.MAX_VALUE, Math.abs((long) currentHeight - neighborHeight));
-                            if (heightDiff > HEIGHT_DIFF_THRESHOLD) {
-                                shouldDrawEdge = true;
-                                maxHeightDiff = Math.max(maxHeightDiff, heightDiff);
-                            }
-                        }
-                    }
-
-                    int pixelValue;
-                    if (shouldDrawEdge) {
-                        float intensity = Math.min(1.0f, (float) maxHeightDiff / MAX_HEIGHT_DIFF);
-                        int r = (int) (baseColor.getRed() * (1 - intensity * 0.7f));
-                        int g = (int) (baseColor.getGreen() * (1 - intensity * 0.7f));
-                        int b = (int) (baseColor.getBlue() * (1 - intensity * 0.7f));
-                        pixelValue = (baseColor.getAlpha() << 24) | (r << 16) | (g << 8) | b;
-                    } else {
-                        pixelValue = baseColor.getRGB();
-                    }
-
-                    pixels[i * width + j] = pixelValue;
-
+                    baseColors[index] = baseColor.getRGB();
                 } catch (Exception e) {
-                    pixels[i * width + j] = ERROR_COLOR.getRGB();
+                    heights[index] = RenderedMap.NO_HEIGHT;
+                    baseColors[index] = ERROR_COLOR.getRGB();
                     errorCount.incrementAndGet();
                 }
             }
         });
 
-        // 一次性设置所有像素
-        image.setRGB(0, 0, width, height, pixels, 0, width);
+        // 第二趟：描边 + 写像素（与缓存路径共用同一套规则）
+        RenderedMap image = renderArrays(width, height, heights, baseColors);
 
         if (errorCount.get() > 0) {
             System.out.println("\n注意：处理过程中有 " + errorCount.get() + " 个像素出现错误");
@@ -497,6 +643,59 @@ public class MapRenderer {
         System.out.println("渲染完成，耗时: " + (totalTime / 1000.0) + "秒");
         
         return image;
+    }
+
+    /**
+     * 由「每像素高度 + 每像素基色」两个数组直接出图 —— 描边规则与 {@link #renderToPng} 完全同一套，
+     * 但不需要逐个像素构造 BlockInfo（Y 带实时重合成走这条路，避免每帧上百万对象）。
+     */
+    public static RenderedMap renderArrays(int width, int height, int[] heights, int[] baseColors) {
+        RenderedMap image = new RenderedMap(width, height);
+        int[] pixels = new int[width * height];
+        IntStream.range(0, height).parallel().forEach(i -> {
+            for (int j = 0; j < width; j++) {
+                int index = i * width + j;
+                int current = heights[index];
+                int left = j > 0 ? heights[index - 1] : RenderedMap.NO_HEIGHT;
+                int right = j + 1 < width ? heights[index + 1] : RenderedMap.NO_HEIGHT;
+                int up = i > 0 ? heights[index - width] : RenderedMap.NO_HEIGHT;
+                int down = i + 1 < height ? heights[index + width] : RenderedMap.NO_HEIGHT;
+                pixels[index] = shadedPixel(baseColors[index], current, left, right, up, down);
+            }
+        });
+        image.setRGB(0, 0, width, height, pixels, 0, width);
+        image.putHeights(heights);
+        return image;
+    }
+
+    /**
+     * 单像素规则：空列直接透明；否则四邻高度差 &gt; 3 时按最大差值压暗（强度上限 1，最多压 70%）。
+     * 邻格为空气/越界都用 NO_HEIGHT 表示。
+     */
+    public static int shadedPixel(int baseArgb, int height, int left, int right, int up, int down) {
+        if (height == RenderedMap.NO_HEIGHT) return baseArgb;
+        int maxDiff = 0;
+        maxDiff = edgeDiff(height, left, maxDiff);
+        maxDiff = edgeDiff(height, right, maxDiff);
+        maxDiff = edgeDiff(height, up, maxDiff);
+        maxDiff = edgeDiff(height, down, maxDiff);
+        if (maxDiff == 0) return baseArgb;
+        float intensity = Math.min(1.0f, (float) maxDiff / MAX_HEIGHT_DIFF);
+        int a = (baseArgb >>> 24) & 0xFF;
+        int r = (int) (((baseArgb >> 16) & 0xFF) * (1 - intensity * 0.7f));
+        int g = (int) (((baseArgb >> 8) & 0xFF) * (1 - intensity * 0.7f));
+        int b = (int) ((baseArgb & 0xFF) * (1 - intensity * 0.7f));
+        return (a << 24) | (r << 16) | (g << 8) | b;
+    }
+
+    private static final int MAX_HEIGHT_DIFF = 50;
+    private static final int HEIGHT_DIFF_THRESHOLD = 3;
+    private static final Color TRANSPARENT = new Color(0, 0, 0, 0);
+
+    private static int edgeDiff(int height, int neighbour, int maxDiff) {
+        if (neighbour == RenderedMap.NO_HEIGHT) return maxDiff;
+        int diff = Math.abs(height - neighbour);
+        return diff > HEIGHT_DIFF_THRESHOLD ? Math.max(maxDiff, diff) : maxDiff;
     }
 
     /**

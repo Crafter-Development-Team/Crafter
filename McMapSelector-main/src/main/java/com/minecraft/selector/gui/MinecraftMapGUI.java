@@ -4,6 +4,7 @@ import com.minecraft.selector.core.MapRenderer;
 import com.minecraft.selector.core.RenderedMap;
 import com.minecraft.selector.core.MinecraftResourceExtractor;
 import com.minecraft.selector.core.BlockColors;
+import com.minecraft.selector.core.ColumnCache;
 import com.minecraft.selector.core.ResourceOptions;
 import com.minecraft.selector.nbt.NBTReader;
 import com.minecraft.selector.utils.FileUtils;
@@ -42,10 +43,10 @@ public class MinecraftMapGUI extends JFrame {
     private JLabel regionLabel;
     private JLabel coordDisplayLabel;
     private JLabel fileInfoLabel;
+    /** 右下角常驻的 Y 带状态：实时路径走的是哪条一眼可见 */
+    private JLabel ybandLabel;
 
-    private JTextField minYEntry;
-    private JTextField maxYEntry;
-    private StyledComponents.DualRangeSlider heightRangeSlider;
+    private StyledComponents.VerticalRangeSlider heightRangeSlider;
     private JComboBox<String> lodDropdown;
     private JTextField xCoordEntry;
     private JTextField zCoordEntry;
@@ -66,18 +67,30 @@ public class MinecraftMapGUI extends JFrame {
 
     private void resetSurfaceView() {
         surfaceMode = hideNetherRoofCheckbox.isSelected() ? MapRenderer.SurfaceMode.AUTO : MapRenderer.SurfaceMode.TOP;
-        // Height choices made during preparation apply when the first viewport is created.
-        // In particular --render-y's debounce must not invalidate the world loading worker.
+        // Height choices made during preparation apply when the first viewport is created:
+        // the debounce must not invalidate the world loading worker.
         if(loadingPanel.getPhase()==LoadingPhasePanel.Phase.PREPARING) return;
         ++viewGeneration;
         coordDisplayLabel.setText("X: —  Y: —  Z: —");
         dynamicMapManager.clear();
         mapCanvas.setImage(null);
         mapImage = null;
+        sourceTop = null;
+        sourceBottom = null;
+        previewCut = false;
+        displayedTop = null;
+        displayedBottom = null;
         if (isDynamicMode && dynamicRegionManager != null) {
-            dynamicRegionManager.shutdown();
-            dynamicRegionManager = createDynamicRegionManager();
-            dynamicMapCanvas.setRegionManager(dynamicRegionManager);
+            if (dynamicRegionManager.getSurfaceMode() != surfaceMode) {
+                // 去顶开关动了：模式变了，必须重建管理器
+                dynamicRegionManager.shutdown();
+                dynamicRegionManager = createDynamicRegionManager();
+                dynamicMapCanvas.setRegionManager(dynamicRegionManager);
+            } else {
+                // 只是 Y 带变了：让已加载瓦片用层缓存重合成，不重载、不闪 loading
+                dynamicRegionManager.setBand(heightRangeSlider.getUpperValue(), heightRangeSlider.getLowerValue());
+                dynamicMapCanvas.repaint();
+            }
         } else if (lastMcaPath != null) {
             renderMap(lastMcaPath);
         } else if (savePath != null) {
@@ -113,10 +126,451 @@ public class MinecraftMapGUI extends JFrame {
     private final ResourceOptions colorResources=ResourceOptions.launch();
     private String lastMcaPath;
     private String singleResourcePath;
-    private RenderHeightPanel renderHeightPanel;
     private LoadingPhasePanel loadingPanel;
     private javax.swing.Timer heightDebounce;
     private String programDir;
+
+    // ── Y 带实时重合成用的层缓存（键 = mca 绝对路径）──
+    // 实测约 5 段/列 ≈ 31MB 一个 region，所以按堆内存决定最多缓存几个
+    private static final int COLUMN_CACHE_LIMIT =
+        Math.max(1, Math.min(9, (int) (Runtime.getRuntime().maxMemory() / (64L * 1024 * 1024))));
+    private final java.util.LinkedHashMap<String, ColumnCacheEntry> columnCaches =
+        new java.util.LinkedHashMap<String, ColumnCacheEntry>(16, 0.75f, true) {
+            @Override
+            protected boolean removeEldestEntry(java.util.Map.Entry<String, ColumnCacheEntry> eldest) {
+                return size() > COLUMN_CACHE_LIMIT;
+            }
+        };
+    private volatile ViewRecipe lastView;
+    private volatile long liveGeneration;
+    /** 当前这张图是用哪个 Y 带出的（兜底裁剪与实时重合成都要对齐它） */
+    private volatile Integer displayedTop, displayedBottom;
+    /** mapImage 这张精确出图对应的 Y 带；临时裁剪只以它为底，绝不修改它本身 */
+    private volatile Integer sourceTop, sourceBottom;
+    /** 显示的是"高度图临时裁剪"出来的图（等缓存就绪会自动转精确） */
+    private volatile boolean displayApproximate;
+    private volatile boolean previewCut;
+    private volatile boolean pendingExactRefresh;
+    private final Object cacheBuildLock = new Object();
+    private ViewRecipe cacheBuildRecipe;
+    private ViewRecipe cacheBuildFailed;
+    private boolean cacheBuildInFlight;
+    private long cacheBuildGeneration;
+    private String liveNote = "";
+    private boolean liveActive;
+    private final java.util.concurrent.atomic.AtomicBoolean liveRunning = new java.util.concurrent.atomic.AtomicBoolean();
+    private volatile boolean livePending;
+    private final java.util.concurrent.atomic.AtomicBoolean dynamicBandRunning = new java.util.concurrent.atomic.AtomicBoolean();
+    private volatile boolean dynamicBandPending;
+
+    private static final class ColumnCacheEntry {
+        final ColumnCache cache;
+        final BlockColors.Palette palette;
+        ColumnCacheEntry(ColumnCache cache, BlockColors.Palette palette) {
+            this.cache = cache;
+            this.palette = palette;
+        }
+    }
+
+    /** 当前这张图是怎么拼出来的：同样的 region/偏移就能在内存里重拼一次。 */
+    private static final class ViewRecipe {
+        final String[] paths;
+        final int[] regionX, regionZ;
+        final int minRegionX, minRegionZ, totalWidth, totalHeight;
+        final MapRenderer.SurfaceMode mode;
+        final BlockColors.Palette palette;
+
+        ViewRecipe(java.util.List<String> paths, java.util.List<int[]> coords, int minRegionX, int minRegionZ,
+                   int totalWidth, int totalHeight, MapRenderer.SurfaceMode mode, BlockColors.Palette palette) {
+            this.paths = paths.toArray(new String[0]);
+            this.regionX = new int[coords.size()];
+            this.regionZ = new int[coords.size()];
+            for (int i = 0; i < coords.size(); i++) { this.regionX[i] = coords.get(i)[0]; this.regionZ[i] = coords.get(i)[1]; }
+            this.minRegionX = minRegionX;
+            this.minRegionZ = minRegionZ;
+            this.totalWidth = totalWidth;
+            this.totalHeight = totalHeight;
+            this.mode = mode;
+            this.palette = palette;
+        }
+    }
+
+    private static java.util.List<int[]> coordsOf(java.util.List<String> paths, Map<String, int[]> coords) {
+        java.util.List<int[]> ordered = new ArrayList<>();
+        for (String path : paths) {
+            int[] coord = coords.get(path);
+            if (coord != null) ordered.add(coord);
+        }
+        return ordered;
+    }
+
+    /**
+     * 用层缓存在内存里重合成当前视图（换 Y 带时走这里）。
+     * 返回 true 表示已接管这次变化，不需要再全量重扫。
+     */
+    private boolean resurfaceFromCache(boolean allowBuild) {
+        final ViewRecipe recipe = lastView;
+        if (recipe == null) {
+            noteLiveDecline("no view recipe yet");
+            return false;
+        }
+        final BlockColors.Palette current = BlockColors.snapshot();
+        final ColumnCache[] caches = new ColumnCache[recipe.paths.length];
+        boolean missing = false, stale = false;
+        synchronized (columnCaches) {
+            for (int i = 0; i < recipe.paths.length; i++) {
+                ColumnCacheEntry entry = columnCaches.get(recipe.paths[i]);
+                if (entry == null) { missing = true; continue; }
+                // 颜色资源换过就不能用了（缓存里的颜色是旧调色板烘的），重建
+                if (entry.palette != current) { stale = true; continue; }
+                caches[i] = entry.cache;
+            }
+        }
+        if (missing || stale) {
+            if (allowBuild) ensureColumnCaches(recipe, stale);
+            noteLiveDecline(stale ? "cache stale (palette changed), rebuilding" : "cache not ready yet");
+            return false;
+        }
+        noteLiveActive();
+
+        final int top = heightRangeSlider.getUpperValue(), bottom = heightRangeSlider.getLowerValue();
+        final long generation = ++liveGeneration;
+        final MapRenderer.SurfaceMode mode = surfaceMode;
+        // 拖动时事件很密：只保留一个在算的任务，期间来的请求合并成"算完再补一次"
+        if (!liveRunning.compareAndSet(false, true)) {
+            livePending = true;
+            return true;
+        }
+        backgroundExecutor.submit(() -> {
+            try {
+                long started = System.currentTimeMillis();
+                RenderedMap combined = composeFromCaches(recipe, caches, top, bottom);
+                long millis = System.currentTimeMillis() - started;
+                SwingUtilities.invokeLater(() -> {
+                    if (generation != liveGeneration || mode != surfaceMode) return;
+                    mapImage = combined;
+                    sourceTop = top;
+                    sourceBottom = bottom;
+                    previewCut = false;
+                    displayedTop = top;
+                    displayedBottom = bottom;
+                    displayApproximate = false;
+                    mapCanvas.setImage(combined);
+                    recordBandFrame(millis, caches.length);
+                    progressLabel.setText(String.format("Y band %d..%d (from column cache)", bottom, top));
+                });
+            } catch (Exception error) {
+                logManager.error("Live resurface failed: " + error.getMessage(), "MinecraftMapGUI", error);
+            } finally {
+                liveRunning.set(false);
+                if (livePending) {
+                    livePending = false;
+                    SwingUtilities.invokeLater(() -> resurfaceFromCache(false));
+                }
+            }
+        });
+        return true;
+    }
+
+    /** 按 recipe 的 region 与偏移，把缓存里的层栈重新合成大图。 */
+    private RenderedMap composeFromCaches(ViewRecipe recipe, ColumnCache[] caches, int top, int bottom) {
+        RenderedMap combined = new RenderedMap(recipe.totalWidth, recipe.totalHeight);
+        Graphics2D g2d = combined.createGraphics();
+        MapRenderer renderer = new MapRenderer(1, null, recipe.mode, top, bottom);
+        try {
+            g2d.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+            g2d.setColor(new Color(32, 32, 32));
+            g2d.fillRect(0, 0, recipe.totalWidth, recipe.totalHeight);
+            for (int i = 0; i < caches.length; i++) {
+                if (caches[i] == null) continue;
+                BufferedImage image = caches[i].toImage(top, bottom);
+                if (image == null) continue;
+                int offsetX = (recipe.regionX[i] - recipe.minRegionX) * 512;
+                int offsetY = (recipe.regionZ[i] - recipe.minRegionZ) * 512;
+                g2d.drawImage(image, offsetX, offsetY, null);
+                combined.copyHeightsFrom(image, offsetX, offsetY);
+            }
+        } finally {
+            renderer.shutdown();
+            g2d.dispose();
+        }
+        return combined;
+    }
+
+    /**
+     * 把当前视图用到的 region 扫一遍层缓存（等于一次整列扫描）。渲染一结束就在后台预热，
+     * 这样用户开始拖 Y 带时缓存已经在手上，拖动才是真的实时。
+     *
+     * <p>force=true 用于调色板换过之后重建；下界去顶这类扫不出缓存的 region 会记住失败，
+     * 不会在每次拖动时反复重扫。
+     */
+    private void ensureColumnCaches(final ViewRecipe recipe, boolean force) {
+        synchronized (cacheBuildLock) {
+            if (cacheBuildInFlight && cacheBuildRecipe == recipe && !force) return;
+            if (!force && cacheBuildFailed == recipe) return;
+            cacheBuildRecipe = recipe;
+            cacheBuildInFlight = true;
+            cacheBuildGeneration++;
+        }
+        final long generation = cacheBuildGeneration;
+        SwingUtilities.invokeLater(() -> progressLabel.setText("Building Y-band cache..."));
+        ybandState("building cache (" + recipe.paths.length + " regions)");
+        ybandLog("Y-band cache: building " + recipe.paths.length + " region(s), limit " + COLUMN_CACHE_LIMIT + ", heap " + (Runtime.getRuntime().maxMemory() >> 20) + "MB");
+        backgroundExecutor.submit(() -> {
+            long start = System.currentTimeMillis();
+            try {
+                for (String path : recipe.paths) {
+                    if (generation != cacheBuildGeneration) return;   // 视图换了，放弃
+                    final BlockColors.Palette buildPalette = BlockColors.snapshot();
+                    synchronized (columnCaches) {
+                        ColumnCacheEntry cached = columnCaches.get(path);
+                        if (cached != null && cached.palette == buildPalette) continue;
+                    }
+                    MapRenderer renderer = new MapRenderer(
+                        Math.min(Runtime.getRuntime().availableProcessors(), 4), null, recipe.mode,
+                        (Integer) null, (Integer) null);
+                    ColumnCache cache;
+                    try {
+                        cache = renderer.scanRegion(path, 32);
+                    } finally {
+                        renderer.shutdown();
+                    }
+                    if (cache == null) {
+                        // 下界去顶的 region：判定依赖扫描窗口，不缓存
+                        synchronized (cacheBuildLock) {
+                            if (generation == cacheBuildGeneration) cacheBuildFailed = recipe;
+                        }
+                        ybandState("unavailable (nether roof view)");
+                        logManager.info("Y-band cache: skipped (nether roof mode) " + path, "MinecraftMapGUI");
+                        SwingUtilities.invokeLater(() -> progressLabel.setText("Y-band live unavailable (nether roof view)"));
+                        return;
+                    }
+                    SwingUtilities.invokeLater(() -> {
+                        synchronized (columnCaches) {
+                            columnCaches.put(path, new ColumnCacheEntry(cache, buildPalette));
+                        }
+                    });
+                }
+                long millis = System.currentTimeMillis() - start;
+                logManager.info("Y-band cache: ready in " + millis + " ms", "MinecraftMapGUI");
+                SwingUtilities.invokeLater(() -> {
+                    ybandState("ready - drag the handles");
+                    progressLabel.setText(String.format("Y-band cache ready in %.1fs - drag the handles", millis / 1000.0));
+                    // 之前用临时裁剪顶着的、或松手时还没出精确图的，在这里补一次精确结果
+                    if ((pendingExactRefresh || displayApproximate) && lastView == recipe) {
+                        pendingExactRefresh = false;
+                        if (!resurfaceFromCache(false) && heightDebounce != null) heightDebounce.restart();
+                    }
+                });
+            } catch (Exception error) {
+                logManager.error("Y-band cache build failed: " + error.getMessage(), "MinecraftMapGUI", error);
+                ybandState("cache build failed");
+                SwingUtilities.invokeLater(() -> progressLabel.setText("Y-band cache failed"));
+            } finally {
+                synchronized (cacheBuildLock) {
+                    if (generation == cacheBuildGeneration) cacheBuildInFlight = false;
+                }
+            }
+        });
+    }
+
+    /**
+     * 平移自动加载出来的合成图：拿 DynamicMapManager 的已加载区域与稳定原点组一个配方，
+     * 让实时 Y 带重合成在这条路径上也能接管（几何与它拼图时一致：(x-minX)*512）。
+     */
+    private void adoptAutoLoadedView(BufferedImage combinedImage, Point worldOrigin, int top, int bottom) {
+        if (dynamicMapManager == null || combinedImage == null || worldOrigin == null) {
+            lastView = null;
+            return;
+        }
+        java.util.Set<Point> loaded = dynamicMapManager.getLoadedRegionCoords();
+        if (loaded.isEmpty()) {
+            lastView = null;
+            return;
+        }
+        File dir = getCurrentRegionDir();
+        java.util.List<String> paths = new ArrayList<>();
+        java.util.List<int[]> coords = new ArrayList<>();
+        for (Point region : loaded) {
+            paths.add(new File(dir, String.format("r.%d.%d.mca", region.x, region.y)).getAbsolutePath());
+            coords.add(new int[]{region.x, region.y});
+        }
+        ViewRecipe recipe = new ViewRecipe(paths, coords, worldOrigin.x / 512, worldOrigin.y / 512,
+            combinedImage.getWidth(), combinedImage.getHeight(), surfaceMode, BlockColors.snapshot());
+        lastView = recipe;
+        mapImage = combinedImage;
+        sourceTop = top;
+        sourceBottom = bottom;
+        previewCut = false;
+        displayedTop = top;
+        displayedBottom = bottom;
+        displayApproximate = false;
+        ensureColumnCaches(recipe, false);
+    }
+
+    /** 渲染那一次顺手拿到的层缓存直接入库：用户第一次拖 Y 带就已经是实时的。 */
+    private void stashColumnCache(String path, ColumnCache cache, BlockColors.Palette palette) {
+        synchronized (columnCaches) {
+            columnCaches.put(path, new ColumnCacheEntry(cache, palette));
+        }
+    }
+
+    /**
+     * 动态视口模式换 Y 带：让已加载的瓦片用层缓存内存重合成（不重建管理器、不重载全部瓦片）。
+     * 拖动时事件很密，所以同时只跑一次，期间来的请求合并成"跑完再补一次"。
+     */
+    private void dynamicBandUpdate() {
+        final DynamicRegionManager manager = dynamicRegionManager;
+        if (!isDynamicMode || manager == null) return;
+        if (!dynamicBandRunning.compareAndSet(false, true)) {
+            dynamicBandPending = true;
+            return;
+        }
+        final int top = heightRangeSlider.getUpperValue(), bottom = heightRangeSlider.getLowerValue();
+        ybandState(String.format("dynamic band %d..%d", bottom, top));
+        backgroundExecutor.submit(() -> {
+            try {
+                manager.setBand(top, bottom);
+            } catch (Exception error) {
+                logManager.error("Dynamic band update failed: " + error.getMessage(), "MinecraftMapGUI", error);
+            } finally {
+                dynamicBandRunning.set(false);
+                if (dynamicBandPending) {
+                    dynamicBandPending = false;
+                    SwingUtilities.invokeLater(this::dynamicBandUpdate);
+                }
+            }
+        });
+    }
+
+    // ── Y 带性能记账：每帧都记，慢帧当场写日志，松手时汇总一行 ──
+    private static final long SLOW_FRAME_MILLIS = 200;
+    private final java.util.concurrent.atomic.AtomicInteger bandFrames = new java.util.concurrent.atomic.AtomicInteger();
+    private final java.util.concurrent.atomic.AtomicLong bandFrameTotal = new java.util.concurrent.atomic.AtomicLong();
+    private final java.util.concurrent.atomic.AtomicLong bandFrameWorst = new java.util.concurrent.atomic.AtomicLong();
+
+    /**
+     * Y 带相关日志：既进日志窗口，也追加到 %TEMP%\crafter-yband.log，
+     * 这样用户直接把文件发过来就能看性能/分支走向。
+     */
+    private void ybandLog(String message) {
+        logManager.info(message, "MinecraftMapGUI");
+        com.minecraft.selector.core.YbandLog.write(message);
+    }
+
+    /** 在 EDT 上调用：记一帧静态重合成的耗时。 */
+    private void recordBandFrame(long millis, int regions) {
+        bandFrames.incrementAndGet();
+        bandFrameTotal.addAndGet(millis);
+        bandFrameWorst.accumulateAndGet(millis, Math::max);
+        if (ybandLabel != null) ybandLabel.setText(String.format("Y-band: live %d ms (%d region)", millis, regions));
+        if (millis >= SLOW_FRAME_MILLIS) {
+            ybandLog(String.format("Y 带慢帧: 静态重合成 %d ms, %d 个 region", millis, regions));
+        }
+    }
+
+    /** 松手时在 EDT 上汇总一次（静态 + 动态两条路）。 */
+    private void logBandSummary() {
+        int frames = bandFrames.getAndSet(0);
+        if (frames > 0) {
+            ybandLog(String.format("Y 带性能(静态): %d 帧, 平均 %d ms, 最大 %d ms",
+                frames, bandFrameTotal.getAndSet(0) / frames, bandFrameWorst.getAndSet(0)));
+        }
+        DynamicRegionManager manager = dynamicRegionManager;
+        if (manager != null) {
+            String stats = manager.takeBandStats();
+            if (stats != null) ybandLog("Y 带性能(动态视口): " + stats);
+        }
+    }
+
+    /** 地图渲染的 loading 延迟阈值：短于它就完全不显示遮罩 */
+    private static final int LOADING_INDICATOR_DELAY_MS = 400;
+    private javax.swing.Timer pendingLoadingTimer;
+
+    /** 右下角常驻状态：实时 Y 带走的是哪条路，一眼可见。 */
+    private void ybandState(String state) {
+        if (ybandLabel == null) return;
+        if (SwingUtilities.isEventDispatchThread()) ybandLabel.setText("Y-band: " + state);
+        else SwingUtilities.invokeLater(() -> ybandLabel.setText("Y-band: " + state));
+    }
+
+    /** 实时路径被拒的原因（去重后写日志，避免拖动时刷屏）。 */
+    private void noteLiveDecline(String reason) {
+        liveActive = false;
+        if (reason.equals(liveNote)) return;
+        liveNote = reason;
+        ybandState("waiting - " + reason);
+        ybandLog("Y-band live: " + reason);
+    }
+
+    private void noteLiveActive() {
+        ybandState("live (memory resurface)");
+        if (liveActive) return;
+        liveActive = true;
+        liveNote = "active";
+        ybandLog("Y-band live: active (memory resurface)");
+    }
+
+    /**
+     * 缓存还没就绪时的兜底：拿"上一次精确出图"当底，按当前下界做一次**临时**剔除
+     * （高度 &lt; 下界的列在副本上抹透明，底图 mapImage 保持不动，所以拖回去还能还原）。
+     * 只处理上界不变的情形；上界一动必须靠层缓存。返回 true 表示显示图已对应当前这条带。
+     */
+    private boolean previewFromSource() {
+        RenderedMap source = mapImage instanceof RenderedMap ? (RenderedMap) mapImage : null;
+        if (source == null || sourceTop == null || sourceBottom == null) return false;
+        final int top = heightRangeSlider.getUpperValue(), bottom = heightRangeSlider.getLowerValue();
+        if (sourceTop.intValue() != top) return false;          // 上界变了：高度图不够，得靠层缓存
+        if (bottom <= sourceBottom.intValue()) {
+            // 下界没有比底图那条带更高：底图本身就是最好结果（更低的部分本来就没画过）
+            if (previewCut) {
+                previewCut = false;
+                displayApproximate = false;
+                displayedTop = sourceTop;
+                displayedBottom = sourceBottom;
+                mapCanvas.setImage(source);
+            }
+            return bottom == sourceBottom.intValue();
+        }
+        int width = source.getWidth(), height = source.getHeight();
+        RenderedMap cut = new RenderedMap(width, height);
+        cut.copyHeightsFrom(source, 0, 0);
+        int[] pixels = source.getRGB(0, 0, width, height, null, 0, width);
+        for (int z = 0; z < height; z++) {
+            for (int x = 0; x < width; x++) {
+                int columnHeight = source.getHeightAt(x, z);
+                if (columnHeight != RenderedMap.NO_HEIGHT && columnHeight < bottom) {
+                    pixels[z * width + x] = 0;
+                    cut.putHeightAt(x, z, RenderedMap.NO_HEIGHT);
+                }
+            }
+        }
+        cut.setRGB(0, 0, width, height, pixels, 0, width);
+        previewCut = true;
+        displayApproximate = true;
+        displayedTop = top;
+        displayedBottom = bottom;
+        mapCanvas.setImage(cut);
+        ybandState("temporary cut (waiting for cache)");
+        progressLabel.setText(String.format("Y band %d..%d (temporary cut)", bottom, top));
+        return true;
+    }
+
+    /**
+     * 该视图的层缓存正在建时，让"松手"先别全量重渲，等缓存建好自动补精确结果。
+     * 没在建就别干等（2~8 秒什么都不动更难受），让调用方走原来的防抖全量渲染。
+     */
+    private boolean requestExactWhenReady() {
+        ViewRecipe recipe = lastView;
+        if (recipe == null) return false;
+        synchronized (cacheBuildLock) {
+            if (cacheBuildFailed == recipe) return false;                 // 这个视图没有缓存可用（下界去顶）
+            if (!cacheBuildInFlight || cacheBuildRecipe != recipe) return false;
+        }
+        pendingExactRefresh = true;
+        progressLabel.setText("Y band applied (temporary); exact result when the cache is ready");
+        return true;
+    }
     
     // 日志相关
     private LogWindow logWindow;
@@ -198,14 +652,7 @@ public class MinecraftMapGUI extends JFrame {
             SwingUtilities.invokeLater(() -> {
                 progressLabel.setText("Blender integration mode started");
 
-                // 设置Blender模式的高度范围
-                if (heightRangeSlider != null) {
-                    heightRangeSlider.setLowerValue(blenderMinY);
-                    heightRangeSlider.setUpperValue(blenderMaxY);
-                    minYEntry.setText(String.valueOf(blenderMinY));
-                    maxYEntry.setText(String.valueOf(blenderMaxY));
-                }
-
+                // 高度轴的初值已在 createComponents 里按 blenderMinY/MaxY 构造，这里不再单独设置
                 if (worldPath != null) {
                     if (new File(worldPath).exists()) {
                         loadWorldFromPath(worldPath);
@@ -312,20 +759,36 @@ public class MinecraftMapGUI extends JFrame {
         regionLabel = new JLabel("Selection: none");
         coordDisplayLabel = new JLabel("X: —  Y: —  Z: —");
         fileInfoLabel = new JLabel("");
+        ybandLabel = new JLabel("Y-band: idle");
+        ybandLabel.setForeground(new Color(0x888888));
 
 
         // 输入框 - 使用样式化输入框
-        minYEntry = new JTextField("-64", 6);
-        maxYEntry = new JTextField("320", 6);
         xCoordEntry = new JTextField("", 8);
         zCoordEntry = new JTextField("", 8);
 
-        // 创建高度范围双滑块
-        heightRangeSlider = new StyledComponents.DualRangeSlider(-64, 365, -64, 365);
+        // 右侧竖向双滑块：上 thumb = 最高 Y、下 thumb = 最低 Y。
+        // 同一对值既决定回传 Blender 的导入范围，也决定预览的 Y 带。
+        int axisMin = Math.min(blenderMinY, -64) - 64;
+        int axisMax = Math.max(blenderMaxY, 320) + 64;
+        heightRangeSlider = new StyledComponents.VerticalRangeSlider(axisMin, axisMax, blenderMinY, blenderMaxY);
+        // 拖动中：动态视口模式换带 = 已加载瓦片就地重合成；静态画布走层缓存/临时裁剪
+        heightRangeSlider.addLiveListener(e -> {
+            if (isDynamicMode) { dynamicBandUpdate(); return; }
+            if (!resurfaceFromCache(true)) previewFromSource();
+        });
+        // 值落定：绝不轻易全量重渲 —— 缓存能接管就它管；临时裁剪已对应当前带就等缓存转精确；
+        // 缓存正在建也等它；只有在"这个视图没有缓存可用"时才回到防抖全量渲染
         heightRangeSlider.addChangeListener(e -> {
-            // 当滑块值改变时，同步更新文本框
-            minYEntry.setText(String.valueOf(heightRangeSlider.getLowerValue()));
-            maxYEntry.setText(String.valueOf(heightRangeSlider.getUpperValue()));
+            logBandSummary();   // 松手：把这一轮的帧耗时汇总一行
+            if (isDynamicMode) { dynamicBandUpdate(); return; }
+            if (resurfaceFromCache(false)) return;
+            if (previewFromSource()) {
+                if (displayApproximate) requestExactWhenReady();
+                return;
+            }
+            if (requestExactWhenReady()) return;
+            if (heightDebounce != null) heightDebounce.restart();
         });
 
         // 地图范围选择输入框已删除
@@ -523,9 +986,35 @@ public class MinecraftMapGUI extends JFrame {
             loadingPanel.beginMap(request,message);progressLabel.setText(message);
         });
     }
+
+    /**
+     * 延迟版：只有超过 {@link #LOADING_INDICATOR_DELAY_MS} 还没做完才真的显示 loading。
+     * 拖动 Y 带时偶尔落回全量渲染，这种短活不该闪一下遮罩（很短就结束的直接不显示）。
+     */
+    private void showMapLoadingDelayed(long request,String message) {
+        onEdt(() -> {
+            if(request!=viewGeneration) return;
+            cancelPendingLoading();
+            pendingLoadingTimer = new javax.swing.Timer(LOADING_INDICATOR_DELAY_MS, e -> {
+                pendingLoadingTimer = null;
+                showMapLoading(request, message);
+            });
+            pendingLoadingTimer.setRepeats(false);
+            pendingLoadingTimer.start();
+        });
+    }
+
+    private void cancelPendingLoading() {
+        if (pendingLoadingTimer != null) {
+            pendingLoadingTimer.stop();
+            pendingLoadingTimer = null;
+        }
+    }
+
     private void hideLoadingState() {
         final long request=viewGeneration;
         onEdt(() -> {
+            cancelPendingLoading();
             if(request!=viewGeneration) return;
             loadingPanel.finish(request);
             statusIndicator.setStatus(LoadingAnimationPanel.StatusIndicator.StatusType.IDLE);
@@ -534,6 +1023,7 @@ public class MinecraftMapGUI extends JFrame {
     private void showSuccessState(String message) {
         final long request=viewGeneration;
         onEdt(() -> {
+            cancelPendingLoading();
             if(request!=viewGeneration) return;
             loadingPanel.finish(request);
             statusIndicator.setStatus(LoadingAnimationPanel.StatusIndicator.StatusType.SUCCESS);
@@ -543,6 +1033,7 @@ public class MinecraftMapGUI extends JFrame {
     private void showErrorState(String message) {
         final long request=viewGeneration;
         onEdt(() -> {
+            cancelPendingLoading();
             if(request!=viewGeneration) return;
             loadingPanel.finish(request);
             statusIndicator.setStatus(LoadingAnimationPanel.StatusIndicator.StatusType.ERROR);
@@ -551,8 +1042,9 @@ public class MinecraftMapGUI extends JFrame {
     }
     private DynamicRegionManager createDynamicRegionManager() {
         final long request=viewGeneration;
-        final DynamicRegionManager manager=new DynamicRegionManager(savePath,getCurrentRegionDir(),surfaceMode,renderHeightPanel.getClipY());
-        showMapLoading(request,"Loading visible map regions...");
+        final DynamicRegionManager manager=new DynamicRegionManager(savePath,getCurrentRegionDir(),surfaceMode,
+            heightRangeSlider.getUpperValue(),heightRangeSlider.getLowerValue());
+        showMapLoadingDelayed(request,"Loading visible map regions...");
         manager.addRegionLoadListener(new DynamicRegionManager.RegionLoadListener() {
             public void onRegionLoaded(Point point,DynamicRegionManager.RegionTile tile) {}
             public void onRegionUnloaded(Point point) {}
@@ -567,7 +1059,7 @@ public class MinecraftMapGUI extends JFrame {
                         progressLabel.setText(total==0?"No map regions in this viewport":
                             "Map regions loaded: "+settled+"/"+total+(failed==0?"":" (failed: "+failed+")"));
                     } else {
-                        if(loadingPanel.getPhase()!=LoadingPhasePanel.Phase.MAP_LOADING) showMapLoading(request,"Loading visible map regions...");
+                        if(loadingPanel.getPhase()!=LoadingPhasePanel.Phase.MAP_LOADING) showMapLoadingDelayed(request,"Loading visible map regions...");
                         loadingPanel.mapProgress(request,settled,total,"Map regions: "+settled+"/"+total+(failed==0?"":" (failed: "+failed+")"));
                     }
                 });
@@ -599,12 +1091,20 @@ public class MinecraftMapGUI extends JFrame {
         JPanel mapPanel = new JPanel(new BorderLayout());
         mapPanel.setBorder(BorderFactory.createTitledBorder("Map Preview"));
         heightDebounce=new javax.swing.Timer(250,e -> resetSurfaceView());heightDebounce.setRepeats(false);
-        renderHeightPanel=new RenderHeightPanel(y -> heightDebounce.restart());
-        if(colorResources.renderY!=null) renderHeightPanel.setClipY(colorResources.renderY);
-        mapPanel.add(renderHeightPanel,BorderLayout.EAST);
+
+        // Y 带滑块与 Import Y 共用同一个模型：回传值和预览裁剪都读它
+        JPanel importYPanel = new JPanel(new BorderLayout(2, 2));
+        importYPanel.setBorder(BorderFactory.createTitledBorder("Import Y"));
+        JLabel importYHint = new JLabel("<html><center>Drag the handles.<br>Preview = import band.</center></html>",
+                                        SwingConstants.CENTER);
+        importYHint.setFont(importYHint.getFont().deriveFont(Font.PLAIN, 10f));
+        importYPanel.add(importYHint, BorderLayout.NORTH);
+        importYPanel.add(heightRangeSlider, BorderLayout.CENTER);
+        mapPanel.add(importYPanel, BorderLayout.EAST);
 
         JScrollPane mapScrollPane = new JScrollPane(mapCanvas);
         mapScrollPane.setMinimumSize(new Dimension(400, 300));
+        mapScrollPane.getViewport().setBackground(CheckerBackground.DARK);
         mapScrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
         mapScrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
 
@@ -618,6 +1118,7 @@ public class MinecraftMapGUI extends JFrame {
         JPanel leftStatusPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
         leftStatusPanel.add(statusIndicator);
         leftStatusPanel.add(progressLabel);
+        leftStatusPanel.add(ybandLabel);
         statusPanel.add(leftStatusPanel, BorderLayout.WEST);
         statusPanel.add(coordDisplayLabel, BorderLayout.EAST);
 
@@ -680,25 +1181,6 @@ public class MinecraftMapGUI extends JFrame {
         // ── 操作按钮 ──
         confirmSelectionButton.addActionListener(e -> confirmSelection());
         bar.add(confirmSelectionButton);
-
-        bar.add(new JSeparator(SwingConstants.VERTICAL));
-
-        // ── 高度设置 ──
-        bar.add(new JLabel("Import Y:"));
-        heightRangeSlider.setPreferredSize(new Dimension(120, 22));
-        // Import range retains its model; the visible controls are standard text fields.
-        bar.add(new JLabel("Min Y:"));
-        bar.add(minYEntry);
-        bar.add(new JLabel("Max Y:"));
-        bar.add(maxYEntry);
-        minYEntry.addActionListener(e -> {
-            try { heightRangeSlider.setLowerValue(Integer.parseInt(minYEntry.getText())); }
-            catch (NumberFormatException ex) { minYEntry.setText(String.valueOf(heightRangeSlider.getLowerValue())); }
-        });
-        maxYEntry.addActionListener(e -> {
-            try { heightRangeSlider.setUpperValue(Integer.parseInt(maxYEntry.getText())); }
-            catch (NumberFormatException ex) { maxYEntry.setText(String.valueOf(heightRangeSlider.getUpperValue())); }
-        });
 
         bar.add(new JSeparator(SwingConstants.VERTICAL));
 
@@ -795,6 +1277,11 @@ public class MinecraftMapGUI extends JFrame {
         dynamicMapManager.clear();
         mapCanvas.setImage(null);
         mapImage = null;
+        sourceTop = null;
+        sourceBottom = null;
+        previewCut = false;
+        displayedTop = null;
+        displayedBottom = null;
         logManager.info("Switch dimension: " + dim.getId() + " -> " + dim.getRegionDir().getAbsolutePath(), "MinecraftMapGUI");
 
         // 如果当前处于动态模式，重建动态区域管理器并清空旧缓存
@@ -840,6 +1327,11 @@ public class MinecraftMapGUI extends JFrame {
             dynamicMapManager.clear();
             mapCanvas.setImage(null);
             mapImage = null;
+            sourceTop = null;
+            sourceBottom = null;
+            previewCut = false;
+            displayedTop = null;
+            displayedBottom = null;
             if (dynamicRegionManager != null) {
                 dynamicRegionManager.shutdown();
                 dynamicRegionManager = null;
@@ -988,6 +1480,7 @@ public class MinecraftMapGUI extends JFrame {
         if(dynamicRegionManager!=null) {dynamicRegionManager.shutdown();dynamicRegionManager=null;}
         if(dynamicMapCanvas!=null) dynamicMapCanvas.setRegionManager(null);
         mapImage=null;mapCanvas.setImage(null);
+displayedTop=null;displayedBottom=null;sourceTop=null;sourceBottom=null;previewCut=false;
         final String path=savePath!=null?savePath:lastMcaPath;
         final ResourceOptions requested=colorResources.copy();
         showLoadingState("Loading resource colors...");
@@ -1004,7 +1497,7 @@ public class MinecraftMapGUI extends JFrame {
                         dynamicMapCanvas.setRegionManager(dynamicRegionManager);
                     } else if(lastMcaPath!=null) renderMap(lastMcaPath);
                     else if(savePath!=null && playerPos!=null) {
-                        showMapLoading(request,"Loading map regions...");renderAroundPlayer();
+                        showMapLoadingDelayed(request,"Loading map regions...");renderAroundPlayer();
                     } else showSuccessState("Resource colors loaded");
                 } catch(Exception e) {showErrorState("Resource colors failed: "+e.getMessage());}
             }
@@ -1141,10 +1634,11 @@ public class MinecraftMapGUI extends JFrame {
      * 渲染多个MCA文件
      */
     private void renderMultipleMcaFiles(java.util.List<String> mcaFiles, int startRegionX, int startRegionZ, int gridSize) {
-        showMapLoading(viewGeneration,"Loading map regions...");
+        showMapLoadingDelayed(viewGeneration,"Loading map regions...");
         final long requestGeneration = viewGeneration;
         final MapRenderer.SurfaceMode requestedMode = surfaceMode;
-        final Integer requestedTop=renderHeightPanel.getClipY();
+        final Integer requestedTop=heightRangeSlider.getUpperValue();
+        final Integer requestedBottom=heightRangeSlider.getLowerValue();
         SwingWorker<BufferedImage, Void> worker = new SwingWorker<BufferedImage, Void>() {
             @Override
             protected BufferedImage doInBackground() throws Exception {
@@ -1172,7 +1666,7 @@ public class MinecraftMapGUI extends JFrame {
 
                 // 创建地图渲染器
                 int maxWorkers = Math.min(Runtime.getRuntime().availableProcessors(), 4);
-                MapRenderer renderer = new MapRenderer(maxWorkers, progressCallback, requestedMode,requestedTop);
+                MapRenderer renderer = new MapRenderer(maxWorkers, progressCallback, requestedMode,requestedTop,requestedBottom);
 
                 try {
                     // 计算区域范围
@@ -1206,6 +1700,16 @@ public class MinecraftMapGUI extends JFrame {
                     System.out.printf("Region range: (%d,%d) to (%d,%d), total size: %dx%d\n",
                         minRegionX, minRegionZ, maxRegionX, maxRegionZ, totalWidth, totalHeight);
 
+                    // 记下这张图的拼法：换 Y 带时用层缓存在内存里重拼
+                    java.util.List<String> viewPaths = new ArrayList<>();
+                    java.util.List<int[]> viewCoords = new ArrayList<>();
+                    for (String mcaFile : mcaFiles) {
+                        int[] coord = regionCoords.get(mcaFile);
+                        if (coord != null) { viewPaths.add(mcaFile); viewCoords.add(coord); }
+                    }
+                    lastView = new ViewRecipe(viewPaths, viewCoords, minRegionX, minRegionZ, totalWidth, totalHeight,
+                        requestedMode, BlockColors.snapshot());
+
                     // 创建大图像
                     RenderedMap combinedImage = new RenderedMap(totalWidth, totalHeight);
                     Graphics2D g2d = combinedImage.createGraphics();
@@ -1229,20 +1733,20 @@ public class MinecraftMapGUI extends JFrame {
                             System.out.printf("Rendering region %d/%d: r.%d.%d.mca\n",
                                 ++processedCount, mcaFiles.size(), regionX, regionZ);
 
-                            // 渲染单个区域
-                            MapRenderer.BlockInfo[][] topBlocks = renderer.getTopBlocks(mcaFile, 32, 1);
-                            if (topBlocks != null) {
-                                BufferedImage regionImage = renderer.renderToPng(topBlocks, 1);
-                                if (regionImage != null) {
-                                    // 计算在大图像中的正确位置
-                                    int offsetX = (regionX - minRegionX) * 512;
-                                    int offsetY = (regionZ - minRegionZ) * 512;
+                            // 渲染单个区域：顺带把层缓存建出来，渲染完就能实时换 Y 带
+                            MapRenderer.RegionScan scan = renderer.scanRegionBlocks(mcaFile, 32,
+                                requestedTop, requestedBottom, true);   // 所有 region 都在渲染那次顺手建缓存，保证渲染完就能实时拖
+                            if (scan.cache != null) stashColumnCache(mcaFile, scan.cache, scan.palette);
+                            BufferedImage regionImage = scan.image();
+                            if (regionImage != null) {
+                                // 计算在大图像中的正确位置
+                                int offsetX = (regionX - minRegionX) * 512;
+                                int offsetY = (regionZ - minRegionZ) * 512;
 
-                                    System.out.printf("  -> placed at: (%d, %d)\n", offsetX, offsetY);
+                                System.out.printf("  -> placed at: (%d, %d)\n", offsetX, offsetY);
 
-                                    g2d.drawImage(regionImage, offsetX, offsetY, null);
-                                    combinedImage.copyHeightsFrom(regionImage, offsetX, offsetY);
-                                }
+                                g2d.drawImage(regionImage, offsetX, offsetY, null);
+                                combinedImage.copyHeightsFrom(regionImage, offsetX, offsetY);
                             }
                         }
                         completedRegions.incrementAndGet();
@@ -1268,7 +1772,15 @@ public class MinecraftMapGUI extends JFrame {
                     BufferedImage image = get();
                     if (image != null) {
                         mapImage = image;
+                        sourceTop = requestedTop;
+                        sourceBottom = requestedBottom;
+                        previewCut = false;
+                        displayedTop = requestedTop;
+                        displayedBottom = requestedBottom;
+                        displayApproximate = false;
+                        ybandState("rendered - preparing cache");
                         mapCanvas.setImage(image); // 手动渲染时不重置视图
+                        if (lastView != null) ensureColumnCaches(lastView, false);   // 渲染一结束就在后台预热层缓存
 
                         // 设置世界坐标映射
                         int worldMinX = lastMultiRenderMinRegionX * 512;
@@ -1338,14 +1850,15 @@ public class MinecraftMapGUI extends JFrame {
         final BlockColors.Palette requestedPalette=BlockColors.snapshot();
         final long requestGeneration = viewGeneration;
         final MapRenderer.SurfaceMode requestedMode = surfaceMode;
-        final Integer requestedTop=renderHeightPanel.getClipY();
+        final Integer requestedTop=heightRangeSlider.getUpperValue();
+        final Integer requestedBottom=heightRangeSlider.getLowerValue();
         SwingWorker<BufferedImage, Void> worker = new SwingWorker<BufferedImage, Void>() {
             private BlockColors.Palette renderedPalette=requestedPalette;
             @Override
             protected BufferedImage doInBackground() throws Exception {
                 if(needsResources) renderedPalette=BlockColors.loadPalette(regionPath,requestedResources,resourceProgress(requestGeneration));
                 if(requestGeneration!=viewGeneration) return null;
-                showMapLoading(requestGeneration,"Loading map regions...");
+                showMapLoadingDelayed(requestGeneration,"Loading map regions...");
                 // 创建进度回调
                 MapRenderer.ProgressCallback progressCallback = new MapRenderer.ProgressCallback() {
                     @Override
@@ -1368,18 +1881,24 @@ public class MinecraftMapGUI extends JFrame {
                     }
                 };
 
+                // 记下这张图的拼法：换 Y 带时用层缓存在内存里重拼
+                lastView = new ViewRecipe(java.util.Collections.singletonList(regionPath),
+                    java.util.Collections.singletonList(new int[]{0, 0}), 0, 0, 512, 512,
+                    requestedMode, renderedPalette);
+
                 // 创建地图渲染器
                 int maxWorkers = Math.min(Runtime.getRuntime().availableProcessors(), 4); // GUI模式使用较少线程
-                MapRenderer renderer = new MapRenderer(maxWorkers, progressCallback, requestedMode,requestedTop,renderedPalette);
+                MapRenderer renderer = new MapRenderer(maxWorkers, progressCallback, requestedMode,requestedTop,requestedBottom,renderedPalette);
 
                 try {
-                    // 渲染区块
-                    MapRenderer.BlockInfo[][] topBlocks = renderer.getTopBlocks(regionPath, 32, 1);
+                    // 渲染区块：顺带把层缓存建出来，渲染完就能实时换 Y 带
+                    MapRenderer.RegionScan scan = renderer.scanRegionBlocks(regionPath, 32,
+                        requestedTop, requestedBottom, true);
+                    if (scan.cache != null) stashColumnCache(regionPath, scan.cache, scan.palette);
+                    BufferedImage image = scan.image();
 
-                    if (topBlocks != null) {
+                    if (image != null) {
                         
-                        // 渲染图像
-                        BufferedImage image = renderer.renderToPng(topBlocks, 1);
 
                         // 保存图像到当前目录
                         if (image != null) {
@@ -1402,11 +1921,21 @@ public class MinecraftMapGUI extends JFrame {
                     BufferedImage image = get();
                     if (image != null) {
                         if(needsResources) {BlockColors.setPalette(renderedPalette);singleResourcePath=regionPath;}
-                        if(!java.util.Objects.equals(requestedTop,renderHeightPanel.getClipY()) || requestedMode!=surfaceMode) {
+                        if(requestedTop.intValue()!=heightRangeSlider.getUpperValue()
+                           || requestedBottom.intValue()!=heightRangeSlider.getLowerValue()
+                           || requestedMode!=surfaceMode) {
                             resetSurfaceView();return;
                         }
                         mapImage = image;
+                        sourceTop = requestedTop;
+                        sourceBottom = requestedBottom;
+                        previewCut = false;
+                        displayedTop = requestedTop;
+                        displayedBottom = requestedBottom;
+                        displayApproximate = false;
+                        ybandState("rendered - preparing cache");
                         mapCanvas.setImage(image); // 手动渲染时不重置视图
+                        if (lastView != null) ensureColumnCaches(lastView, false);   // 渲染一结束就在后台预热层缓存
 
                         // 设置世界坐标映射 (一个区域文件是512x512方块)
                         if (currentRegion != null) {
@@ -1592,7 +2121,8 @@ public class MinecraftMapGUI extends JFrame {
         final long requestGeneration = viewGeneration;
         final File requestedRegionDir = getCurrentRegionDir();
         final MapRenderer.SurfaceMode requestedMode = surfaceMode;
-        final Integer requestedTop=renderHeightPanel.getClipY();
+        final Integer requestedTop=heightRangeSlider.getUpperValue();
+        final Integer requestedBottom=heightRangeSlider.getLowerValue();
         if (!autoLoadCheckbox.isSelected() || isDynamicMode || loadingPanel.getPhase()==LoadingPhasePanel.Phase.PREPARING) return;
 
         // 使用后台线程池异步加载
@@ -1622,17 +2152,17 @@ public class MinecraftMapGUI extends JFrame {
             };
 
             // 创建地图渲染器，使用单线程避免影响主渲染
-            MapRenderer renderer = new MapRenderer(1, progressCallback, requestedMode,requestedTop);
+            MapRenderer renderer = new MapRenderer(1, progressCallback, requestedMode,requestedTop,requestedBottom);
 
             try {
-                // 渲染整个区域 (32x32区块 = 512x512方块)
-                MapRenderer.BlockInfo[][] topBlocks = renderer.getTopBlocks(regionPath.getAbsolutePath(), 32, 1);
-                if (topBlocks != null) {
-                    BufferedImage regionImage = renderer.renderToPng(topBlocks, 1);
-                    if (regionImage != null) {
-                        System.out.printf("Rendered region: %s, image size: %dx%d\n",
-                            regionFile, regionImage.getWidth(), regionImage.getHeight());
-                    }
+                // 渲染整个区域 (32x32区块 = 512x512方块)：平移加载时也顺手把该 region 的层缓存建好
+                MapRenderer.RegionScan scan = renderer.scanRegionBlocks(regionPath.getAbsolutePath(), 32,
+                    requestedTop, requestedBottom, true);
+                if (scan.cache != null) stashColumnCache(regionPath.getAbsolutePath(), scan.cache, scan.palette);
+                BufferedImage regionImage = scan.image();
+                if (regionImage != null) {
+                    System.out.printf("Rendered region: %s, image size: %dx%d\n",
+                        regionFile, regionImage.getWidth(), regionImage.getHeight());
                     return regionImage;
                 }
                 return null;
@@ -1656,6 +2186,7 @@ public class MinecraftMapGUI extends JFrame {
                         if (combinedImage != null) {
                             // 使用新方法保持世界坐标中心点不变，避免视角跳动
                             Point worldOrigin = dynamicMapManager.getWorldOrigin();
+                            adoptAutoLoadedView(combinedImage, worldOrigin, requestedTop, requestedBottom);
                             mapCanvas.setImageKeepWorldCenter(combinedImage, worldOrigin.x, worldOrigin.y);
 
                             // 确保布局稳定
@@ -1688,6 +2219,8 @@ public class MinecraftMapGUI extends JFrame {
             if (combinedImage != null) {
                 // 使用新方法保持世界坐标中心点不变，避免视角跳动
                 Point worldOrigin = dynamicMapManager.getWorldOrigin();
+                adoptAutoLoadedView(combinedImage, worldOrigin,
+                    heightRangeSlider.getUpperValue(), heightRangeSlider.getLowerValue());
                 mapCanvas.setImageKeepWorldCenter(combinedImage, worldOrigin.x, worldOrigin.y);
 
                 // 确保布局稳定
@@ -1927,7 +2460,8 @@ public class MinecraftMapGUI extends JFrame {
     private void renderAllAvailableRegions() {
         final long requestGeneration = viewGeneration;
         final MapRenderer.SurfaceMode requestedMode = surfaceMode;
-        final Integer requestedTop=renderHeightPanel.getClipY();
+        final Integer requestedTop=heightRangeSlider.getUpperValue();
+        final Integer requestedBottom=heightRangeSlider.getLowerValue();
         if (savePath == null || savePath.isEmpty()) {
             JOptionPane.showMessageDialog(this, 
                 "Please select a Minecraft save first", 
@@ -2019,7 +2553,7 @@ public class MinecraftMapGUI extends JFrame {
                 g2d.setColor(new Color(32, 32, 32));
                 g2d.fillRect(0, 0, totalWidth, totalHeight);
                 
-                showMapLoading(requestGeneration,"Loading map regions...");
+                showMapLoadingDelayed(requestGeneration,"Loading map regions...");
                 // 创建进度回调
                 final java.util.concurrent.atomic.AtomicInteger completedRegions=new java.util.concurrent.atomic.AtomicInteger();
                 MapRenderer.ProgressCallback progressCallback = new MapRenderer.ProgressCallback() {
@@ -2042,7 +2576,7 @@ public class MinecraftMapGUI extends JFrame {
                 
                 // 创建地图渲染器
                 int maxWorkers = Math.min(Runtime.getRuntime().availableProcessors(), 4);
-                MapRenderer renderer = new MapRenderer(maxWorkers, progressCallback, requestedMode,requestedTop);
+                MapRenderer renderer = new MapRenderer(maxWorkers, progressCallback, requestedMode,requestedTop,requestedBottom);
                 
                 try {
                     // 渲染每个区域
@@ -2109,6 +2643,13 @@ public class MinecraftMapGUI extends JFrame {
                     BufferedImage result = get();
                     if (result != null) {
                         mapImage = result;
+                        lastView = null; // 全区域渲染的拼法不在 recipe 里，实时路径让位
+                        sourceTop = requestedTop;
+                        sourceBottom = requestedBottom;
+                        previewCut = false;
+                        displayedTop = requestedTop;
+                        displayedBottom = requestedBottom;
+                        displayApproximate = false;
                         
                         SwingUtilities.invokeLater(() -> {
                             // 更新显示
@@ -2172,6 +2713,8 @@ public class MinecraftMapGUI extends JFrame {
     private void enableDynamicMode() {
         try {
             logManager.info("Enable dynamic mode", "MinecraftMapGUI");
+            // 动态视口用的是另一块画布/另一套拼图，静态图的层缓存配方在这里失效
+            lastView = null;
             
             mapCanvas.enableAutoViewportManagement(false);
             // Create the manager for the currently selected dimension.
@@ -2262,6 +2805,7 @@ public class MinecraftMapGUI extends JFrame {
     private void disableDynamicMode() {
         try {
             logManager.info("Disable dynamic mode", "MinecraftMapGUI");
+            lastView = null;
             
             // 清理动态组件
             if (dynamicMapCanvas != null) {

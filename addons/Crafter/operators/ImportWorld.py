@@ -920,7 +920,7 @@ def finish_import(ctx, prefs, imported_time, worldconfig, prepared_time,
     if prefs.Auto_Load_Material:
         log_stage_begin("自动加载材质")
         ms = time.perf_counter()
-        _run_ops(bpy.ops.crafter.load_material)
+        _run_ops(bpy.ops.crafter.load_material, from_import=True)
         mu = time.perf_counter() - ms
         log_stage_end("自动加载材质", f"耗时 {mu:.2f}s")
         debug_log(f"Auto material: {mu:.2f}s")

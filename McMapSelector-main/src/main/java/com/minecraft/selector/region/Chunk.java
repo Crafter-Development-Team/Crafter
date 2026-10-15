@@ -58,6 +58,9 @@ public class Chunk {
         return blockEntities.get(x+","+y+","+z);
     }
 
+    /** 整列扫描时用来跳过逐方块的 block entity 查询（大多数区块一个都没有）。 */
+    public boolean hasBlockEntities() {return !blockEntities.isEmpty();}
+
     /**
      * 从区域文件创建区块
      */

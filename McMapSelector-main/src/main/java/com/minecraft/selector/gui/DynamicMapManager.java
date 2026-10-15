@@ -96,6 +96,13 @@ public class DynamicMapManager {
     public synchronized BufferedImage getCombinedImage() {
         return combinedImage;
     }
+
+    /** 已加载区域的坐标（x,z 为 region 坐标），供 Y 带实时重合成组配方。 */
+    public synchronized java.util.Set<Point> getLoadedRegionCoords() {
+        java.util.Set<Point> coords = new java.util.LinkedHashSet<>();
+        for (RegionCoord coord : regionImages.keySet()) coords.add(new Point(coord.x, coord.z));
+        return coords;
+    }
     
     /**
      * 获取合成地图的世界坐标起点（使用稳定坐标系统）

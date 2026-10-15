@@ -103,6 +103,11 @@ dictionary = {
         "Open Materials":"打开材质文件夹",
         "Reload Materials":"刷新材质列表",
         "Load Material":"加载材质",
+        # "Reload" 交给 Blender 官方词典（译作"重载"），这里不再覆盖
+        "Search PBR":"查找PBR贴图",
+        "When loading or reloading materials from the panel button, look for PBR/normal textures next to the base color texture. Textures the material already has are kept as is, only the missing one is searched for. Loading during import is not affected":"点击面板的加载/重加载按钮时，到基础色贴图所在文件夹查找 PBR/法向贴图；材质里已有的那张保留不动，只补缺的那张。导入时的加载不受这个开关影响",
+        "Force Reload":"强制重加载",
+        "Ignore the material node groups already in this project and reload them from the material library":"忽略工程里已有的材质节点组，强制从材质库重加载",
         "Classification Basis":"材质分类依据",
         "default":"默认",
         "Open Classification Basis":"打开材质分类依据文件夹",

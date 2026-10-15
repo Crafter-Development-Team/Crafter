@@ -15,6 +15,145 @@ is_chinese = lang in ("zh_HANS", "zh_HANT")
 # WorldImporter 输出目录（tint.json / overlay.json / doubleSided.json 都落在这里）
 dir_importer = os.path.join(dir_init_main, "importer")
 
+# ==================== 材质节点组复用 ====================
+# 一套 Crafter 材质节点组（CO-/CI-/C- 节点组 + 材质设置物体）由材质库 .blend 导入而来。
+# 工程里已经有一套、且用的还是同一个材质库时，Load Material 不再拆了重加载，直接复用：
+# 用户对 CI- 组的改动、材质设置面板上的开关都不会被冲掉，重复导入也快得多。
+# 已加载的库名记在场景上（随 .blend 保存）；库名对不上、或关键节点组/物体缺件，就退回全量重加载。
+material_library_prop = "Crafter_loaded_material_library"
+node_groups_use_fake_user = ["C-PBR_Parser", "C-lab_PBR_1.3", "C-old_PBR"]
+name_material_settings = "材质设置/Material Settings"
+
+
+def get_material_library_name(context):
+    '''
+    当前偏好里选中的材质库名；没有有效选择时返回 None
+    '''
+    try:
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
+    except Exception:
+        return None
+    index = addon_prefs.Materials_List_index
+    if not (-1 < index < len(addon_prefs.Materials_List)):
+        return None
+    return addon_prefs.Materials_List[index].name
+
+
+def get_loaded_material_library(context):
+    '''
+    工程里上一次加载材质用的库名（从没加载过则返回空串）
+    '''
+    try:
+        return str(context.scene.get(material_library_prop, "") or "")
+    except Exception:
+        return ""
+
+
+def set_loaded_material_library(context, library_name):
+    '''
+    记录本次加载用的材质库名，供下次判定能否复用
+    '''
+    try:
+        context.scene[material_library_prop] = str(library_name)
+    except Exception as ex:
+        warn_log(f"记录材质库名失败: {ex}")
+
+
+def material_setup_missing(context):
+    '''
+    列出复用所需的东西里缺哪些（返回空列表 = 可以复用）。
+    只查后续流程真正会取用的：C-PBR_Parser、当前 PBR 解析器组、至少一个 CI- 分类组、材质设置物体。
+    '''
+    missing = []
+    for name in node_groups_use_fake_user:
+        if name not in bpy.data.node_groups:
+            missing.append(name)
+    try:
+        parser_name = "C-" + context.preferences.addons[__addon_name__].preferences.PBR_Parser
+        if parser_name not in bpy.data.node_groups and parser_name not in missing:
+            missing.append(parser_name)
+    except Exception:
+        pass
+    if not any(node_group.name.startswith("CI-") for node_group in bpy.data.node_groups):
+        missing.append("CI-*")
+    if name_material_settings not in bpy.data.objects:
+        missing.append(name_material_settings)
+    return missing
+
+
+def can_reuse_material_setup(context):
+    '''
+    工程里是否已有一套能直接复用的材质节点组：库名与上次加载一致，且关键节点组/物体齐全。
+    return: (是否可复用, 说明) —— 说明可直接进日志
+    '''
+    library_name = get_material_library_name(context)
+    if library_name is None:
+        return (False, "没有选中材质库")
+    loaded_name = get_loaded_material_library(context)
+    if loaded_name != library_name:
+        return (False, f"材质库已切换（{loaded_name or '未记录'} → {library_name}）")
+    missing = material_setup_missing(context)
+    if missing:
+        return (False, "缺少 " + "、".join(missing))
+    return (True, f"复用工程内已有的材质节点组（{library_name}）")
+
+
+def ensure_material_settings_object(context):
+    '''
+    把材质设置物体挂进它自己的集合（已在集合里时只刷新隐藏状态）
+    '''
+    if name_material_settings in bpy.data.collections:
+        collection = bpy.data.collections[name_material_settings]
+    else:
+        collection = bpy.data.collections.new(name=name_material_settings)
+        context.scene.collection.children.link(collection)
+    obj = bpy.data.objects.get(name_material_settings)
+    if obj is None:
+        return
+    if collection not in obj.users_collection:
+        collection.objects.link(obj)
+    obj.hide_viewport = True
+    obj.hide_render = True
+
+
+def reload_material_setup(context, library_name):
+    '''
+    全量重加载材质节点组：删掉工程里旧的 CO-/CI-/C- 节点组与材质设置物体，
+    再从 append.blend 与指定材质库 .blend 重新导入（CI- 组随材质设置物体的材质一起进来）。
+    library_name: 材质库名（dir_materials 下去掉 .blend 的文件名）
+    '''
+    # 删除startswith(CO-)、startswith(CI-)节点组、startswith(C-)节点组
+    node_delete = []
+    for node_group in bpy.data.node_groups:
+        if node_group.name.startswith("CO-") or node_group.name.startswith("CI-") or node_group.name.startswith("C-"):
+            node_delete.append(node_group)
+    for node_group in node_delete:
+        bpy.data.node_groups.remove(node_group)
+    # 删除材质设置/Material Settings物体、材质
+    try:
+        bpy.data.objects.remove(bpy.data.objects[name_material_settings])
+    except:
+        pass
+    try:
+        bpy.data.materials.remove(bpy.data.materials[name_material_settings], do_unlink=True)
+    except:
+        pass
+    # 导入C-节点组（已存在的跳过）
+    node_groups_missing = [name for name in node_groups_use_fake_user if name not in bpy.data.node_groups]
+    if node_groups_missing:
+        with bpy.data.libraries.load(dir_blend_append, link=False) as (data_from, data_to):
+            data_to.node_groups = [name for name in data_from.node_groups if name in node_groups_missing]
+    for name in node_groups_use_fake_user:
+        if name in bpy.data.node_groups:
+            bpy.data.node_groups[name].use_fake_user = True
+    # 导入Crafter-Moving_texture节点组
+    add_node_group_if_not_exists(names_Crafter_Moving_texture)
+    # 导入材质设置/Material Settings物体、材质、startswith(CI-)
+    blend_material_dir = os.path.join(dir_materials, library_name + ".blend")
+    with bpy.data.libraries.load(blend_material_dir, link=False) as (data_from, data_to):
+        data_to.objects = [name for name in data_from.objects if name == name_material_settings]
+    ensure_material_settings_object(context)
+
 # ==================== 加载材质 ====================
 
 def get_double_sided_cull_setting(context):
@@ -56,7 +195,7 @@ def load_classification_data(addon_prefs):
     return compile_classification_list(classification_raw)
 
 # ========== 提取的单材质处理函数 ==========
-def process_single_material(material, context, classification_list, imported_by_crafter=False):
+def process_single_material(material, context, classification_list, imported_by_crafter=False, folder_search=None):
     '''
     处理单个材质：扫描 TEX_IMAGE 节点识别基础色/PBR贴图，构建 CI- 节点组，
     装配 PBR 解析器，连接法向和 PBR 贴图。
@@ -64,12 +203,20 @@ def process_single_material(material, context, classification_list, imported_by_
     context:             Blender 上下文
     classification_list: 分类规则列表（来自 load_classification_data）
     imported_by_crafter: 是否由 Crafter 导入触发（True=保留已有贴图节点不重新从文件查找PBR）
+    folder_search:       面板按钮路径的"去基础色贴图文件夹找 PBR/法向"开关：
+                         None  = 导入路径，按 imported_by_crafter 的既定判据走
+                                 （非 Crafter 材质会先删掉已有的后缀节点，再从文件夹整体重找）；
+                         True/False = 面板路径，材质里已有的法向/PBR 节点一律保留不动，
+                                 只在这个值为 True 时去文件夹补上缺的那张。
     '''
     node_tree_material = material.node_tree
     if node_tree_material is None:
         return
     nodes = node_tree_material.nodes
     links = node_tree_material.links
+    # 面板路径（folder_search 非 None）：已有的法向/PBR 一律保留，开关只决定缺的那张要不要去找
+    manual = folder_search is not None
+    keep_existing = True if manual else imported_by_crafter
 
     if bpy.app.version >= (4, 2, 0):
         material.volume_intersection_method = 'ACCURATE'
@@ -159,13 +306,13 @@ def process_single_material(material, context, classification_list, imported_by_
         role_texture = candidate_roles.get(node)
         if role_texture is not None:
             if role_texture == TEX_ROLE_NORMAL:
-                if imported_by_crafter:
+                if keep_existing:
                     node_tex_normal = node
                 else:
                     bpy.data.images.remove(node.image)
                     nodes_wait_remove.append(node)
             elif role_texture == TEX_ROLE_PBR:
-                if imported_by_crafter:
+                if keep_existing:
                     # 有 _a 用 _a，否则用 _s（原实现 _a 覆盖 _s，这里按文件名择优，与扫描顺序无关）
                     if node_tex_PBR is None:
                         node_tex_PBR = node
@@ -240,7 +387,19 @@ def process_single_material(material, context, classification_list, imported_by_
     except Exception as ex:
         warn_log(f"apply_tint 失败 [{material.name}]: {ex}")
     node_C_PBR_Parser = add_node_parser(group_CI=group_CI, nodes=nodes, links=links)
-    if not imported_by_crafter:
+    if manual:
+        # 只补缺：已有哪一类就保留哪一类，开关开着的才去文件夹找缺的那张
+        want_normal = bool(folder_search) and node_tex_normal is None
+        want_pbr = bool(folder_search) and node_tex_PBR is None
+        if node_tex_base is not None and (want_normal or want_pbr):
+            node_new_normal, node_new_PBR = load_normal_and_PBR(
+                node_tex_base=node_tex_base, nodes=nodes, links=links,
+                want_normal=want_normal, want_pbr=want_pbr, keep_moving_texture=True)
+            if node_tex_normal is None:
+                node_tex_normal = node_new_normal
+            if node_tex_PBR is None:
+                node_tex_PBR = node_new_PBR
+    elif not imported_by_crafter:
         node_tex_normal, node_tex_PBR = load_normal_and_PBR(node_tex_base=node_tex_base, nodes=nodes, links=links)
     link_base_normal_PBR(node_tex_base=node_tex_base, group_CI=group_CI, links=links, node_C_PBR_Parser=node_C_PBR_Parser, node_tex_normal=node_tex_normal, node_tex_PBR=node_tex_PBR)
     if node_tex_base is not None:
@@ -440,6 +599,16 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):
     bl_description = "Load Material"
     bl_options = {"REGISTER", "UNDO"}
 
+    # 忽略工程里已有的材质节点组，强制从材质库重加载（面板上的 Reload 按钮）
+    force_reload: BoolProperty(name="Force Reload",
+                               description="Ignore the material node groups already in this project and reload them from the material library",
+                               default=False)# type: ignore
+    # 由导入流程调用（世界导入的自动加载 / 导入物品）：不理会面板上的"查找PBR贴图"开关
+    from_import: BoolProperty(name="From Import",
+                              description="Called by the import flow: ignore the Search PBR preference, import behaviour stays unchanged",
+                              default=False,
+                              options={'HIDDEN'})# type: ignore
+
     @classmethod
     def poll(cls, context: bpy.types.Context):
         return True
@@ -456,42 +625,18 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):
             return {"CANCELLED"}
         make_true_object_mode(context)
         bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
-        # 删除startswith(CO-)、startswith(CI-)节点组、startswith(C-)节点组
-        node_delete = []
-        for node in bpy.data.node_groups:
-            if node.name.startswith("CO-") or node.name.startswith("CI-") or node.name.startswith("C-"):
-                node_delete.append(node)
-        for node in node_delete:
-            bpy.data.node_groups.remove(node)
-        # 删除材质设置/Material Settings物体、材质
-        try:
-            bpy.data.objects.remove(bpy.data.objects["材质设置/Material Settings"])
-        except:
-            pass
-        try:
-            bpy.data.materials.remove(bpy.data.materials["材质设置/Material Settings"], do_unlink=True)
-        except:
-            pass
-        # 导入C-节点组
-        node_groups_use_fake_user = ["C-PBR_Parser", "C-lab_PBR_1.3", "C-old_PBR"]
-        with bpy.data.libraries.load(dir_blend_append, link=False) as (data_from, data_to):
-            data_to.node_groups = [name for name in data_from.node_groups if name in node_groups_use_fake_user]
-        for node_group in node_groups_use_fake_user:
-            bpy.data.node_groups[node_group].use_fake_user = True
-        # 导入Crafter-Moving_texture节点组
-        add_node_group_if_not_exists(names_Crafter_Moving_texture)
-        # 导入材质设置/Material Settings物体、材质、startswith(CI-)
-        blend_material_dir = os.path.join(dir_materials, addon_prefs.Materials_List[addon_prefs.Materials_List_index].name + ".blend")
-        with bpy.data.libraries.load(blend_material_dir, link=False) as (data_from, data_to):
-            data_to.objects = [name for name in data_from.objects if name == "材质设置/Material Settings"]
-        if "材质设置/Material Settings"  in bpy.data.collections:
-            collection_Crafter_Materials_Settings = bpy.data.collections["材质设置/Material Settings"]
+        # 工程里已有一套同库的材质节点组就直接复用，只有换库/缺件/强制重加载才拆了重来
+        library_name = get_material_library_name(context)
+        reusable, reason = can_reuse_material_setup(context)
+        if self.force_reload or not reusable:
+            if self.force_reload:
+                reason = f"强制重加载材质节点组（{library_name}）"
+            push_log(f'[unknown] 重加载材质节点组：{reason}', 'INFO')
+            reload_material_setup(context, library_name)
+            set_loaded_material_library(context, library_name)
         else:
-            collection_Crafter_Materials_Settings = bpy.data.collections.new(name="材质设置/Material Settings")
-            bpy.context.scene.collection.children.link(collection_Crafter_Materials_Settings)
-        collection_Crafter_Materials_Settings.objects.link(bpy.data.objects["材质设置/Material Settings"])
-        bpy.data.objects["材质设置/Material Settings"].hide_viewport = True
-        bpy.data.objects["材质设置/Material Settings"].hide_render = True
+            push_log(f'[unknown] {reason}', 'INFO')
+            ensure_material_settings_object(context)
         # 获取分类依据规则
         classification_list = load_classification_data(addon_prefs)
         # 应用 Parsed_Normal_Strength
@@ -506,13 +651,15 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):
                 for mat in obj.data.materials:
                     if mat.name not in for_collection:
                         for_collection.append(mat.name)
+        # 面板按钮路径按"查找PBR贴图"开关决定要不要去文件夹补缺；导入路径的判据保持不变
+        folder_search = None if self.from_import else bool(addon_prefs.Search_PBR_On_Load)
         # 遍历材质合集
         for name_material in for_collection:
             imported_by_crafter = False
             if name_material in context.scene.Crafter_crafter_mcmts:
                 imported_by_crafter = True
             material = bpy.data.materials[name_material]
-            process_single_material(material, context, classification_list, imported_by_crafter)
+            process_single_material(material, context, classification_list, imported_by_crafter, folder_search)
         # 添加选中物体的材质到合集
         for obj in context.selected_objects:
             if obj.type == "MESH":
