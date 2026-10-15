@@ -2,6 +2,7 @@ package com.minecraft.selector.gui;
 
 import com.minecraft.selector.core.MapRenderer;
 import com.minecraft.selector.core.PreviewOptions;
+import com.minecraft.selector.core.ImportLod;
 import com.minecraft.selector.core.SelectionPreset;
 import com.minecraft.selector.utils.RecentWorlds;
 import com.minecraft.selector.core.SelectionYFit;
@@ -83,6 +84,19 @@ public class MinecraftMapGUI extends JFrame {
 
     private StyledComponents.VerticalRangeSlider heightRangeSlider;
     private JComboBox<String> lodDropdown;
+    private ImportLodPanel importLodPanel;
+    private JCheckBoxMenuItem importLodOverlayItem;
+    public void setInitialImportLod(ImportLod seed) {importLodPanel.setSettings(seed);}
+    private ImportLod resolvedImportLod(SelectionMath.Bounds bounds) {
+        return overlays.importLod.resolved(bounds,worldAnchors,overlays.dimension);
+    }
+    private void importLodChanged(ImportLod value) {
+        if(overlays.importLod.maxLevel==0&&value.maxLevel>0) overlays.importLodVisible=true;
+        overlays.importLod=value;
+        if(importLodOverlayItem!=null) importLodOverlayItem.setSelected(overlays.importLodVisible);
+        if(importLodPanel!=null) importLodPanel.showResolvedCenter(resolvedImportLod(activeCanvas().getSelectionBounds()));
+        repaintCanvases();
+    }
     private JTextField xCoordEntry;
     private JTextField zCoordEntry;
     // 地图范围选择输入框已删除
@@ -255,7 +269,7 @@ public class MinecraftMapGUI extends JFrame {
     private boolean resurfaceFromCache(boolean allowBuild) {
         final ViewRecipe recipe = lastView;
         if (recipe != null && recipe.sampleInterval > 1) {
-            noteLiveDecline("coarse LOD - re-render on band change");
+            noteLiveDecline("coarse preview sampling - re-render on band change");
             return false;
         }
         if (recipe == null) {
@@ -863,7 +877,7 @@ public class MinecraftMapGUI extends JFrame {
         
         // LOD下拉菜单 - 使用样式化下拉框
         String[] lodOptions = {
-            "Auto (by file count)",
+            "Auto",
             "1 (full)",
             "2 (1/2)",
             "4 (1/4)",
@@ -871,7 +885,7 @@ public class MinecraftMapGUI extends JFrame {
         };
         lodDropdown = new JComboBox<>(lodOptions);
         lodDropdown.setSelectedIndex(0);
-        lodDropdown.setToolTipText("Preview sampling; >1 gives approximate pixels and hover heights. Auto: 1 / 2 / 4 / 8 by file count.");
+        lodDropdown.setToolTipText("Preview sampling; >1 gives approximate pixels and hover heights. Auto: dynamic maps use 2; static maps use 1 / 2 / 4 / 8 by rendered file count.");
         lodDropdown.addActionListener(e -> resetSurfaceView());
 
         // MCA文件范围下拉框
@@ -1148,6 +1162,13 @@ public class MinecraftMapGUI extends JFrame {
         importYPanel.add(importYHead, BorderLayout.NORTH);
         importYPanel.add(heightRangeSlider, BorderLayout.CENTER);
         mapPanel.add(importYPanel, BorderLayout.EAST);
+        importLodPanel=new ImportLodPanel(this::importLodChanged);
+        importLodPanel.showResolvedCenter(resolvedImportLod(null));
+        CollapsiblePanel lodPanel=new CollapsiblePanel("Import LOD",new Color(130,150,175));
+        lodPanel.addContent(importLodPanel);
+        JPanel lodSidebar=new JPanel(new BorderLayout());
+        lodSidebar.add(lodPanel,BorderLayout.NORTH);
+        mapPanel.add(lodSidebar,BorderLayout.WEST);
 
         JScrollPane mapScrollPane = new JScrollPane(mapCanvas);
         mapScrollPane.setMinimumSize(new Dimension(400, 300));
@@ -1207,6 +1228,9 @@ public class MinecraftMapGUI extends JFrame {
         addMenuItem(fileMenu, "Exit", e -> System.exit(0), null, null);
         menuBar.add(fileMenu);
         JMenu viewMenu = new JMenu("View");
+        importLodOverlayItem=new JCheckBoxMenuItem("Import LOD rings",overlays.importLodVisible);
+        importLodOverlayItem.addActionListener(e->{overlays.importLodVisible=importLodOverlayItem.isSelected();repaintCanvases();});
+        viewMenu.add(importLodOverlayItem);
         gridMenuItem=addMenuItem(viewMenu,"Map grid: Off",e->cycleGrid(),null,"G: Off / Chunk / Chunk+Region");
         addPreviewItem(viewMenu,"Transparent water","water",false);
         addPreviewItem(viewMenu,"Cave floor below Top Y","cave",false);
@@ -1278,7 +1302,7 @@ public class MinecraftMapGUI extends JFrame {
         // ── Dimension ──
         bar.add(new JLabel("Dimension:"));
         bar.add(dimensionDropdown);
-        bar.add(new JLabel("LOD:"));
+        bar.add(new JLabel("Preview quality:"));
         bar.add(lodDropdown);
         bar.add(new JSeparator(SwingConstants.VERTICAL));
 
@@ -1324,11 +1348,13 @@ public class MinecraftMapGUI extends JFrame {
      * 获取LOD级别
      */
     private int getLodLevel() {
-        if(savePath==null) return getLodLevel(1);
-        File[] files=getCurrentRegionDir().listFiles((dir,name) -> name.matches("r\\.-?\\d+\\.-?\\d+\\.mca"));
-        int count=0;
-        if(files!=null) for(File file:files) if(file.length()>0) count++;
-        return getLodLevel(count);
+        // This path serves dynamic/auto-loaded viewports. Fixed Auto=2 avoids
+        // dimension-wide counts and quality churn as visible tiles load or unload.
+        return resolveDynamicPreviewQuality((String)lodDropdown.getSelectedItem());
+    }
+
+    static int resolveDynamicPreviewQuality(String selected) {
+        return resolveLodLevel(selected,9);
     }
 
     private int getLodLevel(int fileCount) {
@@ -1908,7 +1934,7 @@ displayedTop=null;displayedBottom=null;sourceTop=null;sourceBottom=null;previewC
                         displayedTop = requestedTop;
                         displayedBottom = requestedBottom;
                         displayApproximate = false;
-                        ybandState(requestedSampleInterval>1?"coarse preview (LOD "+requestedSampleInterval+")":"rendered - preparing cache");
+                        ybandState(requestedSampleInterval>1?"coarse preview (sampling "+requestedSampleInterval+")":"rendered - preparing cache");
                         mapCanvas.setImage(image); // 手动渲染时不重置视图
                         if (lastView != null) ensureColumnCaches(lastView, false);   // 渲染一结束就在后台预热层缓存
 
@@ -2067,7 +2093,7 @@ displayedTop=null;displayedBottom=null;sourceTop=null;sourceBottom=null;previewC
                         displayedTop = requestedTop;
                         displayedBottom = requestedBottom;
                         displayApproximate = false;
-                        ybandState(requestedSampleInterval>1?"coarse preview (LOD "+requestedSampleInterval+")":"rendered - preparing cache");
+                        ybandState(requestedSampleInterval>1?"coarse preview (sampling "+requestedSampleInterval+")":"rendered - preparing cache");
                         mapCanvas.setImage(image); // 手动渲染时不重置视图
                         if (lastView != null) ensureColumnCaches(lastView, false);   // 渲染一结束就在后台预热层缓存
 
@@ -2244,6 +2270,7 @@ displayedTop=null;displayedBottom=null;sourceTop=null;sourceBottom=null;previewC
         if(mapCanvas==null||heightRangeSlider==null) return;
         overlays.minY=heightRangeSlider.getLowerValue();overlays.maxY=heightRangeSlider.getUpperValue();repaintCanvases();
         SelectionMath.Bounds b=activeCanvas().getSelectionBounds();
+        if(importLodPanel!=null) importLodPanel.showResolvedCenter(resolvedImportLod(b));
         if(confirmSelectionButton!=null) confirmSelectionButton.setEnabled(b!=null);
         if(b==null) {selectionStatsLabel.setText("No selection");selectionStatsLabel.setForeground(UIManager.getColor("Label.foreground"));return;}
         SelectionStats stats=new SelectionStats(b,heightRangeSlider.getLowerValue(),heightRangeSlider.getUpperValue());
@@ -2318,15 +2345,17 @@ displayedTop=null;displayedBottom=null;sourceTop=null;sourceBottom=null;previewC
             int minY=heightRangeSlider.getLowerValue(),maxY=heightRangeSlider.getUpperValue();
             long generation=viewGeneration;SelectionCanvas canvas=activeCanvas();Map<String,Object> approvedShape=canvas.getSelectionShape().json();
             SelectionStats stats=new SelectionStats(b,minY,maxY);
-            String message="Import bounds: "+ClipboardCoords.selection(b,minY,maxY)+"\n"+stats+"\n\n"+
+            ImportLod approvedLod=resolvedImportLod(b);
+            String lodSummary=approvedLod.maxLevel==0?"Import LOD: Off":"Import LOD: "+approvedLod.maxLevel+"; center (blocks): "+approvedLod.centerX+", "+approvedLod.centerZ+"; widths (chunks): "+approvedLod.distance(0)+", "+approvedLod.distance(1)+", "+approvedLod.distance(2)+", "+approvedLod.distance(3);
+            String message="Import bounds: "+ClipboardCoords.selection(b,minY,maxY)+"\n"+stats+"\n"+lodSummary+"\n\n"+
                 (stats.isLarge()?"Large selection: Blender may require substantial memory and time.\n":"")+"Export uses a single inclusive AABB. All blocks within these bounds are imported.\nContinue with this selection?";
             int result=JOptionPane.showConfirmDialog(this,message,"Confirm import selection",JOptionPane.OK_CANCEL_OPTION,stats.isLarge()?JOptionPane.WARNING_MESSAGE:JOptionPane.QUESTION_MESSAGE);
             if(result!=JOptionPane.OK_OPTION) {progressLabel.setText("Confirmation cancelled; selection kept");return;}
-            if(generation!=viewGeneration||canvas!=activeCanvas()||!approvedShape.equals(canvas.getSelectionShape().json())||!b.equals(canvas.getSelectionBounds())||minY!=heightRangeSlider.getLowerValue()||maxY!=heightRangeSlider.getUpperValue()) {
+            if(!approvedLod.json().equals(resolvedImportLod(b).json())||generation!=viewGeneration||canvas!=activeCanvas()||!approvedShape.equals(canvas.getSelectionShape().json())||!b.equals(canvas.getSelectionBounds())||minY!=heightRangeSlider.getLowerValue()||maxY!=heightRangeSlider.getUpperValue()) {
                 progressLabel.setText("Map or import bounds changed during confirmation; please confirm again");return;
             }
             progressLabel.setText("Confirmed: "+b);
-            if(isBlenderMode&&outputFilePath!=null) outputCoordinatesToFile(b.minX,b.minZ,b.maxX,b.maxZ,minY,maxY);
+            if(isBlenderMode&&outputFilePath!=null) outputCoordinatesToFile(b.minX,b.minZ,b.maxX,b.maxZ,minY,maxY,approvedLod);
         } finally {confirmationOpen=false;updateSelectionStats();}
     }
 
@@ -2527,12 +2556,12 @@ displayedTop=null;displayedBottom=null;sourceTop=null;sourceBottom=null;previewC
     /**
      * 输出坐标到文件（用于Blender集成）
      */
-    private void outputCoordinatesToFile(int minX,int minZ,int maxX,int maxZ,int actualMinY,int actualMaxY) {
+    private void outputCoordinatesToFile(int minX,int minZ,int maxX,int maxZ,int actualMinY,int actualMaxY,ImportLod importLod) {
         try {
             // Use exactly the Y bounds shown in the approved confirmation dialog.
             new com.fasterxml.jackson.databind.ObjectMapper().writerWithDefaultPrettyPrinter().writeValue(
                 new File(outputFilePath),CoordinatesPayload.create(new SelectionMath.Bounds(minX,minZ,maxX,maxZ),actualMinY,actualMaxY,System.currentTimeMillis(),
-                    currentDimension==null?null:currentDimension.getId(),worldAnchors.worldName,worldAnchors.dataVersion,activeCanvas().getSelectionShape(),multiBoxExport,overlays.waypoints,includeWaypointsExport));
+                    currentDimension==null?null:currentDimension.getId(),worldAnchors.worldName,worldAnchors.dataVersion,activeCanvas().getSelectionShape(),multiBoxExport,overlays.waypoints,includeWaypointsExport,importLod));
 
             System.out.printf("Blender mode: coordinates written to %s\n", outputFilePath);
             System.out.printf("XYZ range: (%d,%d,%d) to (%d,%d,%d)\n",

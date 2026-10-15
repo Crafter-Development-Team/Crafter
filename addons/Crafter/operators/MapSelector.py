@@ -6,7 +6,7 @@ import tempfile
 import threading
 import time
 import shutil
-from .map_selector_runtime import probe_java, read_coordinates
+from .map_selector_runtime import probe_java, read_coordinates, import_lod_seed_args, apply_import_lod
 
 from ..config import __addon_name__
 from bpy.props import *
@@ -215,6 +215,8 @@ class VIEW3D_OT_CrafterMapSelector(bpy.types.Operator):
                 "--max-y", str(max_y)
             ]
 
+            cmd.extend(import_lod_seed_args(addon_prefs))
+
             # 如果找到了JAR文件，添加JAR路径参数
             if dir_jar_resource and os.path.exists(dir_jar_resource):
                 cmd.extend(["--jar-path", dir_jar_resource])
@@ -236,11 +238,12 @@ class VIEW3D_OT_CrafterMapSelector(bpy.types.Operator):
                     return 0.25
                 try:
                     if process.returncode == 0 and os.path.isfile(coord_file):
-                        first, second = read_coordinates(coord_file)
+                        first, second, import_lod = read_coordinates(coord_file)
                         # bpy timers run on Blender's main thread. The old background
                         # thread wrote RNA preferences and refreshed UI unsafely.
                         addon_prefs.XYZ_1 = first
                         addon_prefs.XYZ_2 = second
+                        apply_import_lod(addon_prefs, import_lod)
                         reloadwindow()
                         push_log("地图选择坐标已更新", "INFO")
                     elif process.returncode != 0:
