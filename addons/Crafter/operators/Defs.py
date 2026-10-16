@@ -206,12 +206,12 @@ def find_overlay_frames(nodes):
     return frames
 
 
-def overlay_layout_shift(nodes):
+def overlay_layout_shift(nodes, frames=None):
     '''
     overlay 图层在输出节点前占用的布局宽度: 层数 x overlay_mix_step;
     有 overlay 时其他节点额外再左移 overlay_extra_shift(给 Parser 让出与贴图列的间隙)。
     '''
-    count = len(find_overlay_frames(nodes))
+    count = len(find_overlay_frames(nodes) if frames is None else frames)
     if count <= 0:
         return 0.0
     return count * overlay_mix_step + overlay_extra_shift
@@ -1378,7 +1378,40 @@ def link_CI_output(group_CI, node_output_EEVEE, node_output_Cycles, links):
         if "Thickness" in node_output_Cycles.inputs:
             links.new(group_CI.outputs["Cycles-Thickness"], node_output_Cycles.inputs["Thickness"])
 
-def add_node_parser(group_CI, nodes, links, parent=None):
+def compute_default_pbr_value(addon_prefs):
+    '''Encode the default PBR texture value for the selected parser.'''
+    roughness = addon_prefs.Default_Roughness
+    emission_strength = addon_prefs.Default_Emission_Strength
+    if addon_prefs.PBR_Parser == "old_PBR":
+        return [1 - roughness, addon_prefs.Default_Metallic, emission_strength, 1]
+    IOR = addon_prefs.Default_IOR
+    f0 = ((IOR - 1) / (IOR + 1)) ** 2
+    return [1 - roughness, min(229 / 255, f0), 0, emission_strength * 254 / 255]
+
+
+def apply_default_pbr_to_parser_node(node_parser, addon_prefs):
+    '''Set the fallback value; a connected PBR texture still takes precedence.'''
+    node_parser.inputs["PBR"].default_value = compute_default_pbr_value(addon_prefs)
+
+
+def ensure_pbr_parser_group(addon_prefs):
+    '''Rewire the shared parser group without visiting any material nodes.'''
+    group = bpy.data.node_groups["C-PBR_Parser"]
+    for node in group.nodes:
+        if node.type == "GROUP_OUTPUT":
+            node_output = node
+        elif node.type == "GROUP_INPUT":
+            node_input = node
+        elif node.type == "GROUP":
+            node_parser = node
+    node_parser.node_tree = bpy.data.node_groups["C-" + addon_prefs.PBR_Parser]
+    for output in node_parser.outputs:
+        group.links.new(output, node_output.inputs[output.name])
+    for input in node_parser.inputs:
+        group.links.new(input, node_input.outputs[input.name])
+
+
+def add_node_parser(group_CI, nodes, links, parent=None, addon_prefs=None):
     '''
     gout_CI: 材质组节点
     nodes: 目标材质节点组
@@ -1392,6 +1425,11 @@ def add_node_parser(group_CI, nodes, links, parent=None):
         node_C_PBR_Parser.parent = parent
     node_C_PBR_Parser.location = (group_CI.location.x - parser_offset_x, group_CI.location.y - 160)
     node_C_PBR_Parser.node_tree = bpy.data.node_groups["C-PBR_Parser"]
+    # Load Material passes its preferences once for base and overlay parsers, so
+    # imports need no second material walk to initialize unconnected PBR inputs.
+    if addon_prefs is None:
+        addon_prefs = bpy.context.preferences.addons[__addon_name__].preferences
+    apply_default_pbr_to_parser_node(node_C_PBR_Parser, addon_prefs)
     for output in node_C_PBR_Parser.outputs:
         if output.name in group_CI.inputs:
             links.new(output, group_CI.inputs[output.name])

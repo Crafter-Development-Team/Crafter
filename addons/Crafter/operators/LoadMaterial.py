@@ -19,7 +19,7 @@ dir_importer = os.path.join(dir_init_main, "importer")
 # 一套 Crafter 材质节点组（CO-/CI-/C- 节点组 + 材质设置物体）由材质库 .blend 导入而来。
 # 工程里已经有一套、且用的还是同一个材质库时，Load Material 不再拆了重加载，直接复用：
 # 用户对 CI- 组的改动、材质设置面板上的开关都不会被冲掉，重复导入也快得多。
-# 已加载的库名记在场景上（随 .blend 保存）；库名对不上、或关键节点组/物体缺件，就退回全量重加载。
+# 已加载的库名记在场景上（随 .blend 保存）；库名对不上、或关键节点组缺件，就退回全量重加载。
 material_library_prop = "Crafter_loaded_material_library"
 node_groups_use_fake_user = ["C-PBR_Parser", "C-lab_PBR_1.3", "C-old_PBR"]
 name_material_settings = "材质设置/Material Settings"
@@ -62,7 +62,8 @@ def set_loaded_material_library(context, library_name):
 def material_setup_missing(context):
     '''
     列出复用所需的东西里缺哪些（返回空列表 = 可以复用）。
-    只查后续流程真正会取用的：C-PBR_Parser、当前 PBR 解析器组、至少一个 CI- 分类组、材质设置物体。
+    只查后续流程真正会取用的：C-PBR_Parser、当前 PBR 解析器组、至少一个 CI- 分类组。
+    材质设置物体仅面板需要，导入路径不加载它。
     '''
     missing = []
     for name in node_groups_use_fake_user:
@@ -76,14 +77,12 @@ def material_setup_missing(context):
         pass
     if not any(node_group.name.startswith("CI-") for node_group in bpy.data.node_groups):
         missing.append("CI-*")
-    if name_material_settings not in bpy.data.objects:
-        missing.append(name_material_settings)
     return missing
 
 
 def can_reuse_material_setup(context):
     '''
-    工程里是否已有一套能直接复用的材质节点组：库名与上次加载一致，且关键节点组/物体齐全。
+    工程里是否已有一套能直接复用的材质节点组：库名与上次加载一致，且关键节点组齐全。
     return: (是否可复用, 说明) —— 说明可直接进日志
     '''
     library_name = get_material_library_name(context)
@@ -102,24 +101,56 @@ def ensure_material_settings_object(context):
     '''
     把材质设置物体挂进它自己的集合（已在集合里时只刷新隐藏状态）
     '''
+    obj = bpy.data.objects.get(name_material_settings)
+    if obj is None:
+        return
     if name_material_settings in bpy.data.collections:
         collection = bpy.data.collections[name_material_settings]
     else:
         collection = bpy.data.collections.new(name=name_material_settings)
         context.scene.collection.children.link(collection)
-    obj = bpy.data.objects.get(name_material_settings)
-    if obj is None:
-        return
     if collection not in obj.users_collection:
         collection.objects.link(obj)
     obj.hide_viewport = True
     obj.hide_render = True
 
 
-def reload_material_setup(context, library_name):
+def ensure_material_library_settings_object(context, library_name):
+    '''Return the settings object, appending it only if its groups are absent.
+
+    Callers with CI/CO groups already loaded must accept a full, force_reload
+    Load Material instead: appending the object afterwards duplicates CI groups.
+    None tells panel callers to take that full reload path.
+    '''
+    obj = bpy.data.objects.get(name_material_settings)
+    if obj is None:
+        if library_name is None or any(
+                group.name.startswith(("CI-", "CO-", "C-")) for group in bpy.data.node_groups):
+            return None
+        with bpy.data.libraries.load(os.path.join(dir_materials, library_name + ".blend"),
+                                     link=False) as (data_from, data_to):
+            data_to.objects = [name for name in data_from.objects if name == name_material_settings]
+        obj = bpy.data.objects.get(name_material_settings)
+    ensure_material_settings_object(context)
+    return obj
+
+
+def material_settings_object_for_panel(context):
+    obj = ensure_material_library_settings_object(context, get_material_library_name(context))
+    if obj is None:
+        # CI-only imports omit this object. Rebuild materials and append the
+        # object with CI groups in one load, rather than creating CI-*.001.
+        if bpy.ops.crafter.load_material(force_reload=True) != {'FINISHED'}:
+            return None
+        obj = bpy.data.objects.get(name_material_settings)
+    return obj
+
+
+def reload_material_setup(context, library_name, include_settings=False):
     '''
     全量重加载材质节点组：删掉工程里旧的 CO-/CI-/C- 节点组与材质设置物体，
-    再从 append.blend 与指定材质库 .blend 重新导入（CI- 组随材质设置物体的材质一起进来）。
+    再从 append.blend 与指定材质库 .blend 直接导入 CI/CO，嵌套 C- 组随依赖导入。
+    include_settings: 面板需要的设置物体必须与 CI/CO 在同一次 load 中加载，避免重名组。
     library_name: 材质库名（dir_materials 下去掉 .blend 的文件名）
     '''
     # 删除startswith(CO-)、startswith(CI-)节点组、startswith(C-)节点组
@@ -148,10 +179,20 @@ def reload_material_setup(context, library_name):
             bpy.data.node_groups[name].use_fake_user = True
     # 导入Crafter-Moving_texture节点组
     add_node_group_if_not_exists(names_Crafter_Moving_texture)
-    # 导入材质设置/Material Settings物体、材质、startswith(CI-)
+    # Import only the shader groups on the automatic path; Blender loads their
+    # nested helpers. Panel loads request the settings object in this same pass.
     blend_material_dir = os.path.join(dir_materials, library_name + ".blend")
     with bpy.data.libraries.load(blend_material_dir, link=False) as (data_from, data_to):
-        data_to.objects = [name for name in data_from.objects if name == name_material_settings]
+        data_to.node_groups = [name for name in data_from.node_groups
+                               if name.startswith(("CI-", "CO-"))]
+        if include_settings:
+            data_to.objects = [name for name in data_from.objects if name == name_material_settings]
+    if not include_settings:
+        # The settings material normally keeps unused classifications alive.
+        # CI-only loads need their own users so save/reopen preserves the library.
+        for group in data_to.node_groups:
+            if group is not None:
+                group.use_fake_user = True
     ensure_material_settings_object(context)
 
 # ==================== 加载材质 ====================
@@ -195,7 +236,8 @@ def load_classification_data(addon_prefs):
     return compile_classification_list(classification_raw)
 
 # ========== 提取的单材质处理函数 ==========
-def process_single_material(material, context, classification_list, imported_by_crafter=False, folder_search=None):
+def process_single_material(material, context, classification_list, imported_by_crafter=False, folder_search=None,
+                            addon_prefs=None):
     '''
     处理单个材质：扫描 TEX_IMAGE 节点识别基础色/PBR贴图，构建 CI- 节点组，
     装配 PBR 解析器，连接法向和 PBR 贴图。
@@ -212,6 +254,8 @@ def process_single_material(material, context, classification_list, imported_by_
     node_tree_material = material.node_tree
     if node_tree_material is None:
         return
+    if addon_prefs is None:
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
     nodes = node_tree_material.nodes
     links = node_tree_material.links
     # 面板路径（folder_search 非 None）：已有的法向/PBR 一律保留，开关只决定缺的那张要不要去找
@@ -282,7 +326,7 @@ def process_single_material(material, context, classification_list, imported_by_
             apply_tint(group_CI=group_CI, nodes=nodes, links=links, tint=tint)
         except Exception as ex:
             warn_log(f"apply_tint 失败 [{material.name}]: {ex}")
-        add_node_parser(group_CI=group_CI, nodes=nodes, links=links)
+        add_node_parser(group_CI=group_CI, nodes=nodes, links=links, addon_prefs=addon_prefs)
         _apply_ds_cull()
         return
 
@@ -373,7 +417,8 @@ def process_single_material(material, context, classification_list, imported_by_
     group_CI = nodes.new(type="ShaderNodeGroup")
     # 给输出前面的 overlay Mix 链留位置: 有 overlay 时基础 CI 与 Mix 链按同一步长左移
     # (CI -> Mix1 -> ... -> 输出的左边缘间距统一为 overlay_mix_step)
-    overlay_count = len(find_overlay_frames(nodes))
+    overlay_frames = find_overlay_frames(nodes)
+    overlay_count = len(overlay_frames)
     ci_offset_x = overlay_mix_step * (overlay_count + 1) if overlay_count > 0 else 200.0
     group_CI.location = (node_output_EEVEE.location.x - ci_offset_x,
                          node_output_EEVEE.location.y)
@@ -386,7 +431,8 @@ def process_single_material(material, context, classification_list, imported_by_
         apply_tint(group_CI=group_CI, nodes=nodes, links=links, tint=tint)
     except Exception as ex:
         warn_log(f"apply_tint 失败 [{material.name}]: {ex}")
-    node_C_PBR_Parser = add_node_parser(group_CI=group_CI, nodes=nodes, links=links)
+    node_C_PBR_Parser = add_node_parser(group_CI=group_CI, nodes=nodes, links=links,
+                                      addon_prefs=addon_prefs)
     if manual:
         # 只补缺：已有哪一类就保留哪一类，开关开着的才去文件夹找缺的那张
         want_normal = bool(folder_search) and node_tex_normal is None
@@ -407,7 +453,8 @@ def process_single_material(material, context, classification_list, imported_by_
     # overlay 图层：帧内建 CI/Parser，并用 Mix Shader 按层盖到基础表面上
     try:
         process_overlay_frames(material, nodes, links, group_CI,
-                               node_output_EEVEE, node_output_Cycles, classification_list)
+                               node_output_EEVEE, node_output_Cycles, classification_list,
+                               frames=overlay_frames, addon_prefs=addon_prefs)
     except Exception as ex:
         warn_log(f"overlay 处理失败 [{material.name}]: {ex}")
 
@@ -494,7 +541,8 @@ def _apply_overlay_layout_shift(material, nodes, new_shift):
     material["Crafter_overlay_shift"] = new_shift
 
 def process_overlay_frames(material, nodes, links, group_CI,
-                           node_output_EEVEE, node_output_Cycles, classification_list):
+                           node_output_EEVEE, node_output_Cycles, classification_list,
+                           frames=None, addon_prefs=None):
     '''
     overlay 图层加载：
     - 每个 overlay 帧按 label 里的完整材质名分类建 CI（挂在帧内），帧内贴图接 CI 的
@@ -509,12 +557,20 @@ def process_overlay_frames(material, nodes, links, group_CI,
       其他节点按层数左移让位，位移量记录在材质属性上，重复加载按差值位移不会漂移。
     - 可重复调用：先清掉上一轮的 Mix 链与帧内 CI/Parser 再重建。
     '''
-    frames = find_overlay_frames(nodes)
+    if frames is None:
+        frames = find_overlay_frames(nodes)
+    if not frames:
+        # Most imported materials have no overlay. Only undo layout/mix state
+        # when overlay frames from a previous load have actually been removed.
+        if material.get("Crafter_overlay_shift"):
+            _remove_overlay_mix_nodes(nodes)
+            _apply_overlay_layout_shift(material, nodes, 0.0)
+        return
+    if group_CI is None:
+        return
     _remove_overlay_mix_nodes(nodes)
     # 按 overlay 数量把其他节点左移, 给输出节点前面的 Mix 链让位(记录差值, 重复加载不漂移)
-    _apply_overlay_layout_shift(material, nodes, overlay_layout_shift(nodes))
-    if not frames or group_CI is None:
-        return
+    _apply_overlay_layout_shift(material, nodes, overlay_layout_shift(nodes, frames=frames))
 
     # 每个输出目标一条链: (CI 输出名, 输出节点)
     targets = []
@@ -548,7 +604,8 @@ def process_overlay_frames(material, nodes, links, group_CI,
         except Exception as ex:
             warn_log(f"apply_tint 失败 [overlay {name}]: {ex}")
 
-        node_parser = add_node_parser(group_CI=node_CI, nodes=nodes, links=links, parent=frame)
+        node_parser = add_node_parser(group_CI=node_CI, nodes=nodes, links=links, parent=frame,
+                                      addon_prefs=addon_prefs)
         node_tex_normal, node_tex_PBR = _overlay_frame_pbr_textures(nodes, frame)
         link_base_normal_PBR(node_tex_base=None, group_CI=node_CI, links=links,
                              node_C_PBR_Parser=node_parser,
@@ -586,7 +643,8 @@ def load_material_for_object(context, obj):
     addon_prefs = context.preferences.addons[__addon_name__].preferences
     classification_list = load_classification_data(addon_prefs)
     for mat in obj.data.materials:
-        process_single_material(mat, context, classification_list, imported_by_crafter=False)
+        process_single_material(mat, context, classification_list, imported_by_crafter=False,
+                                addon_prefs=addon_prefs)
     add_to_mcmts_collection(object=obj, context=context)
     add_to_crafter_mcmts_collection(object=obj, context=context)
     if addon_prefs.Add_Crafter_time_On_Import:
@@ -624,15 +682,24 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):
         if not (-1 < addon_prefs.Materials_List_index and addon_prefs.Materials_List_index < len(addon_prefs.Materials_List)):
             return {"CANCELLED"}
         make_true_object_mode(context)
-        bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
+        # finish_import already applies world transforms. Item/manual imports
+        # can still have rotation or scale, so retain the operator when needed.
+        if not self.from_import or any(
+                tuple(obj.rotation_euler) != (0.0, 0.0, 0.0) or tuple(obj.scale) != (1.0, 1.0, 1.0)
+                for obj in context.selected_objects if obj.type == "MESH"):
+            bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
         # 工程里已有一套同库的材质节点组就直接复用，只有换库/缺件/强制重加载才拆了重来
         library_name = get_material_library_name(context)
         reusable, reason = can_reuse_material_setup(context)
-        if self.force_reload or not reusable:
+        needs_settings = not self.from_import and name_material_settings not in bpy.data.objects
+        if self.force_reload or not reusable or needs_settings:
             if self.force_reload:
                 reason = f"强制重加载材质节点组（{library_name}）"
+            elif needs_settings and reusable:
+                reason = f"加载材质设置面板（{library_name}）"
             push_log(f'[unknown] 重加载材质节点组：{reason}', 'INFO')
-            reload_material_setup(context, library_name)
+            reload_material_setup(context, library_name,
+                                  include_settings=self.force_reload or not self.from_import)
             set_loaded_material_library(context, library_name)
         else:
             push_log(f'[unknown] {reason}', 'INFO')
@@ -659,7 +726,8 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):
             if name_material in context.scene.Crafter_crafter_mcmts:
                 imported_by_crafter = True
             material = bpy.data.materials[name_material]
-            process_single_material(material, context, classification_list, imported_by_crafter, folder_search)
+            process_single_material(material, context, classification_list, imported_by_crafter, folder_search,
+                                    addon_prefs=addon_prefs)
         # 添加选中物体的材质到合集
         for obj in context.selected_objects:
             if obj.type == "MESH":
@@ -668,7 +736,12 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):
                 if addon_prefs.Add_Crafter_time_On_Import:
                     add_Crafter_time(obj=obj)
                 
-        bpy.ops.crafter.set_pbr_parser()
+        if self.from_import:
+            # Each new base/overlay parser already has its defaults; only the
+            # shared child parser needs rewiring, without another material walk.
+            ensure_pbr_parser_group(addon_prefs)
+        else:
+            bpy.ops.crafter.set_pbr_parser()
 
         # 逐材质在加载时就同步过了，这里只汇总日志（不再全量扫描）
         cull_stats = get_CI_cull_stats()
@@ -1031,40 +1104,17 @@ class VIEW3D_OT_CrafterSetPBRParser(bpy.types.Operator):
     def execute(self, context: bpy.types.Context):
         addon_prefs = context.preferences.addons[__addon_name__].preferences
 
-        node_C_PBR_Parser = bpy.data.node_groups["C-PBR_Parser"]
-        nodes = node_C_PBR_Parser.nodes
-        links = node_C_PBR_Parser.links
-        for node in nodes:
-            if node.type == "GROUP_OUTPUT":
-                node_output = node
-            elif node.type == "GROUP_INPUT":
-                node_input = node
-            elif node.type == "GROUP":
-                node_Parser = node
-        node_Parser.node_tree = bpy.data.node_groups["C-" + addon_prefs.PBR_Parser]
-        for output in node_Parser.outputs:
-            links.new(output, node_output.inputs[output.name])
-        for input in node_Parser.inputs:
-            links.new(input, node_input.outputs[input.name])
-
-        metallic = addon_prefs.Default_Metallic
-        roughness = addon_prefs.Default_Roughness
-        IOR = addon_prefs.Default_IOR
-        f0 = ((IOR - 1) / (IOR + 1)) ** 2
-        emission_strength = addon_prefs.Default_Emission_Strength
-
-        PBR_value = [1 - roughness, min(229/255, f0), 0, emission_strength * 254 / 255]
-        if addon_prefs.PBR_Parser == "old_PBR":
-            PBR_value = [1 - roughness, metallic, emission_strength,1]
+        ensure_pbr_parser_group(addon_prefs)
 
         for name_material in context.scene.Crafter_mcmts:
             material = bpy.data.materials[name_material.name]
             node_tree_material = material.node_tree
+            if node_tree_material is None:
+                continue
             for node in node_tree_material.nodes:
-                if node.type == "GROUP":
-                    if node.node_tree.name != None:
-                        if node.node_tree.name == "C-PBR_Parser":
-                            node.inputs["PBR"].default_value = PBR_value
+                if node.type == "GROUP" and node.node_tree is not None:
+                    if node.node_tree.name == "C-PBR_Parser":
+                        apply_default_pbr_to_parser_node(node, addon_prefs)
         return {'FINISHED'}
 
 class VIEW3D_OT_CrafterMaterialPanel(bpy.types.Operator):
@@ -1075,10 +1125,7 @@ class VIEW3D_OT_CrafterMaterialPanel(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context: bpy.types.Context):
-        for obj in bpy.data.objects:
-            if obj.name == "材质设置/Material Settings":
-                return True
-        return False
+        return name_material_settings in bpy.data.objects or can_reuse_material_setup(context)[0]
 
     def parse_panel_name(self, node_name):
         prefix = "C-Panel-"
@@ -1233,10 +1280,8 @@ class VIEW3D_OT_CrafterMaterialPanel(bpy.types.Operator):
         return panels
 
     def invoke(self, context, event):
-        for obj in bpy.data.objects:
-            if obj.name == "材质设置/Material Settings":
-                break
-        else:
+        obj = material_settings_object_for_panel(context)
+        if obj is None:
             self.report({'ERROR'}, "Material Settings object not found")
             return {'CANCELLED'}
 
@@ -1523,20 +1568,13 @@ class VIEW3D_OT_CrafterMaterialShaderPanel(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context: bpy.types.Context):
-
-        for obj in bpy.data.objects:
-            if obj.name == "材质设置/Material Settings":
-                return True
-        else:
-            return False
+        return name_material_settings in bpy.data.objects or can_reuse_material_setup(context)[0]
 
     def execute(self, context: bpy.types.Context):
         addon_prefs = context.preferences.addons[__addon_name__].preferences
 
-        for obj in bpy.data.objects:
-            if obj.name == "材质设置/Material Settings":
-                break
-        else:
+        obj = material_settings_object_for_panel(context)
+        if obj is None:
             return {'FINISHED'}
 
 
