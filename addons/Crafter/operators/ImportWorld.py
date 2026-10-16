@@ -686,6 +686,19 @@ def _classify_importer_line(line):
     return LOG_LEVEL_INFO
 
 
+def biome_texture_bounds(worldconfig):
+    """Match WI LoadConfig's effective inclusive X/Z bounds before mapping PNGs."""
+    def effective(key):
+        value = worldconfig[key]
+        if worldconfig.get("useChunkPrecision", False):
+            # WI alignTo16 rounds away from zero, including the max endpoint.
+            value = ((value + 15) // 16 if value > 0 else value // 16) * 16
+        return value
+
+    return (effective("minX"), -effective("maxZ") - 1,
+            effective("maxX") + 1, -effective("minZ"))
+
+
 def finish_import(ctx, prefs, imported_time, worldconfig, prepared_time,
                   save, version, dot_minecraftPath, worldPath, undivided, is_custom,
                   _ctx_win=None, _ctx_area=None):
@@ -860,6 +873,7 @@ def finish_import(ctx, prefs, imported_time, worldconfig, prepared_time,
         node_group = node_group_src.copy()
         node_group.name = "Crafter-biomeTex_" + imported_time
         node_group.use_fake_user = True
+        min_x, min_y, max_x, max_y = biome_texture_bounds(worldconfig)
         loaded_imgs = 0
         for node in node_group.nodes:
             if node.type == "TEX_IMAGE":
@@ -871,10 +885,10 @@ def finish_import(ctx, prefs, imported_time, worldconfig, prepared_time,
                 except Exception as ex:
                     debug_log(f"  Image load: {ex}")
             elif node.type == "GROUP":
-                node.inputs["min X"].default_value = worldconfig["minX"]
-                node.inputs["min Y"].default_value = -worldconfig["maxZ"] -1
-                node.inputs["max X"].default_value = 1 + worldconfig["maxX"]
-                node.inputs["max Y"].default_value = -worldconfig["minZ"]
+                node.inputs["min X"].default_value = min_x
+                node.inputs["min Y"].default_value = min_y
+                node.inputs["max X"].default_value = max_x
+                node.inputs["max Y"].default_value = max_y
         log_step(f"节点组 {node_group.name} 就绪，加载 {loaded_imgs} 张群系图")
         debug_log("biomeTex node group ready")
     except Exception as ex:
@@ -911,6 +925,10 @@ def finish_import(ctx, prefs, imported_time, worldconfig, prepared_time,
         for nd in todel: nodes.remove(nd)
         if ntb and pri:
             links.new(ntb.outputs["Alpha"], pri.inputs["Alpha"])
+        if out_ev and node_group:
+            nbn = nodes.new("ShaderNodeGroup")
+            nbn.location = (out_ev.location.x - 400, out_ev.location.y - 550)
+            nbn.node_tree = node_group
         if ntb:
             load_normal_and_PBR(node_tex_base=ntb, nodes=nodes, links=links)
             nodes.active = ntb
