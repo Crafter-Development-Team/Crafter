@@ -778,7 +778,6 @@ def finish_import(ctx, prefs, imported_time, worldconfig, prepared_time,
             add_to_crafter_mcmts_collection(object=obj, context=ctx)
             if prefs.Add_Crafter_time_On_Import:
                 add_Crafter_time(obj=obj)
-            view_2_active_object(ctx)
     log_stage_end("导入 OBJ", f"{len(real_name_dic)} 个唯一材质")
 
     for name in set(material_should_delete):
@@ -959,7 +958,8 @@ def finish_import(ctx, prefs, imported_time, worldconfig, prepared_time,
 
     for o in (set(bpy.data.objects) - before_objects):
         if o.type == "MESH": o.select_set(True)
-    view_2_active_object(ctx)
+    # Frame once after import; let Blender redraw normally to avoid a costly forced swap.
+    view_2_active_object(ctx, redraw=False)
     push_log(rt, "INFO")
     debug_log("finish_import done")
 

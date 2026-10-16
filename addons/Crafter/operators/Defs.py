@@ -448,7 +448,7 @@ def dir_version_2_dir_jar(dir_version):
 def reloadwindow():
     bpy.ops.wm.redraw_timer(type="DRAW_WIN_SWAP")
 
-def view_2_active_object(context):
+def view_2_active_object(context, *, redraw=True):
     for window in context.window_manager.windows:
         for area in window.screen.areas:
             if area.type == 'VIEW_3D':
@@ -461,7 +461,8 @@ def view_2_active_object(context):
                         except:
                             pass
                         break
-    reloadwindow()
+    if redraw:
+        reloadwindow()
 
 def draw_multiline_label( text, parent,context):
     # 获取当前面板宽度和UI缩放比例
