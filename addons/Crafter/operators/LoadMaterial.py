@@ -321,6 +321,7 @@ def process_single_material(material, context, classification_list, imported_by_
         if "Base Color" in group_CI.inputs:
             group_CI.inputs["Base Color"].default_value = [float(material.name[6:10]), float(material.name[11:15]), float(material.name[16:20]), 1]
         link_CI_output(group_CI=group_CI, node_output_EEVEE=node_output_EEVEE, node_output_Cycles=node_output_Cycles, links=links)
+        link_biome_tex(node_biomeTex=node_biomeTex, group_CI=group_CI, links=links)
         tint = get_material_tint(material)
         try:
             apply_tint(group_CI=group_CI, nodes=nodes, links=links, tint=tint)
@@ -426,6 +427,7 @@ def process_single_material(material, context, classification_list, imported_by_
     link_CI_output(group_CI=group_CI, node_output_EEVEE=node_output_EEVEE, node_output_Cycles=node_output_Cycles, links=links)
     # 按 CI- 组的输出接口名决定这个材质的剔除（见 Defs.CI_CULL_OUTPUT_*）：有 → 开，没有 → 关
     sync_CI_culling(material, count=True)
+    link_biome_tex(node_biomeTex=node_biomeTex, group_CI=group_CI, links=links)
     tint = get_material_tint(material)
     try:
         apply_tint(group_CI=group_CI, nodes=nodes, links=links, tint=tint)

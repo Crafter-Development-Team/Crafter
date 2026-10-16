@@ -10,6 +10,7 @@ import tempfile
 import textwrap
 import re
 import fnmatch
+import copy
 
 # 只在Windows上导入wintypes
 if platform.system() == "Windows":
@@ -324,22 +325,49 @@ def build_overlay_frames(material, overlays, dir_importer):
                 float(color[0]), float(color[1]), float(color[2]))
 
 
+def open_zip_icon(zip_file, member):
+    '''仅容忍图标目录项与本地文件头的大小写差异，仍由 zipfile 解压并校验 CRC。'''
+    try:
+        return zip_file.open(member)
+    except zipfile.BadZipFile:
+        # ZipFile.open(ZipInfo) 仍会比较 orig_filename；仅换成目录项的名字不足以修复。
+        # 读取本地文件头上的真实名字，在副本上归一化，避免修改 ZIP 或共享 ZipInfo。
+        with open(zip_file.filename, "rb") as archive:
+            archive.seek(member.header_offset)
+            header = archive.read(30)
+            if len(header) != 30 or header[:4] != b"PK\x03\x04":
+                raise
+            flags = int.from_bytes(header[6:8], "little")
+            name_length = int.from_bytes(header[26:28], "little")
+            raw_name = archive.read(name_length)
+        encoding = "utf-8" if flags & 0x800 else (getattr(zip_file, "metadata_encoding", None) or "cp437")
+        local_name = raw_name.decode(encoding)
+        if (len(raw_name) != name_length or local_name == member.orig_filename
+                or local_name.casefold() != member.orig_filename.casefold()):
+            raise
+        normalized = copy.copy(member)
+        normalized.orig_filename = local_name
+        return zip_file.open(normalized)
+
+
 def load_icon_from_zip(zip_path, icons, name_icons, index):
-    dir_temp = tempfile.mkdtemp()
-    dir_icon = os.path.join(dir_temp, "pack.png")
     with zipfile.ZipFile(zip_path, "r") as zip_file:
-        if "pack.png" in zip_file.namelist():
-            zip_file.extract("pack.png", dir_temp)
-            have = True
-        elif"pack.jpg" in zip_file.namelist():
-            zip_file.extract("pack.jpg", dir_temp)
-            have = True
-            dir_icon = os.path.join(dir_temp, "pack.jpg")
-        else:
-            have = False
-    icons.load(name_icons + "_icon_" + str(index), dir_icon, 'IMAGE')
-    dirs_temp.append(dir_temp)
-    return have
+        members = zip_file.infolist()
+        for name in ("pack.png", "pack.jpg"):
+            member = next((item for item in members if item.filename.casefold() == name), None)
+            if member is None:
+                continue
+            # 固定输出名，兼容 Linux/macOS；不使用压缩包里的路径来创建文件。
+            with open_zip_icon(zip_file, member) as source:
+                data = source.read()
+            dir_temp = tempfile.mkdtemp()
+            dirs_temp.append(dir_temp)
+            dir_icon = os.path.join(dir_temp, name)
+            with open(dir_icon, "wb") as target:
+                target.write(data)
+            icons.load(name_icons + "_icon_" + str(index), dir_icon, 'IMAGE')
+            return True
+    return False
 
 def get_dir_saves(context):
     addon_prefs = context.preferences.addons[__addon_name__].preferences
