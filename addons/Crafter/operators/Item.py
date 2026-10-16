@@ -12,6 +12,20 @@ from ..__init__ import dir_cafter_data, dir_resourcepacks_plans, dir_materials, 
 from ..config import __addon_name__
 from ....common.i18n.i18n import i18n
 from bpy.props import *
+from .Defs import warn_log
+
+
+def _run_load_material(from_import=True):
+    """Allow older installed operators that lack the from_import property."""
+    try:
+        return bpy.ops.crafter.load_material(from_import=from_import)
+    except TypeError as ex:
+        message = str(ex).lower()
+        if "from_import" not in message or not (
+                "unrecognized" in message or "unexpected keyword" in message):
+            raise
+        warn_log("crafter.load_material does not recognize from_import (stale operator); retrying without it")
+        return bpy.ops.crafter.load_material()
 
 # ==================== 物品贴图尺寸 ====================
 
@@ -351,7 +365,7 @@ class VIEW3D_OT_CrafterImportItem(bpy.types.Operator):#导入物体
                 load_material_for_object(context, object_item)
             else:
                 # 没加载过 / 换了材质库 / 缺件 → 走操作符，那里重加载后再统一加载
-                bpy.ops.crafter.load_material(from_import=True)
+                _run_load_material(from_import=True)
 
         return  {'FINISHED'}
         

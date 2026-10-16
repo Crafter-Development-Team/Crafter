@@ -719,6 +719,18 @@ def finish_import(ctx, prefs, imported_time, worldconfig, prepared_time,
                                 continue
         return fn(**kw)
 
+    def _run_load_material(from_import=True):
+        """Allow older installed operators that lack the from_import property."""
+        try:
+            return _run_ops(bpy.ops.crafter.load_material, from_import=from_import)
+        except TypeError as ex:
+            message = str(ex).lower()
+            if "from_import" not in message or not (
+                    "unrecognized" in message or "unexpected keyword" in message):
+                raise
+            warn_log("crafter.load_material does not recognize from_import (stale operator); retrying without it")
+            return _run_ops(bpy.ops.crafter.load_material)
+
     have_obj = False
     real_name_dic = {}
     material_should_delete = []
@@ -934,7 +946,7 @@ def finish_import(ctx, prefs, imported_time, worldconfig, prepared_time,
     if prefs.Auto_Load_Material:
         log_stage_begin("自动加载材质")
         ms = time.perf_counter()
-        _run_ops(bpy.ops.crafter.load_material, from_import=True)
+        _run_load_material(from_import=True)
         mu = time.perf_counter() - ms
         log_stage_end("自动加载材质", f"耗时 {mu:.2f}s")
         debug_log(f"Auto material: {mu:.2f}s")
