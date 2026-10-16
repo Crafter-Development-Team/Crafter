@@ -3,18 +3,23 @@ import com.minecraft.selector.core.*;
 import java.awt.*;
 import java.util.*;
 import javax.swing.*;
-/** Counts cached visible columns; uses palette usage sources, never reads MCA on hover. */
+/**
+ * Reports the cached surface column count for the viewport plus the palette IDs that no
+ * resource source could classify. Per-column block IDs were removed with the +4 MB/tile
+ * metadata arrays, so unknown-ID attribution now comes from the palette, not from pixels.
+ */
 public final class ResourceCoveragePanel extends JPanel {
     public static String report(Map<String,Long> counts,BlockColors.Palette palette) {
-        Map<String,Object> usage=palette.usageReport();Map<String,Long> namespaces=new TreeMap<>();java.util.List<String> unknown=new ArrayList<>();long total=0,unresolved=0;
-        java.util.List<Map.Entry<String,Long>> rows=new ArrayList<>(counts.entrySet());rows.sort((a,b)->Long.compare(b.getValue(),a.getValue()));
-        for(Map.Entry<String,Long> e:rows) {
-            String id=e.getKey(),key=id.startsWith("minecraft:")?id.substring(10):id;total+=e.getValue();
-            Object row=usage.get(id);if(row==null) row=usage.get(key);
-            String source=row instanceof Map?String.valueOf(((Map<?,?>)row).get("source")):"unclassified";
-            if(source.equals("unknown")||source.equals("unclassified")) {unresolved+=e.getValue();String ns=id.contains(":")?id.split(":",2)[0]:"minecraft";namespaces.merge(ns,e.getValue(),Long::sum);unknown.add(id+"  "+e.getValue()+" columns ("+source+")");}
+        long total=0;for(long value:counts.values()) total+=value;
+        Map<String,Object> usage=palette.usageReport();Map<String,Long> namespaces=new TreeMap<>();java.util.List<String> unknown=new ArrayList<>();
+        for(Map.Entry<String,Object> e:usage.entrySet()) {
+            Object row=e.getValue();String source=row instanceof Map?String.valueOf(((Map<?,?>)row).get("source")):"unclassified";
+            if(source.equals("unknown")||source.equals("unclassified")) {
+                String ns=e.getKey().contains(":")?e.getKey().split(":",2)[0]:"minecraft";
+                namespaces.merge(ns,1L,Long::sum);unknown.add(e.getKey()+"  ("+source+")");
+            }
         }
-        StringBuilder out=new StringBuilder("Current viewport cached surface: "+total+" columns; unknown/unclassified: "+unresolved+"\nUnloaded columns excluded.\nNamespaces: "+namespaces+"\n\n");
+        StringBuilder out=new StringBuilder("Current viewport cached surface: "+total+" columns\nUnloaded columns excluded.\nUnclassified palette IDs: "+unknown.size()+"\nNamespaces: "+namespaces+"\n\n");
         for(String line:unknown) out.append(line).append('\n');return out.toString();
     }
     public ResourceCoveragePanel(String report) {

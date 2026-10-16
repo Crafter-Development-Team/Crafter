@@ -39,9 +39,12 @@ public final class ViewLayers {
         while(entries.hasNext()) {Entry entry=entries.next();pixels+=(long)entry.image.getWidth()*entry.image.getHeight();count++;if(count>12||count>1&&pixels>16L*1024*1024) entries.remove();}
         return image;
     }
+    /** 统计视口内的可见列；逐列方块状态已移除，因此只能统计"已加载的表面列"总数。 */
     public static void count(Map<String,Long> counts,BufferedImage image,int x1,int z1,int x2,int z2) {
+        long columns=0;
         for(int z=Math.max(0,z1);z<=Math.min(image.getHeight()-1,z2);z++) for(int x=Math.max(0,x1);x<=Math.min(image.getWidth()-1,x2);x++) {
-            String state=RenderedMap.blockAt(image,x,z);if(state!=null) {int bracket=state.indexOf('[');String id=bracket<0?state:state.substring(0,bracket);counts.merge(id,1L,Long::sum);}
+            if(RenderedMap.heightAt(image,x,z)!=RenderedMap.NO_HEIGHT) columns++;
         }
+        if(columns>0) counts.merge("cached surface",columns,Long::sum);
     }
 }

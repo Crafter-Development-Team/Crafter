@@ -98,17 +98,11 @@ def item_image_size(op):
 
 def item_base_size(op):
     '''
-    参与细分的基准尺寸：自定义尺寸且有 X/Y 时用 X/Y，否则用图片实际尺寸。
-    X/Y 会在选中文件时自动填成图片尺寸；万一没填上（读不出文件头等），这里仍按图片
-    实际尺寸走，和旧行为一致，不会因为默认值把网格切错。
+    参与细分的基准尺寸：一律取所选图片的实际像素尺寸（只读文件头）。
+    读不出就返回 (0, 0)，execute 那边会退回已加载图片的 size。
     注意：属性回调里的 self 是 RNA 包装、没有实例方法，所以尺寸口径都写在这里。
     '''
-    if op.custome_size and op.width > 0 and op.height > 0:
-        return (int(op.width), int(op.height))
-    width, height = item_image_size(op)
-    if width > 0 and height > 0:
-        return (width, height)
-    return (0, 0)
+    return item_image_size(op)
 
 
 def item_current_divisor(op):
@@ -153,23 +147,12 @@ def item_divisor_label():
     return "1（不除）" if divisor <= 1 else str(divisor)
 
 
-def update_item_size(op, context):
-    '''X/Y 被改了就把约数退回"不除"，免得留下除不尽的选项'''
-    item_divisor_state["value"] = 1
-
-
-def update_item_file_size(op, context):
+def update_item_file(op, context):
     '''
-    文件浏览器里选中文件后：把 X/Y 填成图片的实际像素尺寸，并打开自定义尺寸。
-    读不出尺寸就什么都不动（细分时按图片实际尺寸兜底）。
+    文件浏览器里选中文件后：把约数退回"不除"，免得留下除不尽的选项。
+    细分尺寸一律按图片实际尺寸走，所以这里不用再写任何尺寸属性。
     '''
-    width, height = item_image_size(op)
-    if width <= 0 or height <= 0:
-        return
-    op.width = width
-    op.height = height
     item_divisor_state["value"] = 1
-    op.custome_size = True
 
 
 # ==================== 约数下拉菜单 ====================
@@ -213,6 +196,58 @@ class CRAFTER_MT_item_divisor(bpy.types.Menu):
             # 约数与尺寸之间空两格（约数位数不同，两格看着更分得开）
             add_entry(divisor, f"{divisor}  {width} x {height}")
 
+# ==================== 挤出厚度（C-item 节点组输入） ====================
+
+# C-item 里两个数值输入的名字。模板里 "Pxel Min" 是既有拼写（少一个 i），
+# 这里两种写法都认，免得以后模板把名字改回来就失效。
+offset_scale_names = ("Offset Scale",)
+pixel_min_names = ("Pxel Min", "Pixel Min")
+
+
+def _find_group_input(node_group, names):
+    '''
+    在节点组接口里找一个数值输入，返回它的 identifier（modifier[...] 要的就是这个）。
+    只认非几何的 INPUT 插槽；找不到返回 None。
+    '''
+    for item in node_group.interface.items_tree:
+        if getattr(item, "item_type", None) != 'SOCKET':
+            continue
+        if getattr(item, "in_out", None) != 'INPUT':
+            continue
+        if getattr(item, "socket_type", None) == 'NodeSocketGeometry':
+            continue
+        if item.name in names:
+            return item.identifier
+    return None
+
+
+def set_item_thickness_inputs(object_item, thickness_px, pixel_min):
+    '''
+    把厚度写进 C-item 节点组：
+      Offset Scale ← thickness_px
+      Pxel Min     ← pixel_min（被约数除过后的短边像素量）
+    节点组内部是 Offset Scale × 0.5 ÷ Pxel Min，所以每边挤出 = 厚度 ÷ (2 × 短边像素量)，
+    镜像后总厚 = 厚度 ÷ 短边像素量。
+    模板缺插槽时跳过并记一条警告，不让导入整个失败。
+    '''
+    for modifier in object_item.modifiers:
+        if modifier.type != 'NODES':
+            continue
+        node_group = modifier.node_group
+        if node_group is None or node_group.name != "C-item":
+            continue
+        offset_key = _find_group_input(node_group, offset_scale_names)
+        pixel_key = _find_group_input(node_group, pixel_min_names)
+        if offset_key is None or pixel_key is None:
+            warn_log("C-item node group is missing the 'Offset Scale' / 'Pxel Min' inputs; "
+                     "item thickness falls back to the template default")
+            return
+        modifier[offset_key] = float(thickness_px)
+        modifier[pixel_key] = float(pixel_min)
+        return
+    warn_log("no C-item geometry-node modifier found; item thickness was not applied")
+
+
 # ==================== 导入物体 ====================
 
 
@@ -225,20 +260,15 @@ class VIEW3D_OT_CrafterImportItem(bpy.types.Operator):#导入物体
     # 注意：属性回调（update）拿到的 self 是 RNA 包装、没有实例方法，所以一律挂模块级函数
     filepath: StringProperty(name="dir item",
                               subtype='FILE_PATH',
-                              update=update_item_file_size)#type: ignore
-    custome_size: BoolProperty(name="Custome Size",
-                               default=True)#type: ignore
-    # X/Y 是细分用的尺寸；0 = 还没定，这时按图片实际尺寸走（选中文件会自动填成图片尺寸）
-    width: IntProperty(name="X",
-                       default=0,
-                       min=0,
-                       update=update_item_size)#type: ignore
-    height: IntProperty(name="Y",
-                         default=0,
-                         min=0,
-                         update=update_item_size)#type: ignore
+                              update=update_item_file)#type: ignore
     load_material: BoolProperty(name="加载材质",
                                 default=True)#type: ignore
+    # 厚度：单位是像素。节点组内部是 Offset Scale × 0.5 ÷ Pxel Min → 挤出网格，
+    # 所以每边挤出量 = 厚度 ÷ (2 × 短边像素量)，镜像后总厚度 = 厚度 ÷ 短边像素量。
+    thickness: FloatProperty(name="厚度",
+                             description="挤出厚度，单位是像素（1 格 = 1 米）：总厚 = 厚度 ÷ 短边像素量",
+                             default=1.0,
+                             min=0.001)#type: ignore
 
 
     @classmethod
@@ -253,24 +283,21 @@ class VIEW3D_OT_CrafterImportItem(bpy.types.Operator):#导入物体
     def draw(self, context):
         layout = self.layout
         layout.prop(self, "load_material")
-        layout.prop(self, "custome_size")
-        if self.custome_size:
-            row_size = layout.row(align=True)
-            row_size.prop(self, "width")
-            row_size.prop(self, "height")
+        base_width, base_height = item_base_size(self)
+        divisor = item_current_divisor(self)
         # 图片实际尺寸放在约数上面（选中文件时自动读出来）
         image_width, image_height = item_image_size(self)
         if image_width > 0 and image_height > 0:
             layout.label(text=f"图片实际尺寸: {image_width} x {image_height}", icon="IMAGE_DATA")
         # 约数是下拉菜单（Menu + 按钮条目）：条目按当前图片真正的公约数动态生成。
         # 顺带把可选约数刷进模块级状态，菜单照着列。
-        base_width, base_height = item_base_size(self)
         valid = common_divisors(base_width, base_height)[:max_divisor_hint]
         item_divisor_state["valid"] = [(d, base_width // d, base_height // d) for d in valid]
         layout.menu("CRAFTER_MT_item_divisor", text=f"约数: {item_divisor_label()}")
         if base_width > 0 and base_height > 0:
-            divisor = item_current_divisor(self)
             layout.label(text=f"细分尺寸: {base_width // divisor} x {base_height // divisor}")
+        # 厚度（像素）放在约数下面：它的最终厚度取决于细分后的短边像素量
+        layout.prop(self, "thickness")
     def execute(self, context: bpy.types.Context):
         dir_item = self.filepath
         addon_prefs = context.preferences.addons[__addon_name__].preferences
@@ -311,8 +338,7 @@ class VIEW3D_OT_CrafterImportItem(bpy.types.Operator):#导入物体
         bm = bmesh.new()
         bm.from_mesh(mesh)
 
-        # 细分尺寸：自定义尺寸有 X/Y 就用 X/Y（选中文件时会自动填成图片尺寸），
-        # 否则用图片实际尺寸；约数在这里统一生效（64x64 除 4 → 16x16）
+        # 细分尺寸：按图片实际像素尺寸，约数在这里统一生效（64x64 除 4 → 16x16）
         base_width, base_height = item_base_size(self)
         if base_width <= 0 or base_height <= 0:
             base_width, base_height = image_item.size
@@ -321,6 +347,9 @@ class VIEW3D_OT_CrafterImportItem(bpy.types.Operator):#导入物体
         height = max(1, int(base_height) // divisor)
         cuts_x = width - 1
         cuts_y = height - 1
+        # 挤出厚度：厚度（像素）交给 Offset Scale，短边像素量交给 Pxel Min，
+        # 节点组内部算 Offset Scale × 0.5 ÷ Pxel Min，即每边挤出 厚度 ÷ (2 × 短边)。
+        set_item_thickness_inputs(object_item, self.thickness, min(width, height))
 
 
         # 使用示例
@@ -380,7 +409,7 @@ class VIEW3D_OT_CrafterScaleUV(bpy.types.Operator):
     bl_description = "Scale all selected UV faces. See F6 or redo-last panel to adjust factor"
     bl_options = {'REGISTER', 'UNDO'}
 
-    scale: bpy.props.FloatProperty(default=0.75, name="Scale")# type: ignore
+    scale: bpy.props.FloatProperty(default=0.9999, name="Scale")# type: ignore
     selected_only: bpy.props.BoolProperty(default=False, name="Seleced only") # type: ignore
     skipUsage: bpy.props.BoolProperty(default=False, options={'HIDDEN'}) # type: ignore
 

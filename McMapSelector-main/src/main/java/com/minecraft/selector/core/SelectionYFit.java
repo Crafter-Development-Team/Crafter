@@ -11,6 +11,10 @@ public final class SelectionYFit {
     public static Result scan(BufferedImage image,int originX,int originZ,double pixelsPerBlock,Bounds b) {
         return scan(image,originX,originZ,pixelsPerBlock,b,true);
     }
+    /**
+     * opaque 参数保留只为调用方兼容：逐列 opaque/dry 高度元数据已移除（那是每块地图 +4 MB
+     * 的来源），两种策略现在都使用可见顶高，因此结果相同。
+     */
     public static Result scan(BufferedImage image,int originX,int originZ,double pixelsPerBlock,Bounds b,boolean opaque) {
         Result r=new Result();if(image==null) return r;
         int x1=Math.max(0,pixelFloor(((long)b.minX-originX)*pixelsPerBlock));
@@ -18,7 +22,7 @@ public final class SelectionYFit {
         int x2=Math.min(image.getWidth()-1,pixelFloor(((long)b.maxX-originX)*pixelsPerBlock));
         int z2=Math.min(image.getHeight()-1,pixelFloor(((long)b.maxZ-originZ)*pixelsPerBlock));
         for(int z=z1;z<=z2;z++) {if(Thread.currentThread().isInterrupted()) return r;for(int x=x1;x<=x2;x++) {
-            int y=image instanceof RenderedMap?((RenderedMap)image).getFitHeightAt(x,z,opaque):RenderedMap.heightAt(image,x,z);
+            int y=RenderedMap.heightAt(image,x,z);
             r.add(y);if(image instanceof RenderedMap&&!((RenderedMap)image).isLoadedAt(x,z)) r.missing++;else if(y==RenderedMap.NO_HEIGHT) r.empty++;
         }
         }

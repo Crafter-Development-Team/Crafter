@@ -25,4 +25,14 @@ class LodPreviewTest {
         for(int i=0;i<options.length;i++) for(int count:new int[]{1,9,25,49})
             assertEquals(intervals[i],MinecraftMapGUI.resolveLodLevel(options[i],count));
     }
+
+    /**
+     * 默认必须是 1 (full)：只有 sampleInterval == 1 才会走列缓存的换带即时重合成，
+     * 否则拖 Y 滑块会退回整区重扫。这条断言防止默认值被改回 Auto。
+     */
+    @Test void defaultPreviewQualityKeepsInstantBandRecomposition() {
+        assertEquals("1 (full)",MinecraftMapGUI.DEFAULT_PREVIEW_QUALITY);
+        assertEquals(1,MinecraftMapGUI.resolveDynamicPreviewQuality(MinecraftMapGUI.DEFAULT_PREVIEW_QUALITY));
+        assertEquals(1,MinecraftMapGUI.resolveLodLevel(MinecraftMapGUI.DEFAULT_PREVIEW_QUALITY,49));
+    }
 }

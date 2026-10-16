@@ -34,11 +34,13 @@ public class MapCanvas extends JPanel implements Scrollable, SelectionCanvas {
     private int gridMode;
     private Consumer<SelectionMath.Bounds> selectionChangeListener;
     private Consumer<String> commandListener;
-    private Consumer<Integer> importFloorListener;
+    private Consumer<Point> lodCenterListener;
+    /** 中键拖动 LOD 中心进行中（按下时置位，松开清除）。 */
+    private boolean lodDragging;
 
     public void setSelectionChangeListener(Consumer<SelectionMath.Bounds> listener) {selectionChangeListener=listener;}
     public void setCommandListener(Consumer<String> listener) {commandListener=listener;}
-    public void setImportFloorListener(Consumer<Integer> listener) {importFloorListener=listener;}
+    public void setLodCenterListener(Consumer<Point> listener) {lodCenterListener=listener;}
     private void command(String name) {if(commandListener!=null) commandListener.accept(name);else if("grid".equals(name)) setGridMode((gridMode+1)%3);}
     public SelectionMath.Bounds getSelectionBounds() {return hasValidSelection?SelectionMath.normalized(currentMinX,currentMinZ,currentMaxX,currentMaxZ):null;}
     public void restoreSelectionBounds(SelectionMath.Bounds b) {if(java.util.Objects.equals(getSelectionBounds(),b)&&selectionShape.isEmpty()) return;selectionHistory.remember(getSelectionBounds(),selectionShape);applyBounds(b,false);}
@@ -106,13 +108,16 @@ public class MapCanvas extends JPanel implements Scrollable, SelectionCanvas {
         int x = worldMinX + (int) Math.floor(pixel.x / pixelsPerBlock);
         int z = worldMinZ + (int) Math.floor(pixel.y / pixelsPerBlock);
         int y = RenderedMap.heightAt(image, pixel.x, pixel.y);
-        String block=RenderedMap.blockAt(image,pixel.x,pixel.y);
+        // 逐列方块状态 / 生物群系元数据已移除（每块 +4 MB），悬停只显示坐标与表面高度。
         return String.format("X: %d  Y: %s  Z: %d", x,
-            y == RenderedMap.NO_HEIGHT ? "—" : Integer.toString(y), z)+(block==null?"":"  "+block)+(RenderedMap.biomeAt(image,pixel.x,pixel.y)==null?"":"  biome: "+RenderedMap.biomeAt(image,pixel.x,pixel.y));
+            y == RenderedMap.NO_HEIGHT ? "—" : Integer.toString(y), z);
     }
 
     private void refreshHover() {
-        String text = getHoverText(hoverPoint)+(hoverPoint==null?"":overlays.tooltip(hoverPoint,this::worldToScreenCoordinates));
+        // image == null 时 worldToScreenCoordinates 返回 null，tooltip 里的距离比较会 NPE。
+        // 世界加载过程中 resetSelection() 就会走到这里，异常会打断整个加载（表现为"没地图"）。
+        boolean drawable = image != null;
+        String text = getHoverText(hoverPoint)+(hoverPoint==null||!drawable?"":overlays.tooltip(hoverPoint,this::worldToScreenCoordinates));
         setToolTipText(hoverPoint == null ? null : text);
         if (hoverListener != null) hoverListener.accept(text);
     }
@@ -220,9 +225,13 @@ public class MapCanvas extends JPanel implements Scrollable, SelectionCanvas {
                 // Special-shape gestures stay implemented, but are not dispatched by the GUI.
                 overlays.resetSelectionTool();
                 gestures.cancel();
+                // 中键：拖动 LOD 中心（LOD 叠加层可见时）。旧的"设为地表高度"已移除。
                 if(SwingUtilities.isMiddleMouseButton(e)) {
-                    int[] xyz=getHoverCoordinates();
-                    if(importFloorListener!=null) importFloorListener.accept(xyz==null?RenderedMap.NO_HEIGHT:xyz[1]);
+                    if(overlays.importLodVisible) {
+                        lodDragging=true;
+                        setCursor(Cursor.getPredefinedCursor(Cursor.MOVE_CURSOR));
+                        dragLodCenterTo(e.getPoint());
+                    }
                     return;
                 }
                 if(overlays.posMode&&SwingUtilities.isLeftMouseButton(e)) {posClick(screenToWorldCoordinates(e.getPoint()));return;}
@@ -251,6 +260,7 @@ public class MapCanvas extends JPanel implements Scrollable, SelectionCanvas {
                 hoverPoint = e.getPoint();
                 squareGesture=e.isShiftDown();
                 if(gestures.update(e,screenToWorldCoordinates(e.getPoint()),thisCanvas(),snapMode))return;
+                if(lodDragging) { dragLodCenterTo(e.getPoint()); return; }
                 if (resizeHandle != HANDLE_NONE && hasValidSelection) {
                     // 拖拽调整选区边界
                     Point world = screenToWorldCoordinates(e.getPoint());
@@ -274,6 +284,7 @@ public class MapCanvas extends JPanel implements Scrollable, SelectionCanvas {
             public void mouseReleased(MouseEvent e) {
                 squareGesture=e.isShiftDown();
                 if(gestures.release(e,screenToWorldCoordinates(e.getPoint()),thisCanvas(),snapMode)){if(hasValidSelection&&selectionCallback!=null)selectionCallback.onSelectionComplete(currentMinX,currentMinZ,currentMaxX,currentMaxZ);refreshHover();return;}
+                if(lodDragging) { dragLodCenterTo(e.getPoint()); lodDragging=false; setCursor(Cursor.getDefaultCursor()); return; }
                 if (SwingUtilities.isRightMouseButton(e) && selecting) {
                     // 完成右键选择
                     finishSelection(e.getPoint());
@@ -1100,6 +1111,16 @@ public class MapCanvas extends JPanel implements Scrollable, SelectionCanvas {
         if(selectionChangeListener!=null) selectionChangeListener.accept(null);
         refreshHover();
         repaint();
+    }
+
+    /**
+     * 中键拖动 LOD 中心。用 unclamped 版本：屏幕坐标被 clamp 到图像内的话，
+     * 拖到图外圆心会贴边不动。区块对齐与回写面板由 GUI 侧的监听器负责。
+     */
+    private void dragLodCenterTo(Point screenPoint) {
+        if (image == null || lodCenterListener == null) return;
+        Point world = screenToWorldUnclamped(screenPoint);
+        if (world != null) lodCenterListener.accept(world);
     }
 
     /**

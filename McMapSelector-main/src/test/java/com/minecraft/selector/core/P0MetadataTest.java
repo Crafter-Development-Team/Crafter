@@ -54,16 +54,17 @@ class P0MetadataTest {
         p.put("Pos",new NBTString("Pos","bad"));assertNull(WorldAnchors.parse(d).player);
         Files.write(directory.resolve("level.dat"),new byte[]{0});assertThrows(IOException.class,()->WorldAnchors.read(directory.toFile()));
     }
-    @Test void blockPropertiesAreStableAndMetadataSurvivesComposition() {
+    @Test void blockPropertiesAreStableAndHeightsSurviveComposition() {
         Map<String,String> properties=new HashMap<>();properties.put("waterlogged","false");properties.put("axis","x");
         MapRenderer.BlockInfo block=new MapRenderer.BlockInfo("mod:column",80,properties,null);assertEquals("mod:column[axis=x,waterlogged=false]",block.formatState());
         assertEquals("minecraft:stone",new MapRenderer.BlockInfo("stone",0).formatState());
-        RenderedMap source=new RenderedMap(2,2);source.setHeightAt(0,1,80);source.setBlockAt(0,1,block.formatState());
-        RenderedMap dest=new RenderedMap(4,4);dest.setBlockAt(3,3,"minecraft:dirt");dest.copyHeightsFrom(source,1,1);
-        assertEquals(80,dest.getHeightAt(1,2));assertEquals(block.formatState(),dest.getBlockAt(1,2));assertEquals("minecraft:dirt",dest.getBlockAt(3,3));assertNull(dest.getBlockAt(0,0));
-        RenderedMap clipped=new RenderedMap(1,2);clipped.copyHeightsFrom(source,0,-1);assertEquals(block.formatState(),clipped.getBlockAt(0,0));
+        // 逐列方块状态元数据已移除；高度与"已加载列"标记仍必须随合成一起搬运。
+        RenderedMap source=new RenderedMap(2,2);source.setHeightAt(0,1,80);source.markLoaded(0,1);
+        RenderedMap dest=new RenderedMap(4,4);dest.copyHeightsFrom(source,1,1);
+        assertEquals(80,dest.getHeightAt(1,2));assertTrue(dest.isLoadedAt(1,2));assertFalse(dest.isLoadedAt(0,0));
+        RenderedMap clipped=new RenderedMap(1,2);clipped.copyHeightsFrom(source,0,-1);assertEquals(80,clipped.getHeightAt(0,0));assertTrue(clipped.isLoadedAt(0,0));
         MapRenderer renderer=new MapRenderer(1,null);
-        try {RenderedMap rendered=(RenderedMap)renderer.renderToPng(new MapRenderer.BlockInfo[][]{{block,MapRenderer.EMPTY}},1);assertEquals(block.formatState(),rendered.getBlockAt(0,0));assertNull(rendered.getBlockAt(1,0));assertEquals(80,rendered.getHeightAt(0,0));}
+        try {RenderedMap rendered=(RenderedMap)renderer.renderToPng(new MapRenderer.BlockInfo[][]{{block,MapRenderer.EMPTY}},1);assertEquals(80,rendered.getHeightAt(0,0));assertTrue(rendered.isLoadedAt(0,0));assertFalse(rendered.isLoadedAt(1,0));}
         finally {renderer.shutdown();}
     }
 }

@@ -56,6 +56,37 @@ public final class ImportLod {
         return maxLevel;
     }
 
+    /**
+     * 区块对齐：把方块坐标向下取整到所属区块的最小方块坐标。
+     * 与 {@link #resolved} 和 ViewOverlays 画圆心的口径一致（都是 floorDiv(...,16)*16）。
+     */
+    public static int alignCenterToChunk(int block) { return Math.floorDiv(block,16)*16; }
+
+    /**
+     * 半径为 {@code radiusChunks} 个区块的阶梯圆，在第 {@code dz} 行（相对圆心的区块行偏移）上的半宽（区块数）。
+     *
+     * <p>这是 C++ {@code ChunkLoader::CalculateChunkLODs} 的真实判定：
+     * {@code dx*dx + dz*dz <= r*r}，dx/dz 都是<b>区块索引</b>差，所以一个区块整个属于某一级，
+     * 边界是 16 方块一级的阶梯，而不是光滑圆。
+     *
+     * @return 该行包含的区块满足 |dx| &lt;= 返回值；该行完全在圆外时返回 -1
+     */
+    public static int chunkRingHalfWidth(int radiusChunks,int dz) {
+        long rem = (long)radiusChunks*radiusChunks - (long)dz*dz;
+        if (rem < 0) return -1;
+        return (int)Math.floor(Math.sqrt((double)rem));
+    }
+
+    /**
+     * 拖动画布设定手动中心：其余字段原样保留，autoCenter 强制为 false
+     * （否则 {@link #resolved} 会用选区/出生点把拖出来的中心覆盖掉）。
+     */
+    public ImportLod withManualCenter(int newCenterX, int newCenterZ) {
+        return new ImportLod(maxLevel, false,
+            alignCenterToChunk(newCenterX), alignCenterToChunk(newCenterZ),
+            distances[0], distances[1], distances[2], distances[3]);
+    }
+
     public Map<String,Object> json() {
         Map<String,Object> out = new LinkedHashMap<>();
         out.put("maxLevel",maxLevel); out.put("autoCenter",autoCenter);

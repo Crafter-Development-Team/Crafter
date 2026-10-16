@@ -11,7 +11,7 @@ public final class ImportLodPanel extends JPanel {
     final JSpinner[] distances = new JSpinner[4];
     final JCheckBox autoCenter = new JCheckBox("Auto center",true);
     final JSpinner centerX = integer(0,Integer.MIN_VALUE), centerZ = integer(0,Integer.MIN_VALUE);
-    private final JLabel effectiveCenter = new JLabel();
+    final JLabel effectiveCenter = new JLabel();
     private final Consumer<ImportLod> listener;
     private boolean updating;
 
@@ -60,6 +60,23 @@ public final class ImportLodPanel extends JPanel {
     }
 
     public void showResolvedCenter(ImportLod resolved) { effectiveCenter.setText((Math.floorDiv(resolved.centerX,16)*16)+", "+(Math.floorDiv(resolved.centerZ,16)*16)); }
+
+    /**
+     * 画布中键拖动驱动：同步 spinner/checkbox 但**不回调 listener**（避免把事件打回 GUI 形成回环）。
+     * 拖动必须退出自动居中，否则 resolved() 会用选区/出生点覆盖手动中心。
+     */
+    public void applyDraggedCenter(int newCenterX,int newCenterZ) {
+        updating=true;
+        try {
+            autoCenter.setSelected(false);
+            centerX.setValue(newCenterX); centerZ.setValue(newCenterZ);
+        } finally {updating=false;}
+        ImportLod value=settings();
+        for (int i=0;i<4;i++) distances[i].setEnabled(i<value.maxLevel);
+        centerX.setEnabled(value.maxLevel>0); centerZ.setEnabled(value.maxLevel>0);
+        showResolvedCenter(value);
+    }
+
     private void changed() {
         if (updating) return;
         ImportLod value=settings();

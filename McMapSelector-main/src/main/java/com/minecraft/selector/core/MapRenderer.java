@@ -22,9 +22,6 @@ public class MapRenderer {
      * 存储方块信息的内部类，包含方块ID和高度
      */
     public static class BlockInfo {
-        private String biome;
-        private int opaqueHeight=RenderedMap.NO_HEIGHT, dryHeight=RenderedMap.NO_HEIGHT;
-        public String getBiome() {return biome;}
         private final String blockId;
         private final int height;
         private final Map<String,String> properties;
@@ -322,7 +319,6 @@ public class MapRenderer {
         // 有方块实体的区块，颜色跟坐标有关，不能按方块实例缓存
         final boolean entities=chunk.hasBlockEntities();
         final Map<Block,Integer> memo=entities||preview.biomeMode!=0?null:new IdentityHashMap<>();
-        final Map<Block,String> states=new IdentityHashMap<>();
         for(int z=0;z<16;z++) {
             for(int x=0;x<16;x++) {
                 int column=z*16+x;
@@ -342,13 +338,14 @@ public class MapRenderer {
                             Color associated=entities?BlockEntityColors.resolve(blockId,chunk.getBlockEntity(x,worldY,z),scanPalette):null;
                             Color color=associated!=null?associated:surfaceColor(blockId,block.getProperties(),scanPalette);
                             if(associated!=null) scanPalette.recordAssociated(blockId);
-                            color=scanPalette.biomeColor(color,chunk.getBiome(x,worldY,z),blockId,preview.biomeMode);
+                            // 生物群系着色默认关闭（mode 0）：只在真正需要时才解析群系，
+                            // 否则每层一次 chunk.getBiome() 是纯浪费。
+                            if(preview.biomeMode!=0) color=scanPalette.biomeColor(color,chunk.getBiome(x,worldY,z),blockId,preview.biomeMode);
                             argb=color.getRGB();
                             if(memo!=null) memo.put(block,argb);
                         }
                         if(((argb>>>24)&0xFF)==0) continue; // 全透明的层本来就不进层栈
-                        String state=states.computeIfAbsent(block,b->new BlockInfo(b.getId(),0,b.getProperties(),null).formatState());
-                        columns.addLayer(column,(int)bottom+y,argb,blockId,state,chunk.getBiome(x,(int)bottom+y,z));
+                        columns.addLayer(column,(int)bottom+y,argb,blockId);
                     }
                 }
             }
@@ -493,15 +490,10 @@ public class MapRenderer {
             for (int x = 0; x < 16; x += sampleInterval) {
                 BlockInfo top = findSurface(chunk, sections, airSections, x, z);
                 if(top!=EMPTY) {
-                    top.biome=chunk.getBiome(x,top.height,z);
-                    int[] fit=fitHeights(chunk,sections,x,z,top.height);
-                    top.opaqueHeight=fit[0];top.dryHeight=fit[1];
                     localFoundBlocks.add(top.getBlockId());
                 } else {
-                    String biome=chunk.getBiome(x,clipY==null?(sections.isEmpty()?0:sections.get(0).getY()*16):clipY,z);
-                    int[] fit=fitHeights(chunk,sections,x,z,RenderedMap.NO_HEIGHT);
-                    if(biome==null&&fit[0]==RenderedMap.NO_HEIGHT) top=LOADED_EMPTY;
-                    else {top=new BlockInfo("air",RenderedMap.NO_HEIGHT);top.biome=biome;top.opaqueHeight=fit[0];top.dryHeight=fit[1];}
+                    // 空列也来自存在的区块：用 LOADED_EMPTY 标记，缺失区块才是 EMPTY。
+                    top=LOADED_EMPTY;
                 }
                 // Color and Y always refer to the same nearest-neighbor sample.
                 for (int dz = z; dz < Math.min(16, z + sampleInterval); dz++)
@@ -571,19 +563,6 @@ public class MapRenderer {
         }
         return sky;
     }
-    /** Two independent fit policies, read once with each column and cached with the tile. */
-    private int[] fitHeights(Chunk chunk,List<Chunk.Section> sections,int x,int z,int displayY) {
-        int opaque=RenderedMap.NO_HEIGHT,dry=RenderedMap.NO_HEIGHT;
-        for(Chunk.Section section:sections) for(int local=15;local>=0;local--) {
-            long y=(long)section.getY()*16+local;
-            if(clipMinY!=null&&y<clipMinY || clipY!=null&&y>clipY || preview.cave&&y>displayY) continue;
-            Block b=section.getBlock(x,local,z);String id=b.getId();
-            if(BlockColors.isAirBlock(id)) continue;
-            if(opaque==RenderedMap.NO_HEIGHT) opaque=(int)y;
-            if(!PreviewOptions.fitTransparent(id)) {dry=(int)y;return new int[]{opaque,dry};}
-        }
-        return new int[]{opaque,dry};
-    }
     static final class Layer {
         final Block block;final int y;final Color color;
         Layer(Block block,int y,Color color) {this.block=block;this.y=y;this.color=color;}
@@ -592,7 +571,8 @@ public class MapRenderer {
         Color associated=BlockEntityColors.resolve(block.getId(),chunk.getBlockEntity(x,y,z),scanPalette);
         Color color=associated==null?surfaceColor(block.getId(),block.getProperties(),scanPalette):associated;
         if(associated!=null) scanPalette.recordAssociated(block.getId());
-        color=scanPalette.biomeColor(color,chunk.getBiome(x,y,z),block.getId(),preview.biomeMode);
+        // 生物群系着色默认关闭（mode 0）：避免每层一次 getBiome() 的无谓开销。
+        if(preview.biomeMode!=0) color=scanPalette.biomeColor(color,chunk.getBiome(x,y,z),block.getId(),preview.biomeMode);
         return new Layer(block,y,color);
     }
     /** Projection opacity describes horizontal coverage, not occupied volume. */
@@ -700,14 +680,11 @@ public class MapRenderer {
         // 第二趟：描边 + 写像素（与缓存路径共用同一套规则）
         RenderedMap image = renderArrays(width, height, heights, baseColors);
         image.setRenderKey(cacheKey());
-        Map<String,Map<Map<String,String>,String>> states=new HashMap<>();
+        // 逐列方块状态 / 生物群系元数据已移除（每块地图 +4 MB）。
+        // 「已加载列」仍要标出来，供 gaps 底纹与 Fit-Y 的 missing/empty 区分使用。
         for(int z=0;z<height;z++) for(int x=0;x<width;x++) {
             BlockInfo b=topBlocks[z][x];
-            if(b!=null&&b!=EMPTY) image.setColumnMetadata(x,z,b.biome,b.opaqueHeight,b.dryHeight);
-            if(b!=null&&b.height!=RenderedMap.NO_HEIGHT&&!BlockColors.isAirBlock(b.blockId)) {
-                String state=states.computeIfAbsent(b.blockId,id->new HashMap<>()).computeIfAbsent(b.properties,props->b.formatState());
-                image.setBlockAt(x,z,state);
-            }
+            if(b!=null&&b!=EMPTY) image.markLoaded(x,z);
         }
 
         if (errorCount.get() > 0) {

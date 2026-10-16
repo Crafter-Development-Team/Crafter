@@ -164,29 +164,36 @@ public class LogWindow extends JFrame implements LogManager.LogListener {
     }
     
     private void setupEventHandlers() {
-        // 窗口关闭时移除监听器
+        // 窗口关闭时只是隐藏（HIDE_ON_CLOSE）。监听器保留：重新显示时新日志要能继续进来，
+        // 否则关一次日志窗口之后表格就永远停在旧内容上了。
         addWindowListener(new java.awt.event.WindowAdapter() {
             @Override
             public void windowClosing(java.awt.event.WindowEvent windowEvent) {
-                logManager.removeLogListener(LogWindow.this);
-                logManager.info("Log window closed", "LogWindow");
+                logManager.info("Log window hidden", "LogWindow");
             }
         });
     }
     
+    /** 重新显示时补注册监听器并同步一次现有日志（幂等）。 */
+    @Override
+    public void setVisible(boolean visible) {
+        if (visible) {
+            logManager.addLogListener(this);
+            refreshLogs();
+        }
+        super.setVisible(visible);
+    }
+    
     @Override
     public void onLogAdded(LogEntry entry) {
-        // 在EDT中更新表格
-        SwingUtilities.invokeLater(() -> {
-            tableModel.addLogEntry(entry);
-            updateStatus();
-            
-            // 自动滚动到最新日志
-            int lastRow = logTable.getRowCount() - 1;
-            if (lastRow >= 0) {
-                logTable.scrollRectToVisible(logTable.getCellRect(lastRow, 0, true));
-            }
-        });
+        // LogManager 已把通知合并到 EDT，这里直接更新即可（不再额外 invokeLater）。
+        tableModel.addLogEntry(entry);
+        updateStatus();
+        // 自动滚动到最新日志
+        int lastRow = logTable.getRowCount() - 1;
+        if (lastRow >= 0) {
+            logTable.scrollRectToVisible(logTable.getCellRect(lastRow, 0, true));
+        }
     }
     
     private void refreshLogs() {

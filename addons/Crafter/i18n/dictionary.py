@@ -175,7 +175,6 @@ dictionary = {
                 # ==========替换资源包==========
         "Replace resources,but can only replace textures with the same name":"替换资源包,但只能替换同名纹理",
         "Set texture interpolation":"设置纹理插值",
-        "Custome Size":"自定义尺寸",
                 # ==========日志==========
         "Log":"日志",
         "Running":"运行中",

@@ -22,4 +22,6 @@ public interface SelectionCanvas {
     boolean jumpToWorldCoordinate(Point point);
     void confirmCurrentSelection();
     void clearSelection();
+    /** 中键拖动 LOD 中心：回调收到的是世界（方块）坐标，由 GUI 做区块对齐并回写面板。 */
+    void setLodCenterListener(java.util.function.Consumer<Point> listener);
 }

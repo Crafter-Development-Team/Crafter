@@ -56,4 +56,23 @@ class LoadingPhasePanelTest {
             panel.beginMap(12,"No regions");panel.finish(12);assertFalse(panel.isVisible());
         });
     }
+
+    /**
+     * 地图阶段的进度条是 indeterminate（一直动）的，finish 必须同时把它变成 determinate 并隐藏 ——
+     * 只 setVisible(false) 而留着 indeterminate，任何一次迟到的显示都会让条子继续动下去。
+     */
+    @Test void finishStopsTheIndeterminateMapBar() throws Exception {
+        SwingUtilities.invokeAndWait(() -> {
+            LoadingPhasePanel panel=new LoadingPhasePanel();
+            panel.beginMap(7,"Loading visible map regions...");
+            assertTrue(panel.isVisible(),"an in-flight load shows the panel");
+            assertTrue(panel.getMapProgress().isIndeterminate(),"in-flight bar animates");
+            panel.finish(7);
+            assertFalse(panel.isVisible(),"finish hides the panel");
+            assertFalse(panel.getMapProgress().isIndeterminate(),"finish must stop the animation");
+            // 幂等：重复 finish 不应抛错或把它重新显示出来
+            panel.finish(7);
+            assertFalse(panel.isVisible());
+        });
+    }
 }

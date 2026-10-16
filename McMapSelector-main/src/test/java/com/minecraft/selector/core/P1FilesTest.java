@@ -35,9 +35,12 @@ class P1FilesTest {
         recent.add(directory.resolve("world 3").toFile());assertTrue(new RecentWorlds(file.toFile()).list().get(0).endsWith("world 3"));assertEquals(10,recent.list().size());
         Files.delete(directory.resolve("world 3"));assertEquals(9,recent.list().size());assertFalse(new String(Files.readAllBytes(file),"ISO-8859-1").contains("world 3"));
     }
-    @Test void coverageUsesVisibleColumnCountsAndSeparatesUnknownNamespaces() {
-        BlockColors.Palette palette=BlockColors.snapshot();palette.appearance("unknown_p1:chair",Collections.emptyMap());palette.appearance("stone",Collections.emptyMap());Map<String,Long> counts=new HashMap<>();counts.put("unknown_p1:chair",21L);counts.put("minecraft:stone",3L);
-        String report=ResourceCoveragePanel.report(counts,palette);assertTrue(report.contains("24 columns"));assertTrue(report.contains("unknown_p1=21"));assertTrue(report.contains("unknown_p1:chair  21 columns"));assertFalse(report.contains("minecraft:stone  3 columns"));
+    @Test void coverageReportsCachedColumnsAndUnclassifiedPaletteIds() {
+        BlockColors.Palette palette=BlockColors.snapshot();palette.appearance("unknown_p1:chair",Collections.emptyMap());palette.appearance("stone",Collections.emptyMap());Map<String,Long> counts=new HashMap<>();counts.put("cached surface",24L);
+        String report=ResourceCoveragePanel.report(counts,palette);
+        // 逐列方块 ID 已移除：视口只报告缓存的表面列数，未知 ID 归因改为来自调色板。
+        assertTrue(report.contains("24 columns"));
+        assertTrue(report.contains("Unclassified palette IDs:"));
     }
     @Test void scaleBarNiceDistancesStayReadableAcrossZooms() {
         for(double zoom:new double[]{.001,.1,.25,1,3,10,100}) {double d=ViewOverlays.scaleDistance(zoom);assertTrue(d*zoom<=120.000001);assertTrue(d*zoom>=40);}

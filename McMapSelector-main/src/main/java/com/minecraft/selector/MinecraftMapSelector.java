@@ -25,6 +25,8 @@ import java.util.stream.Collectors;
 public class MinecraftMapSelector {
     
     public static void main(String[] args) {
+        // YbandLog 现在是缓冲写入：退出时把尾巴刷到 %TEMP%\crafter-yband.log。
+        Runtime.getRuntime().addShutdownHook(new Thread(com.minecraft.selector.core.YbandLog::flush, "yband-log-flush"));
         for(String arg:args)if("--validate-selection".equals(arg)) {System.exit(com.minecraft.selector.core.SelectionValidator.run(args,System.out,System.err));return;}
         final boolean multiBox=java.util.Arrays.asList(args).contains("--multi-box");
         final boolean includeWaypoints=java.util.Arrays.asList(args).contains("--include-waypoints");

@@ -35,11 +35,13 @@ public class DynamicMapCanvas extends JPanel implements SelectionCanvas, Dynamic
     private int gridMode;
     private Consumer<SelectionMath.Bounds> selectionChangeListener;
     private Consumer<String> commandListener;
-    private Consumer<Integer> importFloorListener;
+    private Consumer<Point> lodCenterListener;
+    /** 中键拖动 LOD 中心进行中（按下时置位，松开清除）。 */
+    private boolean lodDragging;
 
     public void setSelectionChangeListener(Consumer<SelectionMath.Bounds> listener) {selectionChangeListener=listener;}
     public void setCommandListener(Consumer<String> listener) {commandListener=listener;}
-    public void setImportFloorListener(Consumer<Integer> listener) {importFloorListener=listener;}
+    public void setLodCenterListener(Consumer<Point> listener) {lodCenterListener=listener;}
     private void command(String name) {if(commandListener!=null) commandListener.accept(name);else if("grid".equals(name)) setGridMode((gridMode+1)%3);}
     public SelectionMath.Bounds getSelectionBounds() {return hasValidSelection?SelectionMath.normalized(currentMinX,currentMinZ,currentMaxX,currentMaxZ):null;}
     public void restoreSelectionBounds(SelectionMath.Bounds b) {if(java.util.Objects.equals(getSelectionBounds(),b)&&selectionShape.isEmpty()) return;selectionHistory.remember(getSelectionBounds(),selectionShape);applyBounds(b,false);}
@@ -105,9 +107,9 @@ public class DynamicMapCanvas extends JPanel implements SelectionCanvas, Dynamic
         RegionTile tile = regionManager.getLoadedRegion(new Point(Math.floorDiv(world.x, 512), Math.floorDiv(world.y, 512)));
         int y = tile == null ? RenderedMap.NO_HEIGHT :
             tile.getHeightAt(Math.floorMod(world.x, 512), Math.floorMod(world.y, 512));
-        String block=tile==null?null:RenderedMap.blockAt(tile.getImage(),Math.floorMod(world.x,512),Math.floorMod(world.y,512));
+        // 逐列方块状态 / 生物群系元数据已移除（每块 +4 MB），悬停只显示坐标与表面高度。
         return String.format("X: %d  Y: %s  Z: %d", world.x,
-            y == RenderedMap.NO_HEIGHT ? "—" : Integer.toString(y), world.y)+(block==null?"":"  "+block)+(tile==null||RenderedMap.biomeAt(tile.getImage(),Math.floorMod(world.x,512),Math.floorMod(world.y,512))==null?"":"  biome: "+RenderedMap.biomeAt(tile.getImage(),Math.floorMod(world.x,512),Math.floorMod(world.y,512)));
+            y == RenderedMap.NO_HEIGHT ? "—" : Integer.toString(y), world.y);
     }
 
     private void refreshHover() {
@@ -246,9 +248,13 @@ public class DynamicMapCanvas extends JPanel implements SelectionCanvas, Dynamic
                 // Special-shape gestures stay implemented, but are not dispatched by the GUI.
                 overlays.resetSelectionTool();
                 gestures.cancel();
+                // 中键：拖动 LOD 中心（LOD 叠加层可见时）。旧的"设为地表高度"已移除。
                 if(SwingUtilities.isMiddleMouseButton(e)) {
-                    int[] xyz=getHoverCoordinates();
-                    if(importFloorListener!=null) importFloorListener.accept(xyz==null?RenderedMap.NO_HEIGHT:xyz[1]);
+                    if(overlays.importLodVisible) {
+                        lodDragging=true;
+                        setCursor(Cursor.getPredefinedCursor(Cursor.MOVE_CURSOR));
+                        dragLodCenterTo(e.getPoint());
+                    }
                     return;
                 }
                 if(overlays.posMode&&SwingUtilities.isLeftMouseButton(e)) {posClick(screenToWorldCoordinates(e.getPoint()));return;}
@@ -277,6 +283,7 @@ public class DynamicMapCanvas extends JPanel implements SelectionCanvas, Dynamic
             public void mouseReleased(MouseEvent e) {
                 squareGesture=e.isShiftDown();
                 if(gestures.release(e,screenToWorldCoordinates(e.getPoint()),thisCanvas(),snapMode)){if(hasValidSelection&&selectionCallback!=null)selectionCallback.onSelectionComplete(currentMinX,currentMinZ,currentMaxX,currentMaxZ);refreshHover();return;}
+                if(lodDragging) { dragLodCenterTo(e.getPoint()); lodDragging=false; setCursor(Cursor.getDefaultCursor()); return; }
                 if (SwingUtilities.isLeftMouseButton(e)) {
                     if (resizeHandle != HANDLE_NONE) {
                         // 结束选区调整：归一化坐标并通知回调
@@ -306,6 +313,7 @@ public class DynamicMapCanvas extends JPanel implements SelectionCanvas, Dynamic
                 hoverPoint = e.getPoint();
                 squareGesture=e.isShiftDown();
                 if(gestures.update(e,screenToWorldCoordinates(e.getPoint()),thisCanvas(),snapMode))return;
+                if(lodDragging) { dragLodCenterTo(e.getPoint()); return; }
                 if (resizeHandle != HANDLE_NONE && hasValidSelection) {
                     // 拖拽调整选区边界
                     Point world = screenToWorldCoordinates(e.getPoint());
@@ -671,7 +679,7 @@ public class DynamicMapCanvas extends JPanel implements SelectionCanvas, Dynamic
                 overlays.drawOre(g2d,this::worldToScreenCoordinates,scale);
                 SelectionGestures.draw(g2d,selectionShape,this::worldToScreenCoordinates,scale);
                 overlays.drawInView(g2d,getVisibleRect(),scale,this::worldToScreenCoordinates,getSelectionBounds(),pos1,corner1,corner2);
-                if(overlays.minimap){java.util.List<MinimapInset.Tile> tiles=new java.util.ArrayList<>();for(Point p:regionManager.getAvailableRegions()){RegionTile t=regionManager.getLoadedRegion(p);long x=(long)p.x*512,z=(long)p.y*512;tiles.add(new MinimapInset.Tile(new SelectionMath.Bounds(SelectionMath.clamp(x),SelectionMath.clamp(z),SelectionMath.clamp(x+511),SelectionMath.clamp(z+511)),t==null?null:t.peekImage()));}
+                if(overlays.minimap){java.util.List<MinimapInset.Tile> tiles=new java.util.ArrayList<>();for(Point p:regionManager.getAvailableRegions()){RegionTile t=regionManager.peekLoadedRegion(p);long x=(long)p.x*512,z=(long)p.y*512;tiles.add(new MinimapInset.Tile(new SelectionMath.Bounds(SelectionMath.clamp(x),SelectionMath.clamp(z),SelectionMath.clamp(x+511),SelectionMath.clamp(z+511)),t==null?null:t.peekImage()));}
                     Rectangle view=getVisibleRect();Point a=screenToWorldCoordinates(new Point(view.x,view.y)),b=screenToWorldCoordinates(new Point(view.x+view.width-1,view.y+view.height-1));minimap.draw(g2d,view,tiles,SelectionMath.normalized(a.x,a.y,b.x,b.y));
                 }else minimap.clear();
             } else {
@@ -727,7 +735,9 @@ public class DynamicMapCanvas extends JPanel implements SelectionCanvas, Dynamic
                 int screenWidth = (int) (REGION_SIZE * scale);
                 int screenHeight = (int) (REGION_SIZE * scale);
                 
-                RegionTile tile = regionManager.getLoadedRegion(regionCoord);
+                // 绘制期间只读，不触发重渲染：paint 里排队 refresh 会造成"重绘引发重绘"，
+                // 瓦片一块块回来时看起来就是按顺序闪。过期检测交给非绘制的取用路径。
+                RegionTile tile = regionManager.peekLoadedRegion(regionCoord);
                 if (tile != null) {
                     // 绘制已加载的区域
                     BufferedImage image = tile.getImage();
@@ -1004,6 +1014,15 @@ public class DynamicMapCanvas extends JPanel implements SelectionCanvas, Dynamic
         }
     }
     
+    /**
+     * 中键拖动 LOD 中心（区块对齐与回写面板由 GUI 侧监听器负责）。
+     */
+    private void dragLodCenterTo(Point screenPoint) {
+        if (lodCenterListener == null) return;
+        Point world = screenToWorldCoordinates(screenPoint);
+        if (world != null) lodCenterListener.accept(world);
+    }
+
     /**
      * 屏幕坐标转世界坐标
      */

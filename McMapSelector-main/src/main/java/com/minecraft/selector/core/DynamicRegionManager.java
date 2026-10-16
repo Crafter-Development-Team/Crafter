@@ -32,6 +32,23 @@ public class DynamicRegionManager {
     private final TileRenderer tileRenderer;
     private final Object stateLock = new Object();
     private final Map<Point, Long> failedUntil = new HashMap<>();
+    /**
+     * 失败瓦片的自动重试定时器。旧实现只在 failedUntil 到期后、且"视口再次变化"时才会重试，
+     * 所以一块瓦片加载失败后会一直空着（用户看到"加载不出来"），除非再拖动地图。
+     * 现在失败后定时自动重试当前视口需要的瓦片。
+     */
+    private java.util.concurrent.ScheduledExecutorService retryExecutor;
+    private static final long FAILED_RETRY_DELAY_MS = 5000;
+    /**
+     * 换带重合成专用池：换带是纯内存合成（CPU 密集），和读盘加载是两种负载。
+     * 旧实现复用只有 3 线程的 loadingExecutor，16 块瓦片只能分 3 批跑，
+     * 视觉上就是"一块一块按顺序刷新"。这里按核数给足并行度。
+     */
+    private final ThreadPoolExecutor bandExecutor;
+    private static final int BAND_THREADS =
+        Math.max(2, Math.min(8, Runtime.getRuntime().availableProcessors() - 1));
+    /** 上一次写进日志的"缺缓存重载"文本，用于去重（拖动时同一块会反复命中）。 */
+    private String lastBandMissKey;
     private volatile Set<Point> desiredRegions = Collections.emptySet();
     private long generation = 0;
     private volatile boolean closed;
@@ -69,6 +86,9 @@ public class DynamicRegionManager {
         return text;
     }
 
+    /** 慢帧阈值：只有超过它（或有缺缓存）才逐帧写日志，避免拖动时刷出几千行。 */
+    private static final long SLOW_BAND_FRAME_MILLIS = 50;
+
     /** 记一块瓦片的耗时；返回 true 表示这一帧的所有瓦片都完成了。 */
     private boolean countBandTile(long millis, boolean cacheHit, long expectedBand) {
         if (expectedBand != bandGeneration) return false;   // 属于已被取代的那一帧
@@ -82,15 +102,21 @@ public class DynamicRegionManager {
         bandFrames.incrementAndGet();
         bandFrameTotal.addAndGet(frameMillis);
         bandFrameWorst.accumulateAndGet(frameMillis, Math::max);
-        String line = String.format("换带 %d 块: 整帧 %d ms（单块最大 %d ms, 缓存命中 %d, 缺缓存重载 %d）",
-            done, frameMillis, bandMaxMillis.get(), bandCacheHits.get(), bandCacheMisses.get());
-        logManager.info(line, "DynamicRegionManager");
-        YbandLog.write(line);
+        // 逐帧写日志只在"慢"或"有缺缓存重载"时进行：正常拖动一帧几十行会把
+        // 日志窗口和 %TEMP% 文件刷爆（实测一次会话 4700+ 帧、日志 800KB）。
+        // 汇总仍由 GUI 松手时的 "Y 带性能" 行给出。
+        int misses = bandCacheMisses.get();
+        if (frameMillis >= SLOW_BAND_FRAME_MILLIS || misses > 0) {
+            String line = String.format("换带 %d 块: 整帧 %d ms（单块最大 %d ms, 缓存命中 %d, 缺缓存重载 %d）",
+                done, frameMillis, bandMaxMillis.get(), bandCacheHits.get(), misses);
+            logManager.info(line, "DynamicRegionManager");
+            YbandLog.write(line);
+        }
         return true;
     }
     /** 每个 region 的层缓存（换带时内存重合成，不再读盘） */
     private static final int BAND_CACHE_LIMIT =
-        Math.max(1, Math.min(8, (int) (Runtime.getRuntime().maxMemory() / (64L * 1024 * 1024))));
+        ColumnCache.cacheLimit(Runtime.getRuntime().maxMemory());
     private static final class CacheEntry {
         final ColumnCache cache; final BlockColors.Palette palette;
         CacheEntry(ColumnCache cache, BlockColors.Palette palette) { this.cache = cache; this.palette = palette; }
@@ -213,6 +239,12 @@ public class DynamicRegionManager {
         this.cacheExecutor = Executors.newSingleThreadExecutor(r -> {
             Thread t = new Thread(r, "map-region-band-cache"); t.setDaemon(true); return t;
         });
+        this.retryExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "map-region-retry"); t.setDaemon(true); return t;
+        });
+        this.bandExecutor = (ThreadPoolExecutor) Executors.newFixedThreadPool(BAND_THREADS, r -> {
+            Thread t = new Thread(r, "map-band-resurface"); t.setDaemon(true); return t;
+        });
         final BlockColors.Palette tilePalette=BlockColors.snapshot();
         this.tileRenderer = coordinate -> {
             File file = new File(regionDir, String.format("r.%d.%d.mca", coordinate.x, coordinate.y));
@@ -242,6 +274,12 @@ public class DynamicRegionManager {
         this.loadingExecutor = (ThreadPoolExecutor) Executors.newFixedThreadPool(3);
         this.cacheExecutor = Executors.newSingleThreadExecutor(r -> {
             Thread t = new Thread(r, "map-region-band-cache"); t.setDaemon(true); return t;
+        });
+        this.retryExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "map-region-retry"); t.setDaemon(true); return t;
+        });
+        this.bandExecutor = (ThreadPoolExecutor) Executors.newFixedThreadPool(BAND_THREADS, r -> {
+            Thread t = new Thread(r, "map-band-resurface"); t.setDaemon(true); return t;
         });
         scanAvailableRegions();
     }
@@ -277,7 +315,8 @@ public class DynamicRegionManager {
         for (Point coord : coords) {
             final long expected = band;
             try {
-                loadingExecutor.execute(() -> rerenderTileForBand(coord, expected, true));
+                // 用换带专用池：所有瓦片同时开跑，而不是在 3 线程的加载池里排队。
+                bandExecutor.execute(() -> rerenderTileForBand(coord, expected, true));
             } catch (java.util.concurrent.RejectedExecutionException ignored) {
                 return;
             }
@@ -322,8 +361,13 @@ public class DynamicRegionManager {
         if (image == null) {
             // 没有缓存（或颜色资源换了）：删掉瓦片走正常加载（要读盘，慢，这里记一笔）
             if (expectedBand == bandGeneration) {
-                logManager.info("换带缺缓存，重载瓦片: r." + coord.x + "." + coord.y + ".mca", "DynamicRegionManager");
-                YbandLog.write("换带缺缓存，重载瓦片: r." + coord.x + "." + coord.y + ".mca");
+                // 去重：同一块瓦片在一次拖动里可能反复走到这里，别把日志刷成几千行。
+                String miss = "换带缺缓存，重载瓦片: r." + coord.x + "." + coord.y + ".mca";
+                if (!miss.equals(lastBandMissKey)) {
+                    lastBandMissKey = miss;
+                    logManager.info(miss, "DynamicRegionManager");
+                    YbandLog.write(miss);
+                }
             }
             synchronized (stateLock) {
                 if (closed) return;
@@ -432,7 +476,18 @@ public class DynamicRegionManager {
             if (closed) return;
             desiredRegions = new HashSet<>(candidates);
             unloadUnneededRegions(desiredRegions);
-            for (Point point : candidates) {if(loadedRegions.containsKey(point))cacheHits.incrementAndGet();else cacheMisses.incrementAndGet();startLoadingRegion(point);}
+            for (Point point : candidates) {
+                if (loadedRegions.containsKey(point)) {
+                    cacheHits.incrementAndGet();
+                    // 换带时不在视口里的瓦片没被重算（setBand 只做 desiredRegions ∩ loaded 的交集），
+                    // 等它们重新进入视口时必须在这里补一次 —— 绘制路径已改成只读、不再做过期检测。
+                    RegionTile stale = loadedRegions.get(point);
+                    if (stale != null && !stale.matchesBand(clipY, clipMinY, highlightTop)) requestTileRefresh(point);
+                } else {
+                    cacheMisses.incrementAndGet();
+                }
+                startLoadingRegion(point);
+            }
             notifyViewportProgress();
         }
     }
@@ -565,13 +620,15 @@ public class DynamicRegionManager {
                             notifyRegionLoaded(regionCoord, tile);
                             buildBandCacheAsync(regionFile(regionCoord));   // 顺手建层缓存，换带才实时
                         } else if (tile == null) {
-                            failedUntil.put(regionCoord, System.currentTimeMillis()+5000);
+                            failedUntil.put(regionCoord, System.currentTimeMillis()+FAILED_RETRY_DELAY_MS);
                             notifyLoadingFailed(regionCoord,new IllegalStateException("Region renderer returned no image"));
+                            scheduleFailedRetry();
                         }
                     } catch (CancellationException ignored) {
                     } catch (Exception error) {
-                        failedUntil.put(regionCoord, System.currentTimeMillis()+5000);
+                        failedUntil.put(regionCoord, System.currentTimeMillis()+FAILED_RETRY_DELAY_MS);
                         notifyLoadingFailed(regionCoord,error);
+                        scheduleFailedRetry();
                     } finally {
                         loadingRegions.remove(regionCoord, this);
                         notifyViewportProgress();
@@ -592,7 +649,11 @@ public class DynamicRegionManager {
 
     void awaitIdle(long timeout, TimeUnit unit) throws Exception {
         long deadline = System.nanoTime() + unit.toNanos(timeout);
-        while (loadingExecutor.getActiveCount() != 0 || !loadingExecutor.getQueue().isEmpty() || !loadingRegions.isEmpty()) {
+        // 换带重合成跑在 bandExecutor 上，它可能再触发 loadingExecutor 重载，
+        // 所以两个池都要等，否则 awaitIdle 会在换带结果落地前就返回。
+        while (loadingExecutor.getActiveCount() != 0 || !loadingExecutor.getQueue().isEmpty()
+            || bandExecutor.getActiveCount() != 0 || !bandExecutor.getQueue().isEmpty()
+            || !loadingRegions.isEmpty()) {
             if (System.nanoTime() >= deadline) throw new TimeoutException("Region loading did not finish");
             Thread.sleep(5);
         }
@@ -614,7 +675,45 @@ public class DynamicRegionManager {
         return tile;
     }
 
-    /** 把一块"带/兴趣带过期"的瓦片排进重渲染队列（同一块只允许一个在飞）。 */
+    /**
+     * 只读查询：绝不排队重渲染。绘制路径必须用这个 —— 在 paint 里触发 refresh 会导致
+     * "重绘引发重绘"，瓦片陆续回来时表现为一块块按顺序闪。
+     */
+    public RegionTile peekLoadedRegion(Point regionCoord) {
+        return loadedRegions.get(regionCoord);
+    }
+
+    /**
+     * 失败瓦片的自动重试：只重试"当前视口仍然需要、且不正在加载"的坐标。
+     * 每块只排一次，避免重试风暴；重试期间视口又变了也无所谓，startLoadingRegion 自己会判。
+     */
+    private void scheduleFailedRetry() {
+        if (closed) return;
+        try {
+            retryExecutor.schedule(() -> {
+                if (closed) return;
+                List<Point> retry = new ArrayList<>();
+                synchronized (stateLock) {
+                    long now = System.currentTimeMillis();
+                    for (Point point : desiredRegions) {
+                        Long until = failedUntil.get(point);
+                        if (until == null || until > now) continue;
+                        if (loadedRegions.containsKey(point) || loadingRegions.containsKey(point)) continue;
+                        retry.add(point);
+                    }
+                    for (Point point : retry) {
+                        failedUntil.remove(point);
+                        startLoadingRegion(point, false);
+                    }
+                }
+            }, FAILED_RETRY_DELAY_MS, java.util.concurrent.TimeUnit.MILLISECONDS);
+        } catch (java.util.concurrent.RejectedExecutionException ignored) {
+        }
+    }
+
+    /**
+     * 把一块"带/兴趣带过期"的瓦片排进重渲染队列（同一块只允许一个在飞）。
+     */
     private void requestTileRefresh(Point regionCoord) {
         synchronized (stateLock) {
             if (closed || loadingRegions.containsKey(regionCoord)) return;
@@ -622,7 +721,8 @@ public class DynamicRegionManager {
         }
         final long expected = bandGeneration;
         try {
-            loadingExecutor.execute(() -> rerenderTileForBand(regionCoord, expected, false));
+            // 内存重合成用换带池，不跟读盘加载抢那 3 个线程。
+            bandExecutor.execute(() -> rerenderTileForBand(regionCoord, expected, false));
         } catch (java.util.concurrent.RejectedExecutionException ignored) {
         }
     }
@@ -751,6 +851,8 @@ public class DynamicRegionManager {
             listeners.clear();
             loadingExecutor.shutdownNow();
             cacheExecutor.shutdownNow();
+            bandExecutor.shutdownNow();
+            if (retryExecutor != null) retryExecutor.shutdownNow();
             synchronized (bandCaches) { bandCaches.clear(); }
         }
         // Do not await termination on Swing's EDT (dimension changes/window close).

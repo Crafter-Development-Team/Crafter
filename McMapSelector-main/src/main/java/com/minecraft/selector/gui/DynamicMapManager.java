@@ -62,14 +62,53 @@ public class DynamicMapManager {
                 stableMinRegionX, stableMinRegionZ, stableMaxRegionX, stableMaxRegionZ);
         }
 
-        // 重新生成合成图像
-        rebuildCombinedImage();
+        // 重新生成合成图像。坐标系统是首块区域定下的固定 5x5 窗口，
+        // 尺寸不会因为后续 addRegion 变化，所以绝大多数情况只需把这一块贴进去。
+        if (!blitRegionIntoCombined(coord, regionImage)) rebuildCombinedImage();
 
         if (isNewRegion) {
             System.out.printf("添加新区域 r.%d.%d.mca 到动态地图\n", regionX, regionZ);
         } else {
             System.out.printf("更新区域 r.%d.%d.mca 的图像\n", regionX, regionZ);
         }
+    }
+
+    /**
+     * 增量路径：把一块区域直接贴进已有的合成图。
+     *
+     * <p>旧实现每次 addRegion 都 {@code new RenderedMap(2560,2560)} 并把已加载区域全部重绘
+     * 一遍（启动时 16 块 = 16 次全量重建，每次约 25 MB 分配 + 全图拷贝），而且都在 EDT 上。
+     * 现在只要合成图已存在且尺寸匹配，就只贴这一块。
+     *
+     * @return false 表示需要走全量重建（没有合成图、尺寸变了、或坐标落在窗口外）
+     */
+    private boolean blitRegionIntoCombined(RegionCoord coord, BufferedImage regionImage) {
+        if (!(combinedImage instanceof RenderedMap)) return false;
+        RenderedMap existing = (RenderedMap) combinedImage;
+        int width = (stableMaxRegionX - stableMinRegionX + 1) * REGION_SIZE_PIXELS;
+        int height = (stableMaxRegionZ - stableMinRegionZ + 1) * REGION_SIZE_PIXELS;
+        if (existing.getWidth() != width || existing.getHeight() != height) return false;
+
+        int pixelX = (coord.x - stableMinRegionX) * REGION_SIZE_PIXELS;
+        int pixelY = (coord.z - stableMinRegionZ) * REGION_SIZE_PIXELS;
+        if (pixelX < 0 || pixelY < 0
+            || pixelX + REGION_SIZE_PIXELS > width || pixelY + REGION_SIZE_PIXELS > height) return false;
+
+        Graphics2D g2d = existing.createGraphics();
+        try {
+            g2d.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
+            // 与全量重建保持一致：先铺背景色，再按 SrcOver 画（区域图里的透明像素露出背景）。
+            g2d.setComposite(AlphaComposite.Src);
+            g2d.setColor(new Color(32, 32, 32));
+            g2d.fillRect(pixelX, pixelY, REGION_SIZE_PIXELS, REGION_SIZE_PIXELS);
+            g2d.setComposite(AlphaComposite.SrcOver);
+            g2d.drawImage(regionImage, pixelX, pixelY, REGION_SIZE_PIXELS, REGION_SIZE_PIXELS, null);
+        } finally {
+            g2d.dispose();
+        }
+        existing.copyHeightsFrom(regionImage, pixelX, pixelY);
+        existing.copyHighlightsFrom(regionImage, pixelX, pixelY);
+        return true;
     }
     
     /**

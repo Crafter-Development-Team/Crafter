@@ -61,6 +61,11 @@ public class MinecraftMapGUI extends JFrame {
     private JMenuItem gridMenuItem;
     private boolean confirmationOpen;
     private volatile PreviewOptions preview=PreviewOptions.DEFAULT;
+    /**
+     * 预览质量下拉框的默认项。必须是 "1 (full)"：>1 的采样会让
+     * {@code resurfaceFromCache} 放弃层缓存重合成，拖 Y 滑块退回整区重扫。
+     */
+    static final String DEFAULT_PREVIEW_QUALITY="1 (full)";
     private final ViewOverlays overlays=new ViewOverlays();
     private final RecentWorlds recentWorlds=new RecentWorlds();
     private boolean multiBoxExport,includeWaypointsExport;
@@ -185,9 +190,10 @@ public class MinecraftMapGUI extends JFrame {
     private String programDir;
 
     // ── Y 带实时重合成用的层缓存（键 = mca 绝对路径）──
-    // 实测约 5 段/列 ≈ 31MB 一个 region，所以按堆内存决定最多缓存几个
+    // 上限必须 ≥ 一个视口同时需要的 region 数（最大 7x7 = 49），否则边建边被淘汰，
+    // 缓存永远凑不齐、每次换带都退回整区重扫。公式见 ColumnCache.cacheLimit。
     private static final int COLUMN_CACHE_LIMIT =
-        Math.max(1, Math.min(9, (int) (Runtime.getRuntime().maxMemory() / (64L * 1024 * 1024))));
+        com.minecraft.selector.core.ColumnCache.cacheLimit(Runtime.getRuntime().maxMemory());
     private final java.util.LinkedHashMap<String, ColumnCacheEntry> columnCaches =
         new java.util.LinkedHashMap<String, ColumnCacheEntry>(16, 0.75f, true) {
             @Override
@@ -337,18 +343,40 @@ public class MinecraftMapGUI extends JFrame {
         return true;
     }
 
-    /** 按 recipe 的 region 与偏移，把缓存里的层栈重新合成大图。 */
+    /**
+     * 按 recipe 的 region 与偏移，把缓存里的层栈重新合成大图。
+     *
+     * <p>逐块 {@code toImage()} 是纯 CPU 合成，块与块之间完全独立，所以在
+     * renderingExecutor 上并行做；旧实现串行循环，块多时就是"一块一块顺序出图"。
+     * 拼贴和 copyHeightsFrom 仍在调用线程做，保证 combined 只在单线程被写。
+     */
     private RenderedMap composeFromCaches(ViewRecipe recipe, ColumnCache[] caches, int top, int bottom, Integer highlight) {
         RenderedMap combined = new RenderedMap(recipe.totalWidth, recipe.totalHeight);
+        // 并行合成各块（保留 null 占位以便按下标取回）
+        java.util.List<java.util.concurrent.Future<BufferedImage>> futures = new java.util.ArrayList<>(caches.length);
+        for (ColumnCache cache : caches) {
+            if (cache == null) { futures.add(null); continue; }
+            futures.add(renderingExecutor.submit(() -> cache.toImage(top, bottom, highlight)));
+        }
         Graphics2D g2d = combined.createGraphics();
-        MapRenderer renderer = new MapRenderer(1, null, recipe.mode, top, bottom);
         try {
             g2d.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
             g2d.setColor(new Color(32, 32, 32));
             g2d.fillRect(0, 0, recipe.totalWidth, recipe.totalHeight);
             for (int i = 0; i < caches.length; i++) {
-                if (caches[i] == null) continue;
-                BufferedImage image = caches[i].toImage(top, bottom, highlight);
+                if (futures.get(i) == null) continue;
+                BufferedImage image;
+                try {
+                    image = futures.get(i).get();
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    for (java.util.concurrent.Future<BufferedImage> pending : futures)
+                        if (pending != null) pending.cancel(true);
+                    return combined;
+                } catch (java.util.concurrent.ExecutionException failed) {
+                    logManager.error("Band compose failed for one region: " + failed.getCause(), "MinecraftMapGUI");
+                    continue;
+                }
                 if (image == null) continue;
                 int offsetX = (recipe.regionX[i] - recipe.minRegionX) * 512;
                 int offsetY = (recipe.regionZ[i] - recipe.minRegionZ) * 512;
@@ -357,7 +385,6 @@ public class MinecraftMapGUI extends JFrame {
                 combined.copyHighlightsFrom(image, offsetX, offsetY);
             }
         } finally {
-            renderer.shutdown();
             g2d.dispose();
         }
         return combined;
@@ -624,7 +651,6 @@ public class MinecraftMapGUI extends JFrame {
                 }
             }
         }
-        cut.clipSelectionMetadataBelow(bottom);
         cut.setRGB(0, 0, width, height, pixels, 0, width);
         previewCut = true;
         displayApproximate = true;
@@ -884,8 +910,11 @@ public class MinecraftMapGUI extends JFrame {
             "8 (1/8)"
         };
         lodDropdown = new JComboBox<>(lodOptions);
-        lodDropdown.setSelectedIndex(0);
-        lodDropdown.setToolTipText("Preview sampling; >1 gives approximate pixels and hover heights. Auto: dynamic maps use 2; static maps use 1 / 2 / 4 / 8 by rendered file count.");
+        // 默认全采样（DEFAULT_PREVIEW_QUALITY = "1 (full)"）：采样 >1 会禁用列缓存的
+        // "换带即时重合成"（resurfaceFromCache 在 sampleInterval > 1 时直接放弃），
+        // 拖 Y 滑块就得整区重扫（实测 0.05~2s）。想更快出图可手动选 Auto/2/4/8。
+        lodDropdown.setSelectedItem(DEFAULT_PREVIEW_QUALITY);
+        lodDropdown.setToolTipText("Preview sampling; >1 gives approximate pixels and hover heights and disables instant Y-band re-composition. Auto: dynamic maps use 2; static maps use 1 / 2 / 4 / 8 by rendered file count.");
         lodDropdown.addActionListener(e -> resetSurfaceView());
 
         // MCA文件范围下拉框
@@ -1100,6 +1129,11 @@ public class MinecraftMapGUI extends JFrame {
                 onEdt(() -> {
                     if(request!=viewGeneration || dynamicRegionManager!=manager || revision!=manager.getProgressRevision()) return;
                     if(settled>=total) {
+                        // 必须先取消"延迟显示"定时器：瓦片可能在 LOADING_INDICATOR_DELAY_MS 之内就加载完，
+                        // 那时 finish() 只是把还没显示的panel收掉，但定时器还挂着 —— 它随后会 beginMap()
+                        // 把进度条设成 indeterminate 并显示出来，而之后再没有任何进度事件来收尾，
+                        // 于是条子就一直动。hideLoadingState/showSuccessState/showErrorState 都做了这一步。
+                        cancelPendingLoading();
                         loadingPanel.finish(request);
                         applyPendingPreset();
                         if(revision!=manager.getProgressRevision()) return;
@@ -2248,11 +2282,11 @@ displayedTop=null;displayedBottom=null;sourceTop=null;sourceBottom=null;previewC
     private SelectionCanvas activeCanvas() {return isDynamicMode&&dynamicMapCanvas!=null?dynamicMapCanvas:mapCanvas;}
     private void configureCanvas(MapCanvas canvas) {
         canvas.setSelectionChangeListener(b->updateSelectionStats());canvas.setCommandListener(this::selectionCommand);
-        canvas.setTransferHandler(fileDropHandler);canvas.setOverlays(overlays);canvas.setImportFloorListener(this::setImportFloor);canvas.setSnapMode(selectionSnap);canvas.setGridMode(gridMode);
+        canvas.setTransferHandler(fileDropHandler);canvas.setOverlays(overlays);canvas.setLodCenterListener(this::moveLodCenterTo);canvas.setSnapMode(selectionSnap);canvas.setGridMode(gridMode);
     }
     private void configureCanvas(DynamicMapCanvas canvas) {
         canvas.setSelectionChangeListener(b->updateSelectionStats());canvas.setCommandListener(this::selectionCommand);
-        canvas.setTransferHandler(fileDropHandler);canvas.setOverlays(overlays);canvas.setImportFloorListener(this::setImportFloor);canvas.setSnapMode(selectionSnap);canvas.setGridMode(gridMode);
+        canvas.setTransferHandler(fileDropHandler);canvas.setOverlays(overlays);canvas.setLodCenterListener(this::moveLodCenterTo);canvas.setSnapMode(selectionSnap);canvas.setGridMode(gridMode);
     }
     private void selectionCommand(String command) {
         switch(command) {
@@ -2276,10 +2310,18 @@ displayedTop=null;displayedBottom=null;sourceTop=null;sourceBottom=null;previewC
         SelectionStats stats=new SelectionStats(b,heightRangeSlider.getLowerValue(),heightRangeSlider.getUpperValue());
         selectionStatsLabel.setText(stats.toString()+" · checking cached columns…");queueSelectionCoverage();selectionStatsLabel.setForeground(stats.isLarge()?new Color(190,80,0):UIManager.getColor("Label.foreground"));
     }
-    private void setImportFloor(int y) {
-        if(y==RenderedMap.NO_HEIGHT) {progressLabel.setText("No cached height at this column; Import Y unchanged");return;}
-        heightRangeSlider.setLowerValue(y);
-        progressLabel.setText("Import min-Y = "+heightRangeSlider.getLowerValue()+" (cached height "+y+")");
+    /**
+     * 中键拖动 LOD 中心：区块对齐后重建 ImportLod（autoCenter 会被置 false），
+     * 立即生效让圆环跟手，并回写面板控件。
+     */
+    private void moveLodCenterTo(Point world) {
+        if (world == null) return;
+        ImportLod next = overlays.importLod.withManualCenter(world.x, world.y);
+        if (next.centerX == overlays.importLod.centerX && next.centerZ == overlays.importLod.centerZ
+            && !overlays.importLod.autoCenter) return;   // 没跨区块就不折腾
+        overlays.importLod = next;
+        if (importLodPanel != null) importLodPanel.applyDraggedCenter(next.centerX, next.centerZ);
+        repaintCanvases();
     }
     private void autoFitImportY() {autoFitImportY(false);}
     private void autoFitImportY(boolean opaque) {

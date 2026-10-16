@@ -20,24 +20,27 @@ class P1RenderTest {
         try {return (RenderedMap)r.renderToPng(r.getTopBlocks(path.toString(),32,1),1);}finally {r.shutdown();}
     }
     private NBTCompound chunkRoot() {NBTCompound n=new NBTCompound("");n.put("xPos",new NBTInt("xPos",0));n.put("zPos",new NBTInt("zPos",0));return n;}
-    @Test void waterDisplayAndBothFitPoliciesRemainIndependentAcrossComposition() throws Exception {
+    @Test void waterDisplayAndFitPolicyRemainStableAcrossComposition() throws Exception {
         HeightmapTest f=fixture();Path path=f.mca("r.0.0.mca",f.section(0,true,new String[]{"air","stone","water","glass"},i->i/256==0?1:i/256==6?2:i/256==8&&i%16==1?3:0));
         RenderedMap ordinary=render(path,PreviewOptions.DEFAULT,null,BlockColors.snapshot());
         RenderedMap transparent=render(path,new PreviewOptions(true,false,0),null,BlockColors.snapshot());
         assertEquals(6,ordinary.getHeightAt(0,0));assertEquals(0,transparent.getHeightAt(0,0));
-        assertEquals(6,transparent.getFitHeightAt(0,0,true));assertEquals(0,transparent.getFitHeightAt(0,0,false));
-        assertEquals(8,transparent.getFitHeightAt(1,0,true));assertEquals(0,transparent.getFitHeightAt(1,0,false));
+        // 逐列 opaque/dry 高度元数据已移除：两种 Fit-Y 策略都使用可见顶高。
+        assertEquals(0,transparent.getFitHeightAt(0,0,true));assertEquals(0,transparent.getFitHeightAt(0,0,false));
         SelectionMath.Bounds box=new SelectionMath.Bounds(0,0,15,15);
-        assertEquals(8,SelectionYFit.scan(transparent,0,0,1,box,true).max);assertEquals(0,SelectionYFit.scan(transparent,0,0,1,box,false).max);
+        assertEquals(8,SelectionYFit.scan(transparent,0,0,1,box,true).max);assertEquals(8,SelectionYFit.scan(transparent,0,0,1,box,false).max);
         RenderedMap composite=new RenderedMap(520,520);composite.copyHeightsFrom(transparent,4,4);
-        assertEquals(6,composite.getFitHeightAt(4,4,true));assertEquals(0,composite.getFitHeightAt(4,4,false));
+        assertEquals(0,composite.getFitHeightAt(4,4,true));
         assertNotEquals(ordinary.getRenderKey(),transparent.getRenderKey());assertEquals(transparent.getRenderKey(),composite.getRenderKey());
         assertTrue(PreviewOptions.water("custom:still_water"));assertTrue(PreviewOptions.fitTransparent("custom:stained_glass_panel"));assertFalse(PreviewOptions.water("custom:stone"));
     }
-    @Test void waterOnlyColumnsKeepOpaqueFitWhenTransparentViewHasNoFloor() throws Exception {
+    @Test void waterOnlyColumnsAreLoadedButHaveNoSurfaceHeight() throws Exception {
         HeightmapTest f=fixture();Path path=f.mca("water-only.mca",f.section(0,true,new String[]{"air","custom:water"},i->i/256==5?1:0));
         RenderedMap map=render(path,new PreviewOptions(true,false,0),null,BlockColors.snapshot());
-        assertEquals(RenderedMap.NO_HEIGHT,map.getHeightAt(0,0));assertEquals(5,map.getFitHeightAt(0,0,true));assertEquals(RenderedMap.NO_HEIGHT,map.getFitHeightAt(0,0,false));assertTrue(map.isLoadedAt(0,0));
+        assertEquals(RenderedMap.NO_HEIGHT,map.getHeightAt(0,0));
+        assertEquals(RenderedMap.NO_HEIGHT,map.getFitHeightAt(0,0,true));
+        assertEquals(RenderedMap.NO_HEIGHT,map.getFitHeightAt(0,0,false));
+        assertTrue(map.isLoadedAt(0,0));
     }
     @Test void managerCachesAreIsolatedByPreviewPolicy() throws Exception {
         HeightmapTest f=fixture();Path file=f.mca("r.0.0.mca",f.section(0,true,new String[]{"air","stone","water"},i->i/256==0?1:i/256==5?2:0));
@@ -66,8 +69,7 @@ class P1RenderTest {
         assertEquals(256,coverage.empty);assertEquals(256,coverage.missing);assertEquals(0,coverage.count);
         BufferedImage layer=ViewLayers.overlay(map,false,false,true);assertNotEquals(layer.getRGB(0,0),layer.getRGB(16,0));assertEquals(0,map.getRGB(0,0));
         RenderedMap copy=new RenderedMap(520,520);copy.copyHeightsFrom(map,4,4);assertTrue(copy.isLoadedAt(4,4));assertFalse(copy.isLoadedAt(20,4));
-    }
-    @Test void modernPackedBiomesUseQuartCoordinatesAndPreserveUnknownIds() {
+    }    @Test void modernPackedBiomesUseQuartCoordinatesAndPreserveUnknownIds() {
         HeightmapTest f=fixture();NBTCompound section=f.section(-1,true,new String[]{"stone"},i->0);
         NBTCompound biome=new NBTCompound("biomes");NBTList palette=new NBTList("palette",TagType.TAG_String);
         for(int i=0;i<5;i++) palette.add(new NBTString("","mod:biome_"+i));biome.put("palette",palette);
@@ -101,12 +103,13 @@ class P1RenderTest {
             zip.putNextEntry(new ZipEntry("assets/minecraft/textures/colormap/grass.png"));BufferedImage map=new BufferedImage(2,2,BufferedImage.TYPE_INT_RGB);for(int y=0;y<2;y++) for(int x=0;x<2;x++) map.setRGB(x,y,new Color(30,80,140).getRGB());ImageIO.write(map,"PNG",zip);zip.closeEntry();
         }
     }
-    @Test void biomeMetadataSurvivesRenderAndClippedTileCopy() throws Exception {
+    @Test void biomeTintPathRendersWithoutPerColumnBiomeMetadata() throws Exception {
         HeightmapTest f=fixture();NBTCompound section=f.section(0,true,new String[]{"stone"},i->0);NBTCompound b=new NBTCompound("biomes");NBTList palette=new NBTList("palette",TagType.TAG_String);palette.add(new NBTString("","custom:plateau"));b.put("palette",palette);section.put("biomes",b);
         NBTCompound root=chunkRoot();NBTList sections=new NBTList("sections",TagType.TAG_Compound);sections.add(section);root.put("sections",sections);assertEquals("custom:plateau",new Chunk(root).getBiome(0,15,0));
-        RenderedMap actual=render(f.mca("biome.mca",section),new PreviewOptions(false,false,2),null,BlockColors.snapshot());assertEquals("custom:plateau",actual.getBiomeAt(0,0));
-        RenderedMap source=new RenderedMap(2,2);source.setHeightAt(1,1,15);source.setColumnMetadata(1,1,"custom:plateau",15,3);source.setBlockAt(1,1,"custom:surface");RenderedMap dest=new RenderedMap(1,1);dest.copyHeightsFrom(source,-1,-1);
-        assertEquals("custom:plateau",dest.getBiomeAt(0,0));assertEquals(3,dest.getFitHeightAt(0,0,false));assertEquals("custom:surface",dest.getBlockAt(0,0));
+        // 群系着色（像素）保留；逐列生物群系元数据（getBiomeAt）已随 +4 MB 数组移除。
+        // 全石柱的 section Y=0 顶层是 Y=15；带群系渲染仍必须得到同样的高度。
+        RenderedMap actual=render(f.mca("biome.mca",section),new PreviewOptions(false,false,2),null,BlockColors.snapshot());
+        assertEquals(15,actual.getHeightAt(0,0));
     }
     @Test void nightAndContourOverlaysDoNotChangeSourceOrFitHeight() {
         RenderedMap map=new RenderedMap(2,1);map.setHeightAt(0,0,-1);map.setHeightAt(1,0,0);map.setRGB(0,0,Color.WHITE.getRGB());

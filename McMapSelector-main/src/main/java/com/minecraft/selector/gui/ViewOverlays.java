@@ -54,19 +54,37 @@ public final class ViewOverlays {
         new Color(255,210,70),new Color(255,145,70),new Color(215,135,255)};
     private void drawImportLod(Graphics2D graphics,int width,int height,double scale,Function<Point,Point> screen,SelectionMath.Bounds selection) {
         if(importLod.maxLevel==0) return;
+        if(!(scale>0)) return;
         ImportLod lod=importLod.resolved(selection,anchors,dimension);
         // Manual block coordinates are floored to chunks by Blender before WI receives them.
-        Point center=screen.apply(new Point(Math.floorDiv(lod.centerX,16)*16,Math.floorDiv(lod.centerZ,16)*16));
+        int centerChunkX=Math.floorDiv(lod.centerX,16), centerChunkZ=Math.floorDiv(lod.centerZ,16);
+        // 十字画在"该区块的中心"而不是区块角：阶梯圆关于区块中心对称
+        // （第 dz 行含区块 |dx|<=half，跨方块 (ccx-half)*16 … (ccx+half+1)*16，中点正是 ccx*16+8），
+        // 画在区块角会整体偏半格。
+        Point center=screen.apply(new Point(centerChunkX*16+8,centerChunkZ*16+8));
+        // 可见区块行范围：screen 是 world*scale+origin 的仿射映射，反解出屏幕上下边对应的世界 Z。
+        Point origin=screen.apply(new Point(0,0));
+        double inverse=1.0/scale;
+        int topChunk=Math.floorDiv((int)Math.floor((0-origin.y)*inverse),16)-2;
+        int bottomChunk=Math.floorDiv((int)Math.floor((height-origin.y)*inverse),16)+2;
         Graphics2D g=(Graphics2D)graphics.create();
         try {
             g.setRenderingHint(RenderingHints.KEY_ANTIALIASING,RenderingHints.VALUE_ANTIALIAS_ON);
             g.setStroke(new BasicStroke(2f));
             for(int level=0;level<lod.maxLevel;level++) {
-                double radius=lod.radiusChunks(level)*16.0*scale;
+                long radius=lod.radiusChunks(level);
+                // 荒谬的半径（整屏都在圆内）画不出有意义的边界，跳过。
+                if(radius>4_000_000L) continue;
+                int r=(int)radius;
+                int fromZ=Math.max(centerChunkZ-r,topChunk), toZ=Math.min(centerChunkZ+r,bottomChunk);
+                if(fromZ>toZ) continue;
                 g.setColor(LOD_COLORS[level]);
-                g.draw(new java.awt.geom.Ellipse2D.Double(center.x-radius,center.y-radius,2*radius,2*radius));
+                g.draw(chunkRingPath(screen,centerChunkX,centerChunkZ,r,fromZ,toZ));
             }
-            g.setColor(Color.WHITE);g.drawLine(center.x-6,center.y,center.x+6,center.y);g.drawLine(center.x,center.y-6,center.x,center.y+6);
+            // 十字用 fillRect 画成严格对称的加号：2px 描边 + 抗锯齿会让 drawLine 的横竖臂不等长。
+            g.setColor(Color.WHITE);
+            g.fillRect(center.x-6,center.y-1,13,2);
+            g.fillRect(center.x-1,center.y-6,2,13);
             if(width>240&&height>180) {
                 String title="Import LOD · center chunk "+Math.floorDiv(lod.centerX,16)+", "+Math.floorDiv(lod.centerZ,16);
                 int legendWidth=g.getFontMetrics().stringWidth(title)+12;
@@ -87,6 +105,41 @@ public final class ViewOverlays {
         } finally {g.dispose();}
     }
     private static void badge(Graphics2D g,String text,int x,int y) {g.setColor(new Color(0,0,0,190));g.fillRoundRect(x-3,y-15,g.getFontMetrics().stringWidth(text)+9,21,5,5);g.setColor(Color.WHITE);g.drawString(text,x,y);}
+
+    /**
+     * 半径为 r 个区块的 LOD 边界的"阶梯圆"路径 —— 与 WorldImporter 的判定完全一致的形状。
+     *
+     * <p>C++ 判定 {@code dx*dx + dz*dz <= r*r}（dx/dz 为区块索引差），所以包含的是<b>整块区块</b>：
+     * 第 dz 行包含区块 |dx| &lt;= half(dz)，外边界因此落在 {@code (centerChunkX+half+1)*16} 方块的阶梯上，
+     * 而不是光滑圆弧。
+     *
+     * <p>路径顺序：右侧自上而下 → 底部横线 → 左侧自下而上 → 顶部横线（closePath 补上）。
+     * 相邻两行 x 不同时，下一行首个 lineTo 会自然补出水平台阶。
+     */
+    private static java.awt.geom.Path2D.Double chunkRingPath(Function<Point,Point> screen,
+            int centerChunkX,int centerChunkZ,int r,int fromZ,int toZ) {
+        java.awt.geom.Path2D.Double path=new java.awt.geom.Path2D.Double();
+        // 右侧：自上而下，每行画一条竖边（到下一行的 lineTo 自动形成台阶）
+        for(int cz=fromZ;cz<=toZ;cz++) {
+            int half=ImportLod.chunkRingHalfWidth(r,cz-centerChunkZ);
+            if(half<0) continue;
+            int x=(centerChunkX+half+1)*16;
+            Point top=screen.apply(new Point(x,cz*16)), bottom=screen.apply(new Point(x,(cz+1)*16));
+            if(path.getCurrentPoint()==null) path.moveTo(top.x,top.y); else path.lineTo(top.x,top.y);
+            path.lineTo(bottom.x,bottom.y);
+        }
+        // 左侧：自下而上，镜像
+        for(int cz=toZ;cz>=fromZ;cz--) {
+            int half=ImportLod.chunkRingHalfWidth(r,cz-centerChunkZ);
+            if(half<0) continue;
+            int x=(centerChunkX-half)*16;
+            Point bottom=screen.apply(new Point(x,(cz+1)*16)), top=screen.apply(new Point(x,cz*16));
+            path.lineTo(bottom.x,bottom.y);
+            path.lineTo(top.x,top.y);
+        }
+        path.closePath();
+        return path;
+    }
     private static void corner(Graphics2D g,Point p,Color c,String name) {g.setColor(c);g.fillRect(p.x-4,p.y-4,9,9);g.drawString(name,p.x+7,p.y-7);}
     private void marker(Graphics2D g,WorldAnchors.Anchor anchor,String name,Color color,Function<Point,Point> screen) {
         if(anchor==null||!dimension.equals(anchor.dimension)) return;
@@ -95,8 +148,10 @@ public final class ViewOverlays {
     public String tooltip(Point cursor,Function<Point,Point> screen) {
         if(!markers) return "";StringBuilder out=new StringBuilder();
         WorldAnchors.Anchor[] a={anchors.spawn,anchors.player};String[] names={"Spawn","Player"};
-        for(int i=0;i<a.length;i++) if(a[i]!=null&&dimension.equals(a[i].dimension)&&screen.apply(a[i].xz).distance(cursor)<=12) out.append("  ").append(names[i]).append(" (").append(a[i].xz.x).append(", ").append(a[i].xz.y).append(')');
-        for(com.minecraft.selector.core.WaypointStore.Marker m:waypoints.list())if(dimension.equals(m.dimension)&&screen.apply(new Point(m.x,m.z)).distance(cursor)<=12)out.append("  POI: ").append(m.toString());
+        // screen 可能返回 null（画布还没渲染出图时 worldToScreenCoordinates 就是 null），
+        // 直接调 .distance() 会 NPE 并把调用方（世界加载）一起打断。
+        for(int i=0;i<a.length;i++) if(a[i]!=null&&dimension.equals(a[i].dimension)) {Point p=screen.apply(a[i].xz);if(p!=null&&p.distance(cursor)<=12) out.append("  ").append(names[i]).append(" (").append(a[i].xz.x).append(", ").append(a[i].xz.y).append(')');}
+        for(com.minecraft.selector.core.WaypointStore.Marker m:waypoints.list())if(dimension.equals(m.dimension)){Point p=screen.apply(new Point(m.x,m.z));if(p!=null&&p.distance(cursor)<=12)out.append("  POI: ").append(m.toString());}
         return out.toString();
     }
 }

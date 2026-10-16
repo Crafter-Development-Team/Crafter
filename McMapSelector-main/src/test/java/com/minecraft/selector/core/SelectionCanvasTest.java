@@ -64,7 +64,7 @@ class SelectionCanvasTest {
     }
     @Test void visibleViewportMiddleClickYFitConfirmAndCommandParity() throws Exception {
         Files.write(directory.resolve("r.-1.-1.mca"),new byte[]{1});
-        RenderedMap tile=new RenderedMap(512,512);tile.setHeightAt(256,256,-20);tile.setBlockAt(256,256,"mod:floor[axis=x]");
+        RenderedMap tile=new RenderedMap(512,512);tile.setHeightAt(256,256,-20);
         DynamicRegionManager manager=new DynamicRegionManager(directory.toFile(),p->tile);
         manager.updateViewport(new Rectangle(-512,-512,512,512));manager.awaitIdle(5,TimeUnit.SECONDS);
         SwingUtilities.invokeAndWait(()-> {
@@ -75,13 +75,14 @@ class SelectionCanvasTest {
             dynamic.setSelectionCallback(new DynamicMapCanvas.SelectionCallback() {public void onSelectionComplete(int a,int b,int c,int d){}public void onSelectionConfirmed(int a,int b,int c,int d){confirmed.incrementAndGet();}});
             try {
                 for(JComponent c:new JComponent[]{staticMap,dynamic}) {
-                    SelectionCanvas canvas=(SelectionCanvas)c;AtomicInteger floor=new AtomicInteger(0);java.util.List<String> commands=new java.util.ArrayList<>();
-                    if(c instanceof MapCanvas) {staticMap.setImportFloorListener(floor::set);staticMap.setCommandListener(commands::add);}else{dynamic.setImportFloorListener(floor::set);dynamic.setCommandListener(commands::add);}
-                    mouse(c,MouseEvent.MOUSE_PRESSED,128,128,InputEvent.BUTTON2_DOWN_MASK,MouseEvent.BUTTON2);assertEquals(-20,floor.get());
+                    SelectionCanvas canvas=(SelectionCanvas)c;java.util.List<String> commands=new java.util.ArrayList<>();
+                    java.util.List<java.awt.Point> lodCenters=new java.util.ArrayList<>();
+                    if(c instanceof MapCanvas) {staticMap.setLodCenterListener(lodCenters::add);staticMap.setCommandListener(commands::add);}else{dynamic.setLodCenterListener(lodCenters::add);dynamic.setCommandListener(commands::add);}
+                    // 中键现在是拖动 LOD 中心（旧的"设为地表高度"已移除）；LOD 叠加层默认可见。
+                    mouse(c,MouseEvent.MOUSE_PRESSED,128,128,InputEvent.BUTTON2_DOWN_MASK,MouseEvent.BUTTON2);
+                    assertFalse(lodCenters.isEmpty(),"middle press must report a LOD center");
                     assertArrayEquals(new int[]{-256,-20,-256},canvas.getHoverCoordinates());
-                    mouse(c,MouseEvent.MOUSE_PRESSED,129,128,InputEvent.BUTTON2_DOWN_MASK,MouseEvent.BUTTON2);assertEquals(RenderedMap.NO_HEIGHT,floor.get());
-                    key(c,"control A");assertEquals(new SelectionMath.Bounds(-384,-384,-129,-129),canvas.getSelectionBounds());
-                    assertEquals(-20,canvas.fitSelectionY(canvas.getSelectionBounds()).min);
+                    key(c,"control A");assertEquals(new SelectionMath.Bounds(-384,-384,-129,-129),canvas.getSelectionBounds());                    assertEquals(-20,canvas.fitSelectionY(canvas.getSelectionBounds()).min);
                     key(c,"ENTER");assertNotNull(canvas.getSelectionBounds());
                     for(String stroke:new String[]{"SPACE","G","control G","control shift C","F2","F3","F4"}) key(c,stroke);
                     assertEquals(java.util.Arrays.asList("fit","grid","goto","copy","F2","F3","F4"),commands);
@@ -91,5 +92,32 @@ class SelectionCanvasTest {
                 assertEquals(2,confirmed.get());
             } finally {staticMap.enableAutoViewportManagement(false);dynamic.cleanup();}
         });manager.shutdown();
+    }
+
+    /** 中键拖动 LOD 中心：press/drag 都要回调，release 之后必须停止。 */
+    @Test void middleButtonDragsLodCenterOnBothCanvases() throws Exception {
+        SwingUtilities.invokeAndWait(()-> {
+            MapCanvas staticMap=new MapCanvas();staticMap.setSize(256,256);
+            staticMap.setImage(new RenderedMap(256,256));staticMap.jumpToWorldCoordinate(new Point(0,0));
+            DynamicMapCanvas dynamic=new DynamicMapCanvas();dynamic.setSize(256,256);
+            try {
+                for(JComponent c:new JComponent[]{staticMap,dynamic}) {
+                    java.util.List<java.awt.Point> centers=new java.util.ArrayList<>();
+                    if(c instanceof MapCanvas) ((MapCanvas)c).setLodCenterListener(centers::add);
+                    else ((DynamicMapCanvas)c).setLodCenterListener(centers::add);
+
+                    mouse(c,MouseEvent.MOUSE_PRESSED,128,128,InputEvent.BUTTON2_DOWN_MASK,MouseEvent.BUTTON2);
+                    assertEquals(1,centers.size(),"middle press must move the LOD center");
+                    mouse(c,MouseEvent.MOUSE_DRAGGED,140,128,InputEvent.BUTTON2_DOWN_MASK,MouseEvent.NOBUTTON);
+                    assertEquals(2,centers.size(),"middle drag must keep moving the LOD center");
+                    assertNotEquals(centers.get(0),centers.get(1),"dragging must change the center");
+
+                    mouse(c,MouseEvent.MOUSE_RELEASED,140,128,InputEvent.BUTTON2_DOWN_MASK,MouseEvent.BUTTON2);
+                    int settled=centers.size();
+                    mouse(c,MouseEvent.MOUSE_DRAGGED,180,128,InputEvent.BUTTON2_DOWN_MASK,MouseEvent.NOBUTTON);
+                    assertEquals(settled,centers.size(),"after release the drag must not keep moving the center");
+                }
+            } finally {staticMap.enableAutoViewportManagement(false);dynamic.cleanup();}
+        });
     }
 }

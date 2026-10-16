@@ -19,8 +19,7 @@ class P1CanvasTest {
     private void key(JComponent c,String stroke) {Object k=c.getInputMap(JComponent.WHEN_FOCUSED).get(KeyStroke.getKeyStroke(stroke));assertNotNull(k,stroke);c.getActionMap().get(k).actionPerformed(new ActionEvent(c,0,k.toString()));}
     @Test void bothCanvasesSupportCornersFitPoliciesNewKeysZoomAndPngComposite() throws Exception {
         Files.write(directory.resolve("r.-1.-1.mca"),new byte[]{1});RenderedMap tile=new RenderedMap(512,512);
-        for(int z=0;z<512;z++) for(int x=0;x<512;x++) {tile.setRGB(x,z,0xffc8c8c8);tile.setHeightAt(x,z,64);tile.setColumnMetadata(x,z,"mod:park",64,20);}
-        tile.setBlockAt(256,256,"mod:bench[facing=north]");
+        for(int z=0;z<512;z++) for(int x=0;x<512;x++) {tile.setRGB(x,z,0xffc8c8c8);tile.setHeightAt(x,z,64);}
         DynamicRegionManager manager=new DynamicRegionManager(directory.toFile(),p->tile);manager.updateViewport(new Rectangle(-512,-512,512,512));manager.awaitIdle(5,TimeUnit.SECONDS);
         SwingUtilities.invokeAndWait(()-> {
             MapCanvas fixed=new MapCanvas();fixed.setSize(256,256);fixed.setImage(tile);fixed.setWorldCoordinateMapping(-512,-512,1);fixed.jumpToWorldCoordinate(new Point(-256,-256));
@@ -29,13 +28,15 @@ class P1CanvasTest {
                 for(JComponent component:new JComponent[]{fixed,dynamic}) {
                     SelectionCanvas canvas=(SelectionCanvas)component;ViewOverlays overlays=new ViewOverlays();overlays.posMode=true;overlays.markers=false;overlays.scaleBar=false;canvas.setOverlays(overlays);
                     click(component,50,50);assertNull(canvas.getSelectionBounds());click(component,80,90);assertEquals(new SelectionMath.Bounds(-334,-334,-304,-294),canvas.getSelectionBounds());
-                    assertEquals(20,canvas.fitSelectionY(canvas.getSelectionBounds(),false).min);assertEquals(64,canvas.fitSelectionY(canvas.getSelectionBounds(),true).min);
+                    // 逐列 opaque/dry 元数据已移除：两种 Fit 策略都返回可见顶高。
+                    assertEquals(64,canvas.fitSelectionY(canvas.getSelectionBounds(),false).min);assertEquals(64,canvas.fitSelectionY(canvas.getSelectionBounds(),true).min);
                     key(component,"control Z");assertNull(canvas.getSelectionBounds());
                     click(component,60,60);key(component,"ESCAPE");click(component,90,90);assertNull(canvas.getSelectionBounds());click(component,100,110);assertNotNull(canvas.getSelectionBounds());
                     canvas.setSnapMode(SelectionMath.Snap.CHUNK);SelectionMath.Bounds exact=new SelectionMath.Bounds(-333,-332,-301,-300);canvas.restoreSelectionBounds(exact);assertEquals(exact,canvas.getSelectionBounds());
                     canvas.clearSelection();overlays.posMode=false;
-                    mouse(component,MouseEvent.MOUSE_MOVED,128,128,0,MouseEvent.NOBUTTON);assertTrue((component==fixed?fixed.getHoverText(new Point(128,128)):dynamic.getHoverText(new Point(128,128))).contains("biome: mod:park"));
-                    assertEquals(Long.valueOf(1),canvas.visibleBlockCounts().get("mod:bench"));
+                    // 悬停不再显示方块 ID / 生物群系（元数据已移除），但坐标与高度仍在。
+                    mouse(component,MouseEvent.MOUSE_MOVED,128,128,0,MouseEvent.NOBUTTON);assertTrue((component==fixed?fixed.getHoverText(new Point(128,128)):dynamic.getHoverText(new Point(128,128))).contains("Y: 64"));
+                    assertTrue(canvas.visibleBlockCounts().getOrDefault("cached surface",0L)>0);
                     int[] before=canvas.getHoverCoordinates();double oldZoom=component==fixed?fixed.getZoomLevel():dynamic.getZoomLevel();mouse(component,MouseEvent.MOUSE_CLICKED,128,128,2,MouseEvent.BUTTON1);assertArrayEquals(before,canvas.getHoverCoordinates());assertTrue((component==fixed?fixed.getZoomLevel():dynamic.getZoomLevel())>oldZoom);
                     key(component,"HOME");assertEquals(10,component==fixed?fixed.getZoomLevel():dynamic.getZoomLevel());key(component,"END");assertEquals(.5,component==fixed?fixed.getZoomLevel():dynamic.getZoomLevel());
                     java.util.List<String> commands=new ArrayList<>();if(component==fixed) fixed.setCommandListener(commands::add);else dynamic.setCommandListener(commands::add);
