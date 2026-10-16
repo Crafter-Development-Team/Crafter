@@ -518,12 +518,16 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
 
         # 根据平台选择配置目录和可执行文件
         current_platform = platform.system()
+        # Windows ships WorldImporter.exe; macOS/Linux use the extensionless binary.
         if current_platform == "Darwin":  # macOS
             dir_config = os.path.join(dir_importer, "config_macos")
             dir_exe_importer = os.path.join(dir_importer, "WorldImporter")
-        else:  # Windows和其他平台
+        elif current_platform == "Windows":
             dir_config = os.path.join(dir_importer, "config")
             dir_exe_importer = os.path.join(dir_importer, "WorldImporter.exe")
+        else:  # Linux and other Unix: ELF next to config/
+            dir_config = os.path.join(dir_importer, "config")
+            dir_exe_importer = os.path.join(dir_importer, "WorldImporter")
         log_step(f"平台: {current_platform} | exe: {dir_exe_importer}")
 
         # 输出关键配置摘要
@@ -558,7 +562,7 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
                 except:
                     pass
         # 旧的 tint/overlay/doubleSided 元数据一并清理，避免和本次导出的 objs 不匹配
-        for _old_meta in ("tint.json", "overlay.json", double_sided_json_name):
+        for _old_meta in ("tint.json", "overlay.json", "doubleSided.json"):
             try:
                 _old_meta_path = os.path.join(dir_importer, _old_meta)
                 if os.path.exists(_old_meta_path):
