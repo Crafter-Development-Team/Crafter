@@ -753,7 +753,9 @@ def finish_import(ctx, prefs, imported_time, worldconfig, prepared_time,
         debug_log(f"Importing OBJ: {file}")
         pre_set = set(bpy.data.objects)
         try:
-            _run_ops(bpy.ops.wm.obj_import, filepath=os.path.join(dir_importer, file))
+            # WorldImporter's clean GreedyMesh output needs no costly post-import validation.
+            _run_ops(bpy.ops.wm.obj_import, filepath=os.path.join(dir_importer, file),
+                     validate_meshes=False)
             _run_ops(bpy.ops.object.transform_apply, location=False, rotation=True, scale=True)
             have_obj = True
         except Exception as ex:

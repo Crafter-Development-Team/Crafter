@@ -244,7 +244,11 @@ class VIEW3D_OT_CrafterMapSelector(bpy.types.Operator):
                         addon_prefs.XYZ_1 = first
                         addon_prefs.XYZ_2 = second
                         apply_import_lod(addon_prefs, import_lod)
-                        reloadwindow()
+                        # Preference updates only need a queued redraw, not a costly DRAW_WIN_SWAP.
+                        for window in bpy.context.window_manager.windows:
+                            for area in window.screen.areas:
+                                if area.type in {'PREFERENCES', 'VIEW_3D'}:
+                                    area.tag_redraw()
                         push_log("地图选择坐标已更新", "INFO")
                     elif process.returncode != 0:
                         with open(log_path, "rb") as log:
