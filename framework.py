@@ -295,9 +295,8 @@ def release_addon(target_init_file, addon_name,
                                          ". Please download the required wheel file to the wheels folder.")
                     shutil.copy(wheel_source, wheel_folder)
 
+    # Pack naming: Crafter-<version>-YYYYMMDD.zip (dash + version + Asia/Taipei date)
     real_addon_name = "{addon_name}".format(addon_name=release_folder)
-    if is_extension:
-        real_addon_name = f"{real_addon_name}_ext"
     if with_version:
         _version: str
         if not is_extension:
@@ -311,10 +310,10 @@ def release_addon(target_init_file, addon_name,
                 _version = addon_config["version"]
             else:
                 raise ValueError("version not found in:", addon_config_file)
-        real_addon_name = f"{real_addon_name}_V{_version}"
+        real_addon_name = f"{real_addon_name}-{_version}"
     if with_timestamp:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        real_addon_name = f"{real_addon_name}_{timestamp}"
+        timestamp = datetime.now().strftime("%Y%m%d")
+        real_addon_name = f"{real_addon_name}-{timestamp}"
 
     released_addon_path = os.path.abspath(os.path.join(release_dir, real_addon_name) + ".zip")
     # zip the addon
