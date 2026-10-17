@@ -1,5 +1,6 @@
 package com.minecraft.selector.core;
 
+import com.minecraft.selector.utils.WorldPathResolver;
 import java.io.*;
 import java.util.*;
 
@@ -109,9 +110,23 @@ public final class ResourceOptions {
         }
         File mca=input.isFile() && input.getName().endsWith(".mca")?input:null;
         if(mca==null) {
-            File region=new File(directory,"region");
-            if(!region.isDirectory() && directory.getName().equals("region")) region=directory;
-            List<String> files=archives(region,".mca",null);if(!files.isEmpty()) mca=new File(files.get(0));
+            File region=null;
+            // Walk up to world root (level.dat) then resolve 26.1+/legacy region dir.
+            for(File parent=directory;parent!=null;parent=parent.getParentFile()) {
+                if(new File(parent,"level.dat").isFile()) {
+                    region=WorldPathResolver.getOverworldRegionDir(parent.getAbsolutePath());
+                    break;
+                }
+            }
+            if(region==null || !region.isDirectory()) {
+                region=new File(directory,"region");
+                if(!region.isDirectory() && directory.getName().equals("region")) region=directory;
+            }
+            File first=WorldPathResolver.findFirstMca(region);
+            if(first!=null) mca=first;
+            else {
+                List<String> files=archives(region,".mca",null);if(!files.isEmpty()) mca=new File(files.get(0));
+            }
         }
         if(mca!=null) try {
             com.minecraft.selector.region.Region region=com.minecraft.selector.region.Region.fromFile(mca.toString());

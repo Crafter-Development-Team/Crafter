@@ -192,8 +192,23 @@ public final class WorldPathResolver {
         if (!levelDat.exists()) {
             return false;
         }
+        // 26.1+ may have no top-level region/; any dimension with .mca counts.
+        if (!discoverDimensions(savePath).isEmpty()) {
+            return true;
+        }
         File regionDir = getOverworldRegionDir(savePath);
-        return regionDir.exists() && regionDir.isDirectory();
+        return regionDir.isDirectory();
+    }
+
+    /**
+     * Pick first non-empty .mca under a resolved region dir (for resource probing).
+     */
+    public static File findFirstMca(File regionDir) {
+        if (regionDir == null || !regionDir.isDirectory()) return null;
+        File[] files = regionDir.listFiles((d, name) -> name.endsWith(".mca") && new File(d, name).length() > 0);
+        if (files == null || files.length == 0) return null;
+        java.util.Arrays.sort(files);
+        return files[0];
     }
 
     /**
