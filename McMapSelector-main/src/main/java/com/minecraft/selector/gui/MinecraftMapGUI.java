@@ -1198,11 +1198,10 @@ public class MinecraftMapGUI extends JFrame {
         mapPanel.add(importYPanel, BorderLayout.EAST);
         importLodPanel=new ImportLodPanel(this::importLodChanged);
         importLodPanel.showResolvedCenter(resolvedImportLod(null));
-        CollapsiblePanel lodPanel=new CollapsiblePanel("Import LOD",new Color(130,150,175));
+        // Collapsible top bar (not left sidebar): same fold chrome as before, starts collapsed.
+        CollapsiblePanel lodPanel=new CollapsiblePanel("Import LOD",new Color(130,150,175),true);
         lodPanel.addContent(importLodPanel);
-        JPanel lodSidebar=new JPanel(new BorderLayout());
-        lodSidebar.add(lodPanel,BorderLayout.NORTH);
-        mapPanel.add(lodSidebar,BorderLayout.WEST);
+        mapPanel.add(lodPanel,BorderLayout.NORTH);
 
         JScrollPane mapScrollPane = new JScrollPane(mapCanvas);
         mapScrollPane.setMinimumSize(new Dimension(400, 300));
