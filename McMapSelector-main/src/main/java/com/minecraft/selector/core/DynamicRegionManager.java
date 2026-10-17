@@ -317,7 +317,8 @@ public class DynamicRegionManager {
             try {
                 // 用换带专用池：所有瓦片同时开跑，而不是在 3 线程的加载池里排队。
                 bandExecutor.execute(() -> rerenderTileForBand(coord, expected, true));
-            } catch (java.util.concurrent.RejectedExecutionException ignored) {
+            } catch (java.util.concurrent.RejectedExecutionException e) {
+                logManager.debug("Band re-render rejected (shutting down): " + e.getMessage(), "DynamicRegionManager");
                 return;
             }
         }
@@ -411,7 +412,8 @@ public class DynamicRegionManager {
                 Point coord = regionCoordOf(file);
                 if (coord != null) requestTileRefresh(coord);
             });
-        } catch (java.util.concurrent.RejectedExecutionException ignored) {
+        } catch (java.util.concurrent.RejectedExecutionException e) {
+            logManager.debug("Y-band cache task rejected (manager shutting down?): " + e.getMessage(), "DynamicRegionManager");
         }
     }
 
@@ -420,17 +422,26 @@ public class DynamicRegionManager {
      */
     private void scanAvailableRegions() {
         if (!regionDir.exists()) {
-            logManager.warn("区域目录不存在: " + regionDir.getAbsolutePath(), "DynamicRegionManager");
+            logManager.error("区域目录不存在（地图将无法加载）: " + regionDir.getAbsolutePath()
+                + " — 请确认 26.1+ dimensions/<ns>/<name>/region 或 legacy region/", "DynamicRegionManager");
+            return;
+        }
+
+        File[] mcaFiles = regionDir.listFiles((dir, name) -> name.endsWith(".mca"));
+        if (mcaFiles == null) {
+            logManager.error("无法列出 region 目录（权限/IO）: " + regionDir.getAbsolutePath(), "DynamicRegionManager");
+            return;
+        }
+        if (mcaFiles.length == 0) {
+            logManager.warn("region 目录为空（无 .mca）: " + regionDir.getAbsolutePath(), "DynamicRegionManager");
             return;
         }
         
-        File[] mcaFiles = regionDir.listFiles((dir, name) -> name.endsWith(".mca"));
-        if (mcaFiles == null) return;
-        
+        int placeholders = 0;
         for (File mcaFile : mcaFiles) {
-            // 跳过0字节空文件，避免渲染无意义区域
+            // 0 字节 = 未生成区块占位，正常；跳过且不向用户报错
             if (mcaFile.length() == 0) {
-                logManager.debug("跳过空区域文件: " + mcaFile.getName(), "DynamicRegionManager");
+                placeholders++;
                 continue;
             }
             String fileName = mcaFile.getName();
@@ -446,7 +457,14 @@ public class DynamicRegionManager {
             }
         }
         
-        logManager.info("扫描完成，发现 " + availableRegions.size() + " 个区域文件", "DynamicRegionManager");
+        if (availableRegions.isEmpty() && placeholders > 0) {
+            logManager.info("扫描完成：仅有 " + placeholders + " 个未生成区块占位（0 字节 .mca），暂无可加载区域",
+                "DynamicRegionManager");
+        } else {
+            logManager.info("扫描完成，发现 " + availableRegions.size() + " 个区域文件"
+                + (placeholders > 0 ? "（另有 " + placeholders + " 个未生成占位已跳过）" : ""),
+                "DynamicRegionManager");
+        }
     }
     
     /**
@@ -707,7 +725,8 @@ public class DynamicRegionManager {
                     }
                 }
             }, FAILED_RETRY_DELAY_MS, java.util.concurrent.TimeUnit.MILLISECONDS);
-        } catch (java.util.concurrent.RejectedExecutionException ignored) {
+        } catch (java.util.concurrent.RejectedExecutionException e) {
+            logManager.debug("Failed-region retry rejected (shutting down): " + e.getMessage(), "DynamicRegionManager");
         }
     }
 
@@ -723,7 +742,8 @@ public class DynamicRegionManager {
         try {
             // 内存重合成用换带池，不跟读盘加载抢那 3 个线程。
             bandExecutor.execute(() -> rerenderTileForBand(regionCoord, expected, false));
-        } catch (java.util.concurrent.RejectedExecutionException ignored) {
+        } catch (java.util.concurrent.RejectedExecutionException e) {
+            logManager.debug("Tile refresh rejected (shutting down): " + e.getMessage(), "DynamicRegionManager");
         }
     }
     

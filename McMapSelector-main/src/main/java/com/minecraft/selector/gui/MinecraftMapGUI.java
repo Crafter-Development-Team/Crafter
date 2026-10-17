@@ -17,6 +17,7 @@ import com.minecraft.selector.core.ResourceOptions;
 import com.minecraft.selector.nbt.NBTReader;
 import com.minecraft.selector.utils.FileUtils;
 import com.minecraft.selector.utils.LogManager;
+import com.minecraft.selector.utils.UserFeedback;
 import com.minecraft.selector.utils.WorldPathResolver;
 import com.minecraft.selector.core.DynamicRegionManager;
 
@@ -1124,7 +1125,16 @@ public class MinecraftMapGUI extends JFrame {
             public void onRegionLoaded(Point point,DynamicRegionManager.RegionTile tile) {onEdt(()->{if(request==viewGeneration&&manager==dynamicRegionManager) updateSelectionStats();});}
             public void onRegionUnloaded(Point point) {}
             public void onLoadingStarted(Point point) {}
-            public void onLoadingFailed(Point point,Exception error) {}
+            public void onLoadingFailed(Point point,Exception error) {
+                if(UserFeedback.isBenignCancel(error)) return;
+                onEdt(() -> {
+                    if(request!=viewGeneration || dynamicRegionManager!=manager) return;
+                    String msg="Region load failed: r."+point.x+"."+point.y+".mca — "+(error.getMessage()!=null?error.getMessage():error.getClass().getSimpleName());
+                    logManager.warn(msg,"MinecraftMapGUI");
+                    // Status bar: keep short; viewport progress also shows failed count.
+                    progressLabel.setText(msg);
+                });
+            }
             public void onViewportProgress(long revision,int settled,int total,int failed) {
                 onEdt(() -> {
                     if(request!=viewGeneration || dynamicRegionManager!=manager || revision!=manager.getProgressRevision()) return;
@@ -1474,8 +1484,7 @@ public class MinecraftMapGUI extends JFrame {
                     progressLabel.setText("Dimension switched: " + dim.getDisplayName());
                 });
             } catch (Exception ex) {
-                logManager.error("Failed to switch dimension", "MinecraftMapGUI", ex);
-                progressLabel.setText("Failed to switch dimension: " + ex.getMessage());
+                UserFeedback.error(this, progressLabel, "Failed to switch dimension: " + ex.getMessage(), ex);
             }
         } else {
             // 静态模式：提示切换后重新渲染
@@ -1530,7 +1539,12 @@ public class MinecraftMapGUI extends JFrame {
                 protected void done() {
                     if(request!=viewGeneration) return;
                     try {applyPreparedWorld(get());}
-                    catch(Exception error) {showErrorState("World loading failed: "+error.getMessage());}
+                    catch(Exception error) {
+                        if(UserFeedback.isBenignCancel(error)) return;
+                        String msg="World loading failed: "+(error.getMessage()!=null?error.getMessage():error.getClass().getSimpleName());
+                        showErrorState(msg);
+                        UserFeedback.error(MinecraftMapGUI.this, progressLabel, msg, error);
+                    }
                 }
             };
             worker.execute();
@@ -1585,18 +1599,41 @@ public class MinecraftMapGUI extends JFrame {
     }
     private PreparedWorld loadSaveData(long request,String world,ResourceOptions resources) {
         showLoadingState(request,"Parsing world dimensions...");
+        String invalid=WorldPathResolver.explainInvalidSave(world);
+        if(invalid!=null) throw new IllegalStateException(invalid);
         List<WorldPathResolver.DimensionInfo> dimensions=WorldPathResolver.discoverDimensions(world);
-        if(dimensions.isEmpty()) dimensions.add(new WorldPathResolver.DimensionInfo(
-            "minecraft:overworld","Overworld",WorldPathResolver.getOverworldRegionDir(world)));
+        WorldPathResolver.RegionResolve overworldResolve=WorldPathResolver.resolveRegionDir(world,"minecraft:overworld");
+        if(overworldResolve.usedLegacyFallback() && overworldResolve.getNote()!=null) {
+            logManager.info(overworldResolve.getNote(),"MinecraftMapGUI");
+            showLoadingState(request,overworldResolve.getNote());
+        }
+        if(dimensions.isEmpty()) {
+            if(!overworldResolve.isFound()) {
+                throw new IllegalStateException(overworldResolve.missingMessage("minecraft:overworld"));
+            }
+            if(!WorldPathResolver.hasMcaFiles(overworldResolve.getRegionDir())) {
+                throw new IllegalStateException("region 目录中没有 .mca 文件 / No .mca files in region: "
+                    +overworldResolve.getRegionDir().getAbsolutePath());
+            }
+            // 仅有 0 字节占位也算正常世界（区块未生成），照样挂上维度。
+            dimensions.add(new WorldPathResolver.DimensionInfo(
+                "minecraft:overworld","Overworld",overworldResolve.getRegionDir()));
+        }
         showLoadingState(request,"Extracting vanilla / mod / resource-pack colors...");
         BlockColors.Palette palette=BlockColors.loadPalette(world,resources,resourceProgress(request));
         resourceProgress(request).onProgress(0,0,"Reading player data and preparing the initial viewport...");
         File levelDat=new File(world,"level.dat");
         double[] player=levelDat.isFile()?readPlayerPos(levelDat.getAbsolutePath()):null;
-        if(player==null) logManager.warn("No player position; opening nearest available map region","MinecraftMapGUI");
+        if(player==null) {
+            logManager.warn("No player position; opening nearest available map region","MinecraftMapGUI");
+            UserFeedback.warn(this,progressLabel,"No player/spawn position in level.dat; opening nearest map region");
+        }
         WorldAnchors anchors=WorldAnchors.empty();
         try {if(levelDat.isFile()) anchors=WorldAnchors.read(new File(world));}
-        catch(Exception e) {logManager.warn("World anchor metadata unavailable: "+e.getMessage(),"MinecraftMapGUI");}
+        catch(Exception e) {
+            logManager.warn("World anchor metadata unavailable: "+e.getMessage(),"MinecraftMapGUI");
+            UserFeedback.warn(this,progressLabel,"World anchors unavailable: "+e.getMessage(),e);
+        }
         return new PreparedWorld(dimensions,palette,player,anchors);
     }
     private void applyPreparedWorld(PreparedWorld world) {
@@ -1721,7 +1758,7 @@ displayedTop=null;displayedBottom=null;sourceTop=null;sourceBottom=null;previewC
             }
             return null;
         } catch (Exception e) {
-            System.err.println("Error reading level.dat: " + e.getMessage());
+            logManager.warn("Error reading level.dat: " + e.getMessage(), "MinecraftMapGUI");
             return null;
         }
     }
@@ -1811,8 +1848,19 @@ displayedTop=null;displayedBottom=null;sourceTop=null;sourceBottom=null;previewC
                 renderMultipleMcaFiles(mcaFiles, centerRegionX - halfRange, centerRegionZ - halfRange, mcaRange);
             }
         } else {
+            final String detail;
+            if (!regionDir.exists()) {
+                WorldPathResolver.RegionResolve resolve = WorldPathResolver.resolveRegionDir(
+                    savePath, currentDimension != null ? currentDimension.getId() : "minecraft:overworld");
+                detail = resolve.isFound()
+                    ? String.format("No region files around player (center: r.%d.%d.mca) in %s", centerRegionX, centerRegionZ, regionDir.getAbsolutePath())
+                    : resolve.missingMessage(currentDimension != null ? currentDimension.getId() : "minecraft:overworld");
+            } else {
+                detail = String.format("No region files around player (center: r.%d.%d.mca) in %s",
+                    centerRegionX, centerRegionZ, regionDir.getAbsolutePath());
+            }
             SwingUtilities.invokeLater(() -> {
-                progressLabel.setText(String.format("No region files around player (center: r.%d.%d.mca)", centerRegionX, centerRegionZ));
+                UserFeedback.warn(MinecraftMapGUI.this, progressLabel, detail);
                 hideLoadingState();
             });
         }
@@ -2353,7 +2401,10 @@ displayedTop=null;displayedBottom=null;sourceTop=null;sourceBottom=null;previewC
                     // Apply both fitted ends atomically; do not truncate extended-world heights.
                     heightRangeSlider.setSelectedRange(r.min,r.max);
                     progressLabel.setText("Import Y fit: "+heightRangeSlider.getLowerValue()+"…"+heightRangeSlider.getUpperValue()+" ("+r.count+" cached samples; "+r.empty+" empty, "+r.missing+" missing samples; unloaded columns ignored)");
-                } catch(Exception e) {progressLabel.setText("Could not fit Import Y: "+e.getMessage());}
+                } catch(Exception e) {
+                    if(UserFeedback.isBenignCancel(e)) return;
+                    UserFeedback.warn(MinecraftMapGUI.this, progressLabel, "Could not fit Import Y: "+e.getMessage(), e);
+                }
             }
         }.execute();
     }
@@ -2523,7 +2574,14 @@ displayedTop=null;displayedBottom=null;sourceTop=null;sourceBottom=null;previewC
                     System.out.printf("Loaded region r.%d.%d.mca\n", regionX, regionZ);
                 }
             } catch (Exception throwable) {
+                if (UserFeedback.isBenignCancel(throwable)) return;
                 System.err.printf("Failed to load region r.%d.%d.mca: %s\n", regionX, regionZ, throwable.getMessage());
+                final String msg = String.format("Failed to load region r.%d.%d.mca: %s", regionX, regionZ,
+                    throwable.getMessage() != null ? throwable.getMessage() : throwable.getClass().getSimpleName());
+                SwingUtilities.invokeLater(() -> {
+                    if (requestGeneration != viewGeneration) return;
+                    UserFeedback.warn(MinecraftMapGUI.this, progressLabel, msg, throwable);
+                });
             }
         });
     }
@@ -2575,6 +2633,13 @@ displayedTop=null;displayedBottom=null;sourceTop=null;sourceBottom=null;previewC
         File worldDir = new File(worldPath);
         if (!worldDir.exists() || !worldDir.isDirectory()) {
             showErrorState("Invalid world path: " + worldPath);
+            UserFeedback.error(this, progressLabel, "Invalid world path: " + worldPath);
+            return;
+        }
+        String invalid = WorldPathResolver.explainInvalidSave(worldPath);
+        if (invalid != null) {
+            showErrorState(invalid);
+            UserFeedback.error(this, progressLabel, invalid);
             return;
         }
 
@@ -2603,7 +2668,12 @@ displayedTop=null;displayedBottom=null;sourceTop=null;sourceBottom=null;previewC
             protected void done() {
                 if(request!=viewGeneration) return;
                 try {applyPreparedWorld(get());}
-                catch(Exception error) {showErrorState("World loading failed: "+error.getMessage());}
+                catch(Exception error) {
+                    if(UserFeedback.isBenignCancel(error)) return;
+                    String msg="World loading failed: "+(error.getMessage()!=null?error.getMessage():error.getClass().getSimpleName());
+                    showErrorState(msg);
+                    UserFeedback.error(MinecraftMapGUI.this, progressLabel, msg, error);
+                }
             }
         };
         worker.execute();
@@ -2761,15 +2831,21 @@ displayedTop=null;displayedBottom=null;sourceTop=null;sourceBottom=null;previewC
                 // 扫描所有可用的区域文件
                 File regionDir = requestedRegionDir;
                 if (!regionDir.exists()) {
-                    logManager.error("Region dir does not exist: " + regionDir.getAbsolutePath(), "MinecraftMapGUI");
-                    return null;
+                    WorldPathResolver.RegionResolve resolve = WorldPathResolver.resolveRegionDir(
+                        savePath, currentDimension != null ? currentDimension.getId() : "minecraft:overworld");
+                    String msg = resolve.isFound()
+                        ? ("Region dir does not exist: " + regionDir.getAbsolutePath())
+                        : resolve.missingMessage(currentDimension != null ? currentDimension.getId() : "minecraft:overworld");
+                    logManager.error(msg, "MinecraftMapGUI");
+                    throw new IllegalStateException(msg);
                 }
-                
+
                 // 获取所有.mca文件
                 File[] mcaFiles = regionDir.listFiles((dir, name) -> name.endsWith(".mca"));
                 if (mcaFiles == null || mcaFiles.length == 0) {
-                    logManager.warn("No .mca region files found", "MinecraftMapGUI");
-                    return null;
+                    String msg = "region 目录为空（无 .mca）/ No .mca in: " + regionDir.getAbsolutePath();
+                    logManager.warn(msg, "MinecraftMapGUI");
+                    throw new IllegalStateException(msg);
                 }
                 
                 logManager.info("Found " + mcaFiles.length + " region files", "MinecraftMapGUI");
@@ -3249,7 +3325,10 @@ displayedTop=null;displayedBottom=null;sourceTop=null;sourceBottom=null;previewC
             protected void done() {try {get();progressLabel.setText("View exported: "+file);}catch(Exception e) {showFileError(e);}}
         }.execute();
     }
-    private void showFileError(Exception e) {JOptionPane.showMessageDialog(this,e.getMessage(),"Map selector",JOptionPane.ERROR_MESSAGE);}
+    private void showFileError(Exception e) {
+        if(UserFeedback.isBenignCancel(e)) return;
+        UserFeedback.error(this, progressLabel, e.getMessage()!=null?e.getMessage():e.getClass().getSimpleName(), e);
+    }
 
     private void queueSelectionCoverage() {
         if(selectionCoverageTimer==null) {selectionCoverageTimer=new javax.swing.Timer(180,e->refreshSelectionCoverage());selectionCoverageTimer.setRepeats(false);}selectionCoverageTimer.restart();
