@@ -8,6 +8,7 @@ import com.minecraft.selector.core.SelectionSeed;
 import com.minecraft.selector.core.ImportLod;
 import com.minecraft.selector.gui.SelectionMath;
 import com.minecraft.selector.gui.MinecraftMapGUI;
+import com.minecraft.selector.utils.WorldPathResolver;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
@@ -240,9 +241,10 @@ public class MinecraftMapSelector {
      * 将相邻的 region 聚合成簇，每簇渲染为一张合并大图
      */
     private static void renderWorld(File worldDir, String[] args, long overallStartTime) {
-        File regionDir = new File(worldDir, "region");
+        // 26.1+: dimensions/minecraft/overworld/region；旧布局: region/
+        File regionDir = WorldPathResolver.getOverworldRegionDir(worldDir.getAbsolutePath());
         if (!regionDir.isDirectory()) {
-            System.err.println("不是有效的存档目录（缺少 region 文件夹）: " + worldDir.getAbsolutePath());
+            System.err.println("不是有效的存档目录（找不到 region，含 26.1+ dimensions/.../region）: " + worldDir.getAbsolutePath());
             return;
         }
 

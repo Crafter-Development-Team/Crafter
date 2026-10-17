@@ -1689,39 +1689,54 @@ displayedTop=null;displayedBottom=null;sourceTop=null;sourceBottom=null;previewC
     }
 
     /**
-     * 读取level.dat中的玩家位置
+     * 读取玩家(或出生点)位置。兼容旧 Data.Player / SpawnX·Y·Z，以及
+     * 26.1+ singleplayer_uuid→players/data 与 spawn{pos} 复合标签。
      */
     private double[] readPlayerPos(String levelDatPath) {
         try {
             NBTReader.NBTCompound nbtFile = NBTReader.readFromFile(levelDatPath);
-
-            // 尝试获取玩家位置数据
-            try {
-                // 单人模式
-                NBTReader.NBTCompound data = nbtFile.getCompound("Data");
-                NBTReader.NBTCompound player = data.getCompound("Player");
-                NBTReader.NBTList pos = player.getList("Pos");
-
-                double x = ((NBTReader.NBTDouble) pos.get(0)).getValue();
-                double y = ((NBTReader.NBTDouble) pos.get(1)).getValue();
-                double z = ((NBTReader.NBTDouble) pos.get(2)).getValue();
-
-                return new double[]{x, y, z};
-            } catch (Exception e) {
-                // 多人模式或其他格式
-                try {
-                    NBTReader.NBTCompound data = nbtFile.getCompound("Data");
-                    int spawnX = data.getInt("SpawnX");
-                    int spawnY = data.getInt("SpawnY");
-                    int spawnZ = data.getInt("SpawnZ");
-
-                    return new double[]{spawnX, spawnY, spawnZ};
-                } catch (Exception e2) {
-                    return null;
+            NBTReader.NBTCompound data = nbtFile.get("Data") instanceof NBTReader.NBTCompound
+                ? nbtFile.getCompound("Data") : nbtFile;
+            double[] fromPlayer = xyzFromPlayerCompound(
+                data.get("Player") instanceof NBTReader.NBTCompound ? data.getCompound("Player") : null);
+            if (fromPlayer != null) return fromPlayer;
+            File world = new File(levelDatPath).getParentFile();
+            if (world != null) {
+                WorldAnchors anchors = WorldAnchors.read(world);
+                if (anchors.player != null)
+                    return new double[]{anchors.player.xz.x + 0.5, 64, anchors.player.xz.y + 0.5};
+            }
+            if (data.get("spawn") instanceof NBTReader.NBTCompound) {
+                NBTReader.NBTCompound spawn = data.getCompound("spawn");
+                if (spawn.get("pos") instanceof NBTReader.NBTIntArray) {
+                    int[] pos = ((NBTReader.NBTIntArray) spawn.get("pos")).getValue();
+                    if (pos != null && pos.length >= 3)
+                        return new double[]{pos[0], pos.length > 1 ? pos[1] : 64, pos[2]};
                 }
             }
+            if (data.get("SpawnX") instanceof NBTReader.NBTInt
+                && data.get("SpawnZ") instanceof NBTReader.NBTInt) {
+                int y = data.get("SpawnY") instanceof NBTReader.NBTInt ? data.getInt("SpawnY") : 64;
+                return new double[]{data.getInt("SpawnX"), y, data.getInt("SpawnZ")};
+            }
+            return null;
         } catch (Exception e) {
             System.err.println("Error reading level.dat: " + e.getMessage());
+            return null;
+        }
+    }
+
+    private static double[] xyzFromPlayerCompound(NBTReader.NBTCompound player) {
+        if (player == null || !(player.get("Pos") instanceof NBTReader.NBTList)) return null;
+        try {
+            NBTReader.NBTList pos = player.getList("Pos");
+            if (pos.size() < 3) return null;
+            double x = ((Number) pos.get(0).getValue()).doubleValue();
+            double y = ((Number) pos.get(1).getValue()).doubleValue();
+            double z = ((Number) pos.get(2).getValue()).doubleValue();
+            if (!Double.isFinite(x) || !Double.isFinite(y) || !Double.isFinite(z)) return null;
+            return new double[]{x, y, z};
+        } catch (Exception e) {
             return null;
         }
     }

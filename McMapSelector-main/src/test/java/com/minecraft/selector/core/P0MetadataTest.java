@@ -67,4 +67,38 @@ class P0MetadataTest {
         try {RenderedMap rendered=(RenderedMap)renderer.renderToPng(new MapRenderer.BlockInfo[][]{{block,MapRenderer.EMPTY}},1);assertEquals(80,rendered.getHeightAt(0,0));assertTrue(rendered.isLoadedAt(0,0));assertFalse(rendered.isLoadedAt(1,0));}
         finally {renderer.shutdown();}
     }
+
+    @Test void modern26SpawnAndSingleplayerUuidPlayerFile() throws Exception {
+        // UUID ints for 00112233-4455-6677-8899-aabbccddeeff
+        int[] uuid=new int[]{0x00112233,0x44556677,0x8899aabb,(int)0xccddeeff};
+        assertEquals("00112233-4455-6677-8899-aabbccddeeff",WorldAnchors.uuidToDashed(uuid));
+        Path players=directory.resolve("players/data");Files.createDirectories(players);
+        try(DataOutputStream out=new DataOutputStream(new GZIPOutputStream(Files.newOutputStream(players.resolve("00112233-4455-6677-8899-aabbccddeeff.dat"))))) {
+            out.writeByte(10);out.writeUTF("");
+            out.writeByte(9);out.writeUTF("Pos");out.writeByte(6);out.writeInt(3);out.writeDouble(10.2);out.writeDouble(70);out.writeDouble(-3.8);
+            out.writeByte(8);out.writeUTF("Dimension");out.writeUTF("minecraft:overworld");out.writeByte(0);
+        }
+        try(DataOutputStream out=new DataOutputStream(new GZIPOutputStream(Files.newOutputStream(directory.resolve("level.dat"))))) {
+            out.writeByte(10);out.writeUTF("");out.writeByte(10);out.writeUTF("Data");
+            out.writeByte(8);out.writeUTF("LevelName");out.writeUTF("Snap26");
+            out.writeByte(3);out.writeUTF("DataVersion");out.writeInt(5000);
+            out.writeByte(10);out.writeUTF("spawn");
+            out.writeByte(11);out.writeUTF("pos");out.writeInt(3);out.writeInt(100);out.writeInt(64);out.writeInt(-50);
+            out.writeByte(8);out.writeUTF("dimension");out.writeUTF("minecraft:overworld");out.writeByte(0);
+            out.writeByte(11);out.writeUTF("singleplayer_uuid");out.writeInt(4);
+            for(int part:uuid) out.writeInt(part);
+            out.writeByte(0);out.writeByte(0);
+        }
+        WorldAnchors a=WorldAnchors.read(directory.toFile());
+        assertEquals(100,a.spawn.xz.x);assertEquals(-50,a.spawn.xz.y);assertEquals("minecraft:overworld",a.spawn.dimension);
+        assertEquals(10,a.player.xz.x);assertEquals(-4,a.player.xz.y);assertEquals("minecraft:overworld",a.player.dimension);
+        assertEquals("Snap26",a.worldName);assertEquals(5000,a.dataVersion);
+    }
+
+    @Test void dropFilesRecognizesDimensionsFolderWithoutTopLevelRegion() throws Exception {
+        Path world=directory.resolve("mac26");Files.createDirectories(world.resolve("dimensions/minecraft/overworld/region"));
+        Files.write(world.resolve("level.dat"),new byte[]{1});
+        Files.write(world.resolve("dimensions/minecraft/overworld/region/r.0.0.mca"),new byte[]{1});
+        assertEquals(com.minecraft.selector.gui.DropFiles.Kind.WORLD,com.minecraft.selector.gui.DropFiles.classify(world.toFile()));
+    }
 }
