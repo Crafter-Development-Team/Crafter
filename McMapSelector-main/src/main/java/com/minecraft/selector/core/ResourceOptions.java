@@ -108,7 +108,7 @@ public final class ResourceOptions {
                 catch(Exception e) {System.err.println("Cannot probe level.dat version: "+e.getMessage());}break;
             }
         }
-        File mca=input.isFile() && input.getName().endsWith(".mca")?input:null;
+        File mca=input.isFile() && input.getName().endsWith(".mca") && input.length()>0?input:null;
         if(mca==null) {
             File region=null;
             // Walk up to world root (level.dat) then resolve 26.1+/legacy region dir.
@@ -122,11 +122,9 @@ public final class ResourceOptions {
                 region=new File(directory,"region");
                 if(!region.isDirectory() && directory.getName().equals("region")) region=directory;
             }
+            // Only probe non-empty .mca; 0-byte placeholders are normal and have no chunk data.
             File first=WorldPathResolver.findFirstMca(region);
             if(first!=null) mca=first;
-            else {
-                List<String> files=archives(region,".mca",null);if(!files.isEmpty()) mca=new File(files.get(0));
-            }
         }
         if(mca!=null) try {
             com.minecraft.selector.region.Region region=com.minecraft.selector.region.Region.fromFile(mca.toString());

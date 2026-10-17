@@ -48,7 +48,14 @@ public class MinecraftMapSelector {
         catch(IllegalArgumentException e) {System.err.println("Ignoring invalid import LOD seed: "+e.getMessage());}
         final ImportLod initialImportLod=parsedImportLod;
         args=ImportLod.withoutFlags(args);
-        ResourceOptions.setLaunch(ResourceOptions.parse(args));
+        try {
+            ResourceOptions.setLaunch(ResourceOptions.parse(args));
+        } catch (IllegalArgumentException e) {
+            // Bad --jar-path / mods (common when Blender resolves a stale Windows path)
+            // must not abort before the Swing GUI is scheduled — that looks like "click does nothing".
+            System.err.println("Ignoring invalid resource options: " + e.getMessage());
+            ResourceOptions.setLaunch(new ResourceOptions());
+        }
         args=ResourceOptions.withoutResourceFlags(args);
 
         // 检查是否是Blender集成模式
@@ -125,7 +132,8 @@ public class MinecraftMapSelector {
             });
         } else if (args.length >= 1 && !args[0].startsWith("--")) {
             // 有参数且不是选项，运行命令行模式
-            runCommandLine(args);
+            int code = runCommandLine(args);
+            if (code != 0) System.exit(code);
         } else {
             showUsage();
         }
@@ -138,18 +146,29 @@ public class MinecraftMapSelector {
     /**
      * 运行命令行模式
      */
-    private static void runCommandLine(String[] args) {
+    private static int runCommandLine(String[] args) {
         long overallStartTime = System.currentTimeMillis();
 
         String mcaFilePath = args[0];
-        BlockColors.initializeColorsFromSavePath(mcaFilePath,ResourceOptions.launch());
-
-        // 检查是否为存档目录
         File inputFile = new File(mcaFilePath);
         if (inputFile.isDirectory()) {
-            renderWorld(inputFile, args, overallStartTime);
-            return;
+            String invalid = WorldPathResolver.explainInvalidSave(mcaFilePath);
+            if (invalid != null) {
+                System.err.println(invalid);
+                return 1;
+            }
+            BlockColors.initializeColorsFromSavePath(mcaFilePath,ResourceOptions.launch());
+            return renderWorld(inputFile, args, overallStartTime);
         }
+        if (!inputFile.isFile()) {
+            System.err.println("输入路径不存在 / Path not found: " + mcaFilePath);
+            return 1;
+        }
+        if (inputFile.length() == 0 && mcaFilePath.toLowerCase(Locale.ROOT).endsWith(".mca")) {
+            System.out.println("该 .mca 为 0 字节未生成区块占位，无内容可渲染 — 这是正常情况。");
+            return 0;
+        }
+        BlockColors.initializeColorsFromSavePath(mcaFilePath,ResourceOptions.launch());
 
         // 生成默认输出文件名（基于输入文件名和时间戳）
         String defaultBaseName = generateDefaultOutputName(mcaFilePath);
@@ -225,43 +244,53 @@ public class MinecraftMapSelector {
                 System.out.println("\n所有处理完成!");
                 System.out.println("总耗时: " + (totalTime / 1000.0) + "秒");
             } else {
-                System.err.println("区域文件读取失败");
+                System.err.println("区域文件读取失败 / Failed to read region file: " + mcaFilePath);
+                return 1;
             }
             
         } catch (Exception e) {
             System.err.println("处理过程中出错: " + e.getMessage());
             e.printStackTrace();
+            return 1;
         } finally {
             renderer.shutdown();
         }
+        return 0;
     }
     
     /**
      * 渲染整个存档目录（world/region/*.mca）
      * 将相邻的 region 聚合成簇，每簇渲染为一张合并大图
+     * @return 0 on success, non-zero on failure
      */
-    private static void renderWorld(File worldDir, String[] args, long overallStartTime) {
+    private static int renderWorld(File worldDir, String[] args, long overallStartTime) {
         // 26.1+: dimensions/minecraft/overworld/region；旧布局: region/
-        File regionDir = WorldPathResolver.getOverworldRegionDir(worldDir.getAbsolutePath());
-        if (!regionDir.isDirectory()) {
-            System.err.println("不是有效的存档目录（找不到 region，含 26.1+ dimensions/.../region）: " + worldDir.getAbsolutePath());
-            return;
+        WorldPathResolver.RegionResolve resolve = WorldPathResolver.resolveRegionDir(worldDir.getAbsolutePath(), "minecraft:overworld");
+        if (resolve.usedLegacyFallback() && resolve.getNote() != null) {
+            System.out.println(resolve.getNote());
+        }
+        File regionDir = resolve.getRegionDir();
+        if (!resolve.isFound() || !regionDir.isDirectory()) {
+            System.err.println(resolve.missingMessage("minecraft:overworld"));
+            System.err.println("存档: " + worldDir.getAbsolutePath());
+            return 1;
         }
 
         File[] mcaFiles = regionDir.listFiles((dir, name) -> name.toLowerCase().endsWith(".mca"));
         if (mcaFiles == null || mcaFiles.length == 0) {
-            System.err.println("region 文件夹中没有 .mca 文件: " + regionDir.getAbsolutePath());
-            return;
+            System.err.println("region 文件夹中没有 .mca 文件 / No .mca in region: " + regionDir.getAbsolutePath());
+            return 1;
         }
 
         int maxWorkers = args.length > 1 ? Integer.parseInt(args[1]) : Math.min(Runtime.getRuntime().availableProcessors(), 8);
         int sampleInterval = args.length > 2 ? Integer.parseInt(args[2]) : 1;
 
-        // 解析所有 mca 文件的 region 坐标，跳过 0 字节空文件
+        // 解析所有 mca 文件的 region 坐标；0 字节是未生成区块占位，静默跳过（不是错误）
         List<RegionFile> regionFiles = new ArrayList<>();
+        int placeholderCount = 0;
         for (File mca : mcaFiles) {
             if (mca.length() == 0) {
-                System.out.println("跳过空文件: " + mca.getName());
+                placeholderCount++;
                 continue;
             }
             int[] coord = parseRegionCoord(mca.getName());
@@ -273,8 +302,18 @@ public class MinecraftMapSelector {
         }
 
         if (regionFiles.isEmpty()) {
-            System.err.println("没有可渲染的 region 文件");
-            return;
+            // 有 .mca 文件名但全是 0 字节占位：正常未探索世界，不报错。
+            if (placeholderCount > 0) {
+                System.out.println("region 内仅有未生成区块占位（" + placeholderCount
+                    + " 个 0 字节 .mca），无内容可渲染 — 这是正常情况。");
+                return 0;
+            }
+            System.err.println("region 文件夹中没有可渲染的 .mca 文件 / No renderable .mca in region: "
+                + regionDir.getAbsolutePath());
+            return 1;
+        }
+        if (placeholderCount > 0) {
+            System.out.println("已跳过 " + placeholderCount + " 个未生成区块占位（0 字节 .mca）");
         }
 
         // 按邻接关系聚类（曼哈顿距离 1 视为相邻）
@@ -299,6 +338,7 @@ public class MinecraftMapSelector {
 
         long totalTime = System.currentTimeMillis() - overallStartTime;
         System.out.println("\n所有处理完成! 总耗时: " + (totalTime / 1000.0) + "秒");
+        return 0;
     }
 
     /**

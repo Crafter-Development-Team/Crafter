@@ -121,6 +121,18 @@ def find_java_path(prefs):
                     return java_path
     return None
 
+
+def resolve_gui_java(java_path):
+    """On Windows prefer javaw.exe next to java.exe so Swing has no console window."""
+    if os.name != "nt" or not java_path:
+        return java_path
+    directory, name = os.path.split(java_path)
+    if name.lower() == "java.exe":
+        javaw = os.path.join(directory, "javaw.exe")
+        if os.path.isfile(javaw):
+            return javaw
+    return java_path
+
 # 地图选择器操作符
 class VIEW3D_OT_CrafterMapSelector(bpy.types.Operator):
     bl_label = "打开选择器"
@@ -182,7 +194,7 @@ class VIEW3D_OT_CrafterMapSelector(bpy.types.Operator):
 
         # 启动地图选择器
         try:
-            # 检测Java路径
+            # 检测Java路径（探测用 java.exe；GUI 启动优先 javaw.exe）
             java_path = find_java_path(addon_prefs)
             if not java_path:
                 shutil.rmtree(temp_dir, ignore_errors=True)
@@ -191,7 +203,8 @@ class VIEW3D_OT_CrafterMapSelector(bpy.types.Operator):
                 return {'CANCELLED'}
             if addon_prefs.Java_Path != java_path:
                 addon_prefs.Java_Path = java_path
-            self.report({'INFO'}, f"使用Java: {java_path}")
+            gui_java = resolve_gui_java(java_path)
+            self.report({'INFO'}, f"使用Java: {gui_java}")
 
             # 获取Y坐标范围
             xyz1 = getattr(addon_prefs, 'XYZ_1', (0, 0, 0))
@@ -207,8 +220,10 @@ class VIEW3D_OT_CrafterMapSelector(bpy.types.Operator):
                 max_y = 255
             
             # 构建命令
+            # normpath may yield backslashes on Windows; Java File accepts them on Windows.
+            # Keep list-form Popen (no shell) so spaces in paths are safe.
             cmd = [
-                java_path, "-jar", jar_path,
+                gui_java, "-jar", jar_path,
                 "--world-path", worldPath,
                 "--output-file", coord_file,
                 "--min-y", str(min_y),
@@ -229,9 +244,20 @@ class VIEW3D_OT_CrafterMapSelector(bpy.types.Operator):
             
             # A file log avoids pipe deadlock and unbounded communicate() buffers.
             log_path = os.path.join(temp_dir, "selector.log")
+            persistent_log = os.path.join(tempfile.gettempdir(), "crafter_map_selector_last.log")
+            popen_kwargs = {
+                "stdout": None,  # set below
+                "stderr": subprocess.STDOUT,
+                "cwd": os.path.dirname(jar_path),
+            }
+            if os.name == "nt":
+                # Hide console when falling back to java.exe; javaw already has none.
+                popen_kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
             with open(log_path, "wb") as log:
-                process = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT,
-                                           cwd=os.path.dirname(jar_path))
+                popen_kwargs["stdout"] = log
+                process = subprocess.Popen(cmd, **popen_kwargs)
+            print(f"Map selector PID={process.pid} log={log_path}")
+            push_log(f"地图选择器已启动 PID={process.pid}", "INFO")
 
             def poll_selector():
                 if process.poll() is None:
@@ -251,11 +277,23 @@ class VIEW3D_OT_CrafterMapSelector(bpy.types.Operator):
                                     area.tag_redraw()
                         push_log("地图选择坐标已更新", "INFO")
                     elif process.returncode != 0:
-                        with open(log_path, "rb") as log:
-                            log.seek(0, os.SEEK_END)
-                            log.seek(max(0, log.tell() - 8192))
-                            detail = log.read().decode("utf-8", errors="replace")
-                        push_log("地图选择器失败: " + detail, "ERROR")
+                        detail = ""
+                        try:
+                            with open(log_path, "rb") as log:
+                                log.seek(0, os.SEEK_END)
+                                log.seek(max(0, log.tell() - 8192))
+                                detail = log.read().decode("utf-8", errors="replace")
+                            shutil.copy2(log_path, persistent_log)
+                        except OSError:
+                            pass
+                        msg = f"地图选择器失败 (exit={process.returncode}). 日志: {persistent_log}"
+                        if detail.strip():
+                            msg += "\n" + detail.strip()[-1500:]
+                        push_log(msg, "ERROR")
+                        print(msg)
+                    elif process.returncode == 0 and not os.path.isfile(coord_file):
+                        # User closed without confirming — not an error.
+                        push_log("地图选择器已关闭（未回传坐标）", "INFO")
                 except Exception as error:
                     push_log("地图坐标回传失败: " + str(error), "ERROR")
                 finally:
