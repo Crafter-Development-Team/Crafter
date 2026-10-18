@@ -317,11 +317,17 @@ def build_entities(store, frame_times, tex: TextureCache, *, box=None, mc_space=
         layer, tex_rel = spec
         img = None
         slim = False
+        from .entities import CAT_VARIANTS, VILLAGER_TYPES, VILLAGER_PROFESSIONS, DYE_TEXTURE_DIFFUSE
+        t0 = tr.spawn_t
         if tr.type_name == "player":
             prof = store.profiles.get(tr.uuid)
             img = tex.skin(prof.skin_url if prof else None)
             if img:
                 img = upgrade_legacy_skin(img)
+        elif tr.type_name == "cat":
+            vid = tr.cat_variant_id(t0)
+            if vid is not None and 0 <= vid < len(CAT_VARIANTS):
+                tex_rel = f"entity/cat/{CAT_VARIANTS[vid]}.png"
         img = img or tex.path(tex_rel)
         if not img:
             continue
@@ -337,16 +343,46 @@ def build_entities(store, frame_times, tex: TextureCache, *, box=None, mc_space=
         bpy.context.scene.collection.objects.link(model)
         model.parent = flip
         model.location = (0, -1.501, 0)
-        mat = _material(f"ent_{Path(img).stem}", img)
+        # AgeableListModel baby: body scale 1/2, bodyYOffset 24px (Quadruped/Sheep defaults)
+        if tr.baby(t0) and tr.type_name in ("cat", "sheep", "cow", "pig", "chicken", "wolf"):
+            model.scale = (0.5, 0.5, 0.5)
+            model.location = (0, -1.501 + 24.0 / 16.0 * 0.5, 0)
+        mat = _material(f"ent_{Path(img).stem}_{tr.eid}", img)
         parts = build_layer(layer, mat, model, prefix)
-        for extra_layer, extra_tex in MOB_EXTRA.get(tr.type_name, []):
+        extras = list(MOB_EXTRA.get(tr.type_name, []))
+        if tr.type_name == "villager":
+            vd = tr.villager_data(t0)
+            vtype = VILLAGER_TYPES[vd[0]] if vd and 0 <= vd[0] < len(VILLAGER_TYPES) else "plains"
+            vprof = VILLAGER_PROFESSIONS[vd[1]] if vd and 0 <= vd[1] < len(VILLAGER_PROFESSIONS) else "none"
+            extras = [("villager#main", f"entity/villager/type/{vtype}.png")]
+            if vprof != "none":
+                extras.append(("villager#main", f"entity/villager/profession/{vprof}.png"))
+        fur_objs = []
+        for extra_layer, extra_tex in extras:
             p2 = tex.path(extra_tex)
-            if p2:
-                # Same layer key => identical cubes. Separate them so a transparent
-                # overlay (villager head on plains.png) is not coplanar with the base.
-                shell = _OVERLAY_INFLATE if extra_layer == layer else 0.0
-                build_layer(extra_layer, _material(f"ent_{Path(p2).stem}", p2), model, prefix + "_x",
-                            attach_to=parts, inflate=shell)
+            if not p2:
+                continue
+            shell = _OVERLAY_INFLATE if extra_layer == layer else 0.0
+            tint = None
+            mat_name = f"ent_{Path(p2).stem}_{tr.eid}"
+            if tr.type_name == "sheep" and "sheep_fur" in extra_tex:
+                color = tr.sheep_color(t0)
+                if 0 <= color < len(DYE_TEXTURE_DIFFUSE):
+                    tint = DYE_TEXTURE_DIFFUSE[color]
+                mat_name = f"ent_sheep_fur_{tr.eid}_{color}"
+            built = build_layer(extra_layer, _material(mat_name, p2, tint), model, prefix + "_x",
+                                attach_to=parts, inflate=shell)
+            if tr.type_name == "sheep" and "sheep_fur" in extra_tex:
+                fur_objs = list(built.values())
+                if tr.sheep_sheared(t0):
+                    for ob in fur_objs:
+                        ob.hide_render = True
+                        ob.hide_viewport = True
+        # Player skin-layer hat (zombie#main only has hat among overlay parts)
+        if tr.type_name == "player" and "hat" in parts:
+            if not (tr.player_skin_parts(t0) & 0x40):
+                parts["hat"].hide_render = True
+                parts["hat"].hide_viewport = True
         # --- per-frame animation ---
         locs, rots, head_r, limb = [], [], [], []
         walk_pos, last = 0.0, None
@@ -367,6 +403,7 @@ def build_entities(store, frame_times, tex: TextureCache, *, box=None, mc_space=
             last = k
             limb.append((walk_pos, speed))
             alive = t >= tr.spawn_t and (tr.remove_t is None or t < tr.remove_t)
+            alive = alive and not tr.invisible(t)
             vis.append((f, alive))
         bake(root, "location", frames, locs)
         bake(root, "rotation_euler", frames, rots)
