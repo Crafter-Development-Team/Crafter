@@ -96,7 +96,8 @@ def apply_replay_camera(info: dict, *, fps: int = 30, fov_degrees: float = 70.0)
     return apply_camera_timeline(tls[0], fps=fps, fov_degrees=fov_degrees)
 
 
-def write_time_varying_worlds(info: dict, base_dir: str, box=None, min_t: int = 0, quantum_ms: int = 500):
+def write_time_varying_worlds(info: dict, base_dir: str, box=None, min_t: int = 0, quantum_ms: int = 500,
+                              quantize=None):
     """Split the reconstructed world into a static base + small per-interval block worlds.
 
     Changed positions (block_change / multi_block_change after load) are cleared to air in
@@ -104,6 +105,7 @@ def write_time_varying_worlds(info: dict, base_dir: str, box=None, min_t: int = 
     the blocks that are present during that interval, so WorldImporter meshes them with real
     models/textures and Blender toggles their visibility over time.
     box = (x1, y1, z1, x2, y2, z2) inclusive, optional filter.
+    quantize(t) -> key time (or None = never / until the end); default rounds to quantum_ms.
     Returns (base_world_dir, [ {world, t_from, t_to, box} ... ]).
     """
     from .chunks import ChunkStore, NUM_SECTIONS, BLOCK_VOLUME, BIOME_VOLUME
@@ -125,12 +127,15 @@ def write_time_varying_worlds(info: dict, base_dir: str, box=None, min_t: int = 
     for p, st in final_backup.items():
         store.set_block(*p, st)
     groups: dict = {}
-    q = lambda t: None if t is None else (0 if t == 0 else max(1, int(round(t / quantum_ms)) * quantum_ms))
+    q = quantize or (lambda t: None if t is None else (0 if t == 0 else max(1, int(round(t / quantum_ms)) * quantum_ms)))
     for p, v in segs.items():
         for state, t0, t1 in v:
             if state == 0:
                 continue
-            groups.setdefault((q(t0), q(t1)), []).append((p, state))
+            k0, k1 = q(t0), q(t1)
+            if k0 is None or (k1 is not None and k1 <= k0):
+                continue  # never visible in the rendered range
+            groups.setdefault((k0, k1), []).append((p, state))
     out = []
     for gi, ((t0, t1), blocks) in enumerate(sorted(groups.items(), key=lambda kv: kv[0][0])):
         mini = ChunkStore()
@@ -148,7 +153,32 @@ def write_time_varying_worlds(info: dict, base_dir: str, box=None, min_t: int = 
     return base, out
 
 
-def prepare_replay_world(mcpr_path: str, box, work_root: str | None = None, focus=None, focus_radius: float = 0):
+def frame_quantizer(info: dict, fps: int = 30, max_groups: int = 96):
+    """Snap block-change times to the video frame where they first become visible
+    (first frame whose replay time >= t, like ReplayMod's renderer), so an edit never shows
+    early/late by up to half a quantum. Returns None (use the coarse default) when that would
+    create more than max_groups block worlds."""
+    from bisect import bisect_left
+    from .scene_builder import frame_times
+    ft = frame_times(info, fps)
+    times = [t for _f, t in ft]
+    if any(b < a for a, b in zip(times, times[1:])):
+        return None  # time path goes backwards: frame snapping is ambiguous
+
+    def q(t):
+        if t is None:
+            return None
+        if t <= times[0]:
+            return 0
+        i = bisect_left(times, t)
+        return times[i] if i < len(times) else None
+
+    keys = {(q(t0), q(t1)) for v in (info.get("block_segments") or {}).values() for s, t0, t1 in v if s}
+    return q if len(keys) <= max_groups else None
+
+
+def prepare_replay_world(mcpr_path: str, box, work_root: str | None = None, focus=None, focus_radius: float = 0,
+                         fps: int = 30):
     """Full replay preparation used by Crafter: parse, split static/time-varying, return info.
     info['world'] = base Anvil world; info['block_groups'] = interval mini worlds."""
     if work_root is None:
@@ -169,7 +199,7 @@ def prepare_replay_world(mcpr_path: str, box, work_root: str | None = None, focu
         fx, fy, fz = focus
         info["block_segments"] = {p: v for p, v in segs.items()
                                   if (p[0] - fx) ** 2 + (p[1] - fy) ** 2 + (p[2] - fz) ** 2 <= focus_radius ** 2}
-    base, groups = write_time_varying_worlds(info, work_root, box=box)
+    base, groups = write_time_varying_worlds(info, work_root, box=box, quantize=frame_quantizer(info, fps))
     info["final_world"] = world
     info["world"] = base
     info["block_groups"] = groups
