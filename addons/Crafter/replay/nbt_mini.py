@@ -18,7 +18,17 @@ class Int(int, Base): tag_id = 3
 class Long(int, Base): tag_id = 4
 class Float(float, Base): tag_id = 5
 class Double(float, Base): tag_id = 6
-class ByteArray(list, Base): tag_id = 7
+class ByteArray(list, Base):
+    tag_id = 7
+
+    @classmethod
+    def from_bytes(cls, data: bytes):
+        """Tag whose payload is already raw bytes (avoids a 2048-int Python list)."""
+        obj = cls()
+        obj._raw = bytes(data)
+        return obj
+
+
 class String(str, Base): tag_id = 8
 class IntArray(list, Base): tag_id = 11
 class LongArray(list, Base): tag_id = 12
@@ -67,7 +77,10 @@ def _w(out: bytearray, tid: int, v) -> None:
         b = str(v).encode("utf-8")
         out += struct.pack(">H", len(b)) + b
     elif tid == 7:
-        out += struct.pack(">i", len(v)) + bytes((x & 0xFF) for x in v)
+        raw = getattr(v, "_raw", None)
+        if raw is None:
+            raw = bytes(x & 0xFF for x in v)
+        out += struct.pack(">i", len(raw)) + raw
     elif tid == 11:
         out += struct.pack(f">i{len(v)}i", len(v), *v)
     elif tid == 12:

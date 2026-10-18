@@ -13,10 +13,12 @@ PalettedContainer:
 """
 from __future__ import annotations
 
+import array
 import json
 import math
 import struct
 import zlib
+from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -25,6 +27,7 @@ from .varint import read_varint, write_varint
 
 # 1.21.1 overworld
 MIN_SECTION_Y = -4
+MIN_Y = -64  # heightmap stored value = top_block_y - MIN_Y + 1 (0 if the column has none)
 NUM_SECTIONS = 24  # 384 / 16
 BLOCK_VOLUME = 4096
 BIOME_VOLUME = 64
@@ -35,6 +38,63 @@ BLOCK_CHANGE_ID = 0x09
 MULTI_BLOCK_CHANGE_ID = 0x49
 UNLOAD_CHUNK_ID = 0x21
 DATA_VERSION = 3955
+# 9 bits covers world height 384; 64//9 = 7 entries per long, no spanning → 37 longs.
+HEIGHTMAP_BITS = 9
+HEIGHTMAP_LONGS = 37
+HEIGHTMAP_NAMES = (
+    "MOTION_BLOCKING",
+    "MOTION_BLOCKING_NO_LEAVES",
+    "OCEAN_FLOOR",
+    "WORLD_SURFACE",
+)
+# Per-state flags. Approximates Java Heightmap predicates:
+#   WORLD_SURFACE = not air; OCEAN_FLOOR = blocksMotion (legacy solid);
+#   MOTION_BLOCKING = blocksMotion or has a fluid; NO_LEAVES drops *_leaves.
+F_AIR = 1
+F_SOLID = 2
+F_FLUID = 4
+F_LEAVES = 8
+_NO_TOP = -1_000_000
+
+# Non-motion-blocking blocks (no legacy solid). Fluids / waterlogged still count
+# for MOTION_BLOCKING via F_FLUID. Not a collision-box test: banners and ladders
+# stay solid; cobwebs, bamboo shoots, and snow layer 1 do not.
+_NON_SOLID_EXACT = frozenset({
+    "short_grass", "tall_grass", "fern", "large_fern", "dead_bush", "sugar_cane",
+    "bamboo", "vine", "glow_lichen", "sculk_vein", "hanging_roots", "cobweb",
+    "seagrass", "tall_seagrass", "kelp", "kelp_plant",
+    "nether_sprouts", "crimson_roots", "warped_roots",
+    "crimson_fungus", "warped_fungus", "brown_mushroom", "red_mushroom",
+    "twisting_vines", "twisting_vines_plant", "weeping_vines", "weeping_vines_plant",
+    "cave_vines", "cave_vines_plant", "small_dripleaf", "frogspawn", "spore_blossom",
+    "mangrove_propagule",
+    "dandelion", "poppy", "blue_orchid", "allium", "azure_bluet",
+    "red_tulip", "orange_tulip", "white_tulip", "pink_tulip",
+    "oxeye_daisy", "cornflower", "lily_of_the_valley", "wither_rose",
+    "torchflower", "sunflower", "lilac", "rose_bush", "peony",
+    "pitcher_plant", "pink_petals", "lily_pad",
+    "wheat", "carrots", "potatoes", "beetroots",
+    "melon_stem", "pumpkin_stem", "attached_melon_stem", "attached_pumpkin_stem",
+    "nether_wart", "cocoa", "sweet_berry_bush", "torchflower_crop", "pitcher_crop",
+    "fire", "soul_fire", "scaffolding", "light", "structure_void", "sea_pickle",
+    "redstone_wire", "repeater", "comparator", "lever",
+    "tripwire", "tripwire_hook", "string", "rail",
+    "torch", "wall_torch",
+    "nether_portal", "end_portal", "end_gateway",
+})
+_NON_SOLID_SUFFIXES = (
+    "_sapling", "_button", "_pressure_plate", "_sign", "_torch", "_rail",
+    "_carpet", "_coral_fan", "_coral_wall_fan",
+)
+_PURE_FLUIDS = frozenset({"water", "lava", "bubble_column"})
+_ALWAYS_FLUID = _PURE_FLUIDS | frozenset({"seagrass", "tall_seagrass", "kelp", "kelp_plant"})
+_FLAG_TABLE: list[int] | None = None
+# Per-state sky opacity (0 / 1 / 15) plus bit 4 when the block's bottom face
+# stops the vertical level-15 sun column (stairs, bottom slabs, paths, …).
+_LIGHT_TABLE: bytes | None = None
+_SKY_FULL = b"\xff" * 2048
+# Horizontal spread under roofs/overhangs. Deeper than this stays unlit.
+_SKY_FLOOR_MARGIN = 20
 
 _STATE_TABLE: list[dict | None] | None = None
 _BIOME_TABLE: dict[str, str] | None = None
@@ -231,10 +291,581 @@ def _palette_bits(n: int, minimum: int = 4) -> int:
     return b
 
 
-def section_to_nbt(section_y: int, block_ids: list[int], biome_ids: list[int]):
+def _bare_block_name(name: str) -> str:
+    return name[10:] if name.startswith("minecraft:") else name
+
+
+def _flags_for_state(name: str, props: dict) -> int:
+    """Bitset F_AIR / F_SOLID / F_FLUID / F_LEAVES for one block state."""
+    bare = _bare_block_name(name)
+    if bare in ("air", "cave_air", "void_air"):
+        return F_AIR
+    if bare in _PURE_FLUIDS:
+        return F_FLUID
+    leaves = bare.endswith("_leaves")
+    if leaves:
+        solid = True
+    elif bare == "snow":
+        # One snow layer has an empty collision; thicker layers block motion.
+        solid = str(props.get("layers", "1")) != "1"
+    elif bare == "big_dripleaf":
+        solid = str(props.get("tilt", "none")) != "full"
+    elif bare in _NON_SOLID_EXACT or bare.endswith(_NON_SOLID_SUFFIXES):
+        solid = False
+    else:
+        solid = True
+    fluid = bare in _ALWAYS_FLUID or str(props.get("waterlogged", "false")) == "true"
+    flags = 0
+    if solid:
+        flags |= F_SOLID
+    if fluid:
+        flags |= F_FLUID
+    if leaves:
+        flags |= F_LEAVES
+    return flags
+
+
+def _state_flag_table() -> list[int]:
+    global _FLAG_TABLE
+    if _FLAG_TABLE is None:
+        states, _ = load_state_tables()
+        table = [F_AIR] * len(states)
+        for i, entry in enumerate(states):
+            if not entry:
+                continue
+            table[i] = _flags_for_state(str(entry.get("Name") or "minecraft:air"), entry.get("Properties") or {})
+        _FLAG_TABLE = table
+    return _FLAG_TABLE
+
+
+# Opacity 1: vanilla sky-light filters (block light is unaffected). Opacity 0 names
+# that are not caught by a suffix live in _SKY_CLEAR_EXACT. Everything else is a
+# full opaque cube (opacity 15). Matches minecraft-data filterLight for 1.21.1.
+_SKY_FILTER_EXACT = frozenset({
+    "water", "lava", "bubble_column", "ice", "frosted_ice", "cobweb",
+    "slime_block", "honey_block", "spawner", "beacon", "end_gateway",
+    "chorus_plant", "chorus_flower", "mangrove_roots", "powder_snow",
+    "seagrass", "tall_seagrass", "kelp", "kelp_plant", "sea_pickle", "conduit",
+    "sculk_vein", "sculk_shrieker", "trial_spawner", "vault", "shulker_box",
+})
+_SKY_CLEAR_SUFFIXES = (
+    "_stairs", "_slab", "_fence", "_fence_gate", "_door", "_trapdoor", "_wall",
+    "_pane", "_bars", "_carpet", "_pressure_plate", "_button", "_sign",
+    "_hanging_sign", "_banner", "_head", "_skull", "_bed", "_rail", "_candle",
+    "_sapling", "_torch", "_glass",
+)
+_SKY_CLEAR_EXACT = frozenset({
+    "air", "cave_air", "void_air", "glass", "tinted_glass",
+    "short_grass", "fern", "tall_grass", "large_fern", "dead_bush", "vine",
+    "glow_lichen", "hanging_roots", "seagrass", "tall_seagrass",
+    "nether_sprouts", "crimson_roots", "warped_roots", "crimson_fungus",
+    "warped_fungus", "brown_mushroom", "red_mushroom", "twisting_vines",
+    "twisting_vines_plant", "weeping_vines", "weeping_vines_plant",
+    "cave_vines", "cave_vines_plant", "small_dripleaf", "big_dripleaf",
+    "big_dripleaf_stem", "frogspawn", "spore_blossom", "mangrove_propagule",
+    "dandelion", "poppy", "blue_orchid", "allium", "azure_bluet", "red_tulip",
+    "orange_tulip", "white_tulip", "pink_tulip", "oxeye_daisy", "cornflower",
+    "lily_of_the_valley", "wither_rose", "torchflower", "sunflower", "lilac",
+    "rose_bush", "peony", "pitcher_plant", "pitcher_crop", "pink_petals",
+    "lily_pad", "wheat", "carrots", "potatoes", "beetroots", "melon_stem",
+    "pumpkin_stem", "attached_melon_stem", "attached_pumpkin_stem",
+    "nether_wart", "cocoa", "sweet_berry_bush", "torchflower_crop", "fire",
+    "soul_fire", "scaffolding", "light", "structure_void", "redstone_wire",
+    "repeater", "comparator", "lever", "tripwire", "tripwire_hook", "rail",
+    "torch", "nether_portal", "end_portal", "sugar_cane", "bamboo", "cactus",
+    "snow", "ladder", "chain", "iron_bars", "glass_pane",
+    "chest", "trapped_chest", "ender_chest", "farmland", "dirt_path",
+    "enchanting_table", "end_portal_frame", "brewing_stand", "cauldron",
+    "water_cauldron", "lava_cauldron", "powder_snow_cauldron", "dragon_egg",
+    "flower_pot", "anvil", "chipped_anvil", "damaged_anvil", "daylight_detector",
+    "hopper", "barrier", "end_rod", "turtle_egg", "sniffer_egg", "grindstone",
+    "lectern", "stonecutter", "bell", "lantern", "soul_lantern", "campfire",
+    "soul_campfire", "composter", "candle", "candle_cake", "amethyst_cluster",
+    "large_amethyst_bud", "medium_amethyst_bud", "small_amethyst_bud",
+    "sculk_sensor", "calibrated_sculk_sensor", "lightning_rod", "pointed_dripstone",
+    "azalea", "flowering_azalea", "decorated_pot", "heavy_core", "moving_piston",
+    "piston_head", "copper_grate", "exposed_copper_grate", "weathered_copper_grate",
+    "oxidized_copper_grate", "waxed_copper_grate", "waxed_exposed_copper_grate",
+    "waxed_weathered_copper_grate", "waxed_oxidized_copper_grate",
+    "white_stained_glass", "orange_stained_glass", "magenta_stained_glass",
+    "light_blue_stained_glass", "yellow_stained_glass", "lime_stained_glass",
+    "pink_stained_glass", "gray_stained_glass", "light_gray_stained_glass",
+    "cyan_stained_glass", "purple_stained_glass", "blue_stained_glass",
+    "brown_stained_glass", "green_stained_glass", "red_stained_glass",
+    "black_stained_glass",
+    "white_candle_cake", "orange_candle_cake", "magenta_candle_cake",
+    "light_blue_candle_cake", "yellow_candle_cake", "lime_candle_cake",
+    "pink_candle_cake", "gray_candle_cake", "light_gray_candle_cake",
+    "cyan_candle_cake", "purple_candle_cake", "blue_candle_cake",
+    "brown_candle_cake", "green_candle_cake", "red_candle_cake", "black_candle_cake",
+})
+# Bottom face blocks the sun column (the cell itself can still be 15).
+_SKY_OCCLUDERS = frozenset({
+    "dirt_path", "farmland", "snow", "enchanting_table", "end_portal_frame",
+    "lectern", "stonecutter", "daylight_detector", "sculk_sensor",
+    "calibrated_sculk_sensor", "piston_head",
+})
+
+
+def _sky_opacity(name: str, props: dict) -> int:
+    """0 clear, 1 filter, 15 opaque. Bit 4 set when the bottom face stops sun."""
+    bare = _bare_block_name(name)
+    if bare in ("air", "cave_air", "void_air"):
+        return 0
+    if bare == "tinted_glass":
+        return 15
+    if bare.endswith("_slab") and str(props.get("type", "")) == "double":
+        return 15
+    if (
+        bare in _SKY_FILTER_EXACT
+        or bare.endswith("_leaves")
+        or bare.endswith("_shulker_box")
+        or "coral" in bare
+    ):
+        return 1
+    clear = bare in _SKY_CLEAR_EXACT or bare.endswith(_SKY_CLEAR_SUFFIXES) or bare.startswith("potted_")
+    if not clear:
+        return 15
+    # Waterlogged clear blocks filter sky light; copper grates do not.
+    base = 1 if str(props.get("waterlogged", "false")) == "true" and "grate" not in bare else 0
+    occ = False
+    if bare.endswith("_stairs"):
+        occ = str(props.get("half", "")) == "bottom"
+    elif bare.endswith("_slab"):
+        occ = str(props.get("type", "")) == "bottom"
+    elif bare in _SKY_OCCLUDERS:
+        occ = True
+    # Bit 4: bottom face stops the sun column and does not emit downward.
+    return base | (16 if occ else 0)
+
+
+def _light_table() -> bytes:
+    global _LIGHT_TABLE
+    if _LIGHT_TABLE is None:
+        states, _ = load_state_tables()
+        tab = bytearray(len(states))
+        for i, entry in enumerate(states):
+            if not entry:
+                continue
+            tab[i] = _sky_opacity(str(entry.get("Name") or "minecraft:air"), entry.get("Properties") or {})
+        _LIGHT_TABLE = bytes(tab)
+    return _LIGHT_TABLE
+
+
+def _column_geometry(sections: list[tuple[list[int], list[int]]]):
+    """Heightmap stored-values, NO_LEAVES block-y per column, and top non-air section.
+
+    ``sections[0]`` is section Y ``MIN_SECTION_Y``. ``nl_top`` is the world y of
+    the highest MOTION_BLOCKING_NO_LEAVES block, or ``_NO_TOP`` when the column
+    has none.
+    """
+    flags = _state_flag_table()
+    nflags = len(flags)
+    ws = [0] * 256
+    of = [0] * 256
+    mb = [0] * 256
+    nl = [0] * 256
+    nl_top = [_NO_TOP] * 256
+    done = [False] * 256
+    remaining = 256
+
+    top_si = -1
+    for si in range(len(sections) - 1, -1, -1):
+        blocks = sections[si][0]
+        sid0 = blocks[0]
+        if blocks.count(sid0) == BLOCK_VOLUME:
+            f0 = flags[sid0] if 0 <= sid0 < nflags else F_AIR
+            if f0 & F_AIR:
+                continue
+            top_si = si
+            break
+        hit = False
+        for sid in blocks:
+            f = flags[sid] if 0 <= sid < nflags else F_AIR
+            if not (f & F_AIR):
+                hit = True
+                break
+        if hit:
+            top_si = si
+            break
+
+    if top_si >= 0:
+        # Sections top-down, and inside a section Y top-down, so the first hit is the highest.
+        for si in range(top_si, -1, -1):
+            if remaining == 0:
+                break
+            blocks = sections[si][0]
+            base = (MIN_SECTION_Y + si) << 4
+            for ly in range(15, -1, -1):
+                if remaining == 0:
+                    break
+                y = base + ly
+                stored = y - MIN_Y + 1
+                layer = ly << 8
+                for lz in range(16):
+                    row = layer | (lz << 4)
+                    col0 = lz << 4
+                    for lx in range(16):
+                        col = col0 | lx
+                        if done[col]:
+                            continue
+                        sid = blocks[row | lx]
+                        f = flags[sid] if 0 <= sid < nflags else F_AIR
+                        if f & F_AIR:
+                            continue
+                        if ws[col] == 0:
+                            ws[col] = stored
+                        solid = f & F_SOLID
+                        fluid = f & F_FLUID
+                        if solid and of[col] == 0:
+                            of[col] = stored
+                        if (solid or fluid) and mb[col] == 0:
+                            mb[col] = stored
+                        if (solid or fluid) and not (f & F_LEAVES) and nl[col] == 0:
+                            nl[col] = stored
+                            nl_top[col] = y
+                        if ws[col] and mb[col] and nl[col] and of[col]:
+                            done[col] = True
+                            remaining -= 1
+
+    hm = {
+        "WORLD_SURFACE": ws,
+        "OCEAN_FLOOR": of,
+        "MOTION_BLOCKING": mb,
+        "MOTION_BLOCKING_NO_LEAVES": nl,
+    }
+    return hm, nl_top, top_si
+
+
+def _section_span(top_si: int, n_sections: int) -> int:
+    """Highest section index (inclusive) that receives a SkyLight array."""
+    light_hi = 0 if top_si < 0 else top_si + 1
+    if n_sections <= 0:
+        return -1
+    if light_hi >= n_sections:
+        light_hi = n_sections - 1
+    return light_hi
+
+
+def _pack_band_section(
+    sy: int,
+    chunk_base: int,
+    light: bytearray,
+    fifteen: array.array,
+    y_lo: int,
+    y_hi: int,
+    height: int,
+) -> bytes:
+    """Nibble SkyLight for one section. y > y_hi is sun; y < y_lo is 0 unless the column is open."""
+    base_y = sy << 4
+    if base_y > y_hi:
+        return _SKY_FULL
+    buf = bytearray(2048)
+    for ly in range(16):
+        y = base_y + ly
+        layer = ly << 8
+        if y > y_hi:
+            for i in range(256):
+                idx = layer | i
+                bi = idx >> 1
+                if idx & 1:
+                    buf[bi] |= 0xF0
+                else:
+                    buf[bi] |= 0x0F
+            continue
+        if y < y_lo:
+            for local in range(256):
+                if y < fifteen[chunk_base + local]:
+                    continue
+                idx = layer | local
+                bi = idx >> 1
+                if idx & 1:
+                    buf[bi] |= 0xF0
+                else:
+                    buf[bi] |= 0x0F
+            continue
+        rel = y - y_lo
+        for local in range(256):
+            lv = light[(chunk_base + local) * height + rel]
+            if not lv:
+                continue
+            idx = layer | local
+            bi = idx >> 1
+            if idx & 1:
+                buf[bi] |= lv << 4
+            else:
+                buf[bi] |= lv
+    return bytes(buf)
+
+
+def _compute_skylight(
+    columns: dict[tuple[int, int], list],
+    geo: dict[tuple[int, int], tuple[list[int], int]],
+) -> dict[tuple[int, int], dict[int, bytes]]:
+    """Vanilla-like sky light for every loaded column.
+
+    Column pass: 15 straight down through opacity-0 blocks that do not occlude
+    downward; filters (water, ice, leaves, cobweb, …) cost 1; full cubes are 0.
+    A bottom stair, bottom slab, path, or similar keeps 15 but does not emit
+    downward. Then a 6-direction BFS spreads at a cost of 1 through passable
+    cells, including across chunk borders and upward into rooms. The flood stays
+    in ``[min(NO_LEAVES) - 20, top of the highest non-air section]`` and will not
+    enter a column below that column's own NO_LEAVES - 20.
+    """
+    out: dict[tuple[int, int], dict[int, bytes]] = {}
+    if not columns:
+        return out
+    keys = list(columns.keys())
+    chunk_index = {k: i for i, k in enumerate(keys)}
+    nchunks = len(keys)
+    # Band from the lowest surface margin up to the tallest non-air section.
+    y_hi = MIN_Y
+    y_lo = 10**9
+    any_surface = False
+    for key in keys:
+        nl_top, top_si = geo[key]
+        if top_si >= 0:
+            y_hi = max(y_hi, ((MIN_SECTION_Y + top_si) << 4) + 15)
+        for top in nl_top:
+            if top > _NO_TOP // 2:
+                any_surface = True
+                y_lo = min(y_lo, top - _SKY_FLOOR_MARGIN)
+    if not any_surface:
+        y_lo = y_hi
+    y_lo = max(MIN_Y, y_lo)
+    if y_hi < y_lo:
+        y_hi = y_lo
+    height = y_hi - y_lo + 1
+    ncolumns = nchunks * 256
+    total = ncolumns * height
+    light = bytearray(total)
+    # 15 blocks the flood; 0 lets it through. Column pass overwrites the band.
+    opacity = bytearray(b"\x0f") * total
+    fifteen = array.array("i", [y_hi + 1]) * ncolumns
+    table = _light_table()
+    ntable = len(table)
+
+    plus_x = array.array("i", [-1]) * ncolumns
+    minus_x = array.array("i", [-1]) * ncolumns
+    plus_z = array.array("i", [-1]) * ncolumns
+    minus_z = array.array("i", [-1]) * ncolumns
+    for (cx, cz), ci in chunk_index.items():
+        nix = chunk_index.get((cx + 1, cz))
+        ndx = chunk_index.get((cx - 1, cz))
+        niz = chunk_index.get((cx, cz + 1))
+        ndz = chunk_index.get((cx, cz - 1))
+        base = ci * 256
+        for lz in range(16):
+            zrow = lz << 4
+            for lx in range(16):
+                c = base + zrow + lx
+                if lx < 15:
+                    plus_x[c] = c + 1
+                elif nix is not None:
+                    plus_x[c] = nix * 256 + zrow
+                if lx > 0:
+                    minus_x[c] = c - 1
+                elif ndx is not None:
+                    minus_x[c] = ndx * 256 + zrow + 15
+                if lz < 15:
+                    plus_z[c] = c + 16
+                elif niz is not None:
+                    plus_z[c] = niz * 256 + lx
+                if lz > 0:
+                    minus_z[c] = c - 16
+                elif ndz is not None:
+                    minus_z[c] = ndz * 256 + (15 << 4) + lx
+
+    for (cx, cz), ci in chunk_index.items():
+        sections = columns[(cx, cz)]
+        nl_top, _top_si = geo[(cx, cz)]
+        block_secs = [sec[0] for sec in sections]
+        nsec = len(block_secs)
+        base = ci * 256
+        for local in range(256):
+            col = base + local
+            lx = local & 15
+            lz = local >> 4
+            col_in_sec = (lz << 4) | lx
+            top = nl_top[local]
+            floor_y = top - _SKY_FLOOR_MARGIN if top > _NO_TOP // 2 else y_lo
+            source = True
+            prev = 15
+            ff = y_hi + 1
+            cbase = col * height
+            for y in range(y_hi, y_lo - 1, -1):
+                rel = y - y_lo
+                idx = cbase + rel
+                if y < floor_y:
+                    # Tail is already opacity 15 / light 0. Stop so an unblocked
+                    # column is not treated as open sky below the flood floor.
+                    source = False
+                    break
+                si = (y >> 4) - MIN_SECTION_Y
+                if not (0 <= si < nsec):
+                    opacity[idx] = 0
+                    light[idx] = 15
+                    prev = 15
+                    ff = y
+                    continue
+                sid = block_secs[si][((y & 15) << 8) | col_in_sec]
+                info = table[sid] if 0 <= sid < ntable else 0
+                op = info & 15
+                # Bit 4 stored on the cell: passable, but do not emit downward.
+                blocked_down = info & 16
+                if op >= 15:
+                    opacity[idx] = 15
+                    light[idx] = 0
+                    source = False
+                    prev = 0
+                    continue
+                opacity[idx] = blocked_down
+                if source and op == 0 and not blocked_down:
+                    light[idx] = 15
+                    prev = 15
+                    ff = y
+                    continue
+                arrived = 15 if source else prev
+                source = False
+                if arrived <= 0:
+                    light[idx] = 0
+                    prev = 0
+                    continue
+                # Sun into an opacity-0 occluder stays 15; every other step costs
+                # max(1, opacity). The bottom face then ends the column.
+                if not (op == 0 and blocked_down and arrived == 15):
+                    arrived -= 1 if op <= 1 else op
+                    if arrived < 0:
+                        arrived = 0
+                light[idx] = arrived
+                if arrived == 15:
+                    ff = y
+                prev = 0 if blocked_down else arrived
+            if source:
+                ff = MIN_Y
+            fifteen[col] = ff
+
+    # Seed only the vertical frontier: the bottom of each level-15 run, the
+    # attenuated tail under it, and columns whose sun height differs from a
+    # neighbor. Scanning every lit sky cell is most of the cost and almost
+    # none of those cells can raise a neighbor.
+    queued = bytearray(total)
+    q: deque[int] = deque()
+
+    def _enqueue(i: int) -> None:
+        if queued[i] or light[i] <= 1 or (opacity[i] & 15) >= 15:
+            return
+        queued[i] = 1
+        q.append(i)
+
+    for col in range(ncolumns):
+        ff = fifteen[col]
+        cbase = col * height
+        if y_lo <= ff <= y_hi:
+            _enqueue(cbase + (ff - y_lo))
+        y = ff - 1
+        if y > y_hi:
+            y = y_hi
+        while y >= y_lo:
+            i = cbase + (y - y_lo)
+            if light[i] <= 1:
+                break
+            _enqueue(i)
+            y -= 1
+        for nc in (plus_x[col], plus_z[col]):
+            if nc < 0:
+                continue
+            nff = fifteen[nc]
+            if ff <= nff:
+                lower, higher, src = ff, nff, col
+            else:
+                lower, higher, src = nff, ff, nc
+            y0 = y_lo if lower < y_lo else lower
+            y1 = y_hi if higher - 1 > y_hi else higher - 1
+            if y0 > y1:
+                continue
+            sbase = src * height
+            rel = y0 - y_lo
+            last = y1 - y_lo
+            while rel <= last:
+                _enqueue(sbase + rel)
+                rel += 1
+
+    while q:
+        i = q.popleft()
+        queued[i] = 0
+        lv = light[i]
+        if lv <= 1:
+            continue
+        col = i // height
+        rel = i - col * height
+        spread = lv - 1
+        no_down = opacity[i] & 16
+        if rel > 0 and not no_down:
+            nidx = i - 1
+            if (opacity[nidx] & 15) < 15 and spread > light[nidx]:
+                light[nidx] = spread
+                if spread > 1 and not queued[nidx]:
+                    queued[nidx] = 1
+                    q.append(nidx)
+        if rel + 1 < height:
+            nidx = i + 1
+            if (opacity[nidx] & 15) < 15 and spread > light[nidx]:
+                light[nidx] = spread
+                if spread > 1 and not queued[nidx]:
+                    queued[nidx] = 1
+                    q.append(nidx)
+        for nc in (plus_x[col], minus_x[col], plus_z[col], minus_z[col]):
+            if nc < 0:
+                continue
+            nidx = nc * height + rel
+            if (opacity[nidx] & 15) < 15 and spread > light[nidx]:
+                light[nidx] = spread
+                if spread > 1 and not queued[nidx]:
+                    queued[nidx] = 1
+                    q.append(nidx)
+
+    for key, ci in chunk_index.items():
+        _nl, top_si = geo[key]
+        nsec = len(columns[key])
+        light_hi = _section_span(top_si, nsec)
+        sky: dict[int, bytes] = {}
+        if light_hi >= 0:
+            chunk_base = ci * 256
+            for si in range(light_hi + 1):
+                sy = MIN_SECTION_Y + si
+                sky[sy] = _pack_band_section(sy, chunk_base, light, fifteen, y_lo, y_hi, height)
+        out[key] = sky
+    return out
+
+
+def _heightmaps_and_skylight(sections: list[tuple[list[int], list[int]]]):
+    """Heightmap stored-values (256, index z*16+x) and SkyLight bytes keyed by section Y.
+
+    Single-chunk entry point. World writes use ``_prepare_chunk_light`` so the
+    flood crosses chunk borders. ``sections[0]`` is section Y ``MIN_SECTION_Y``.
+    """
+    hm, nl_top, top_si = _column_geometry(sections)
+    sky = _compute_skylight({(0, 0): sections}, {(0, 0): (nl_top, top_si)})[(0, 0)]
+    return hm, sky
+
+
+def _prepare_chunk_light(columns: dict[tuple[int, int], list]):
+    """Heightmaps and cross-chunk sky light for every loaded column."""
+    geo_nl: dict[tuple[int, int], tuple[list[int], int]] = {}
+    hms: dict[tuple[int, int], dict] = {}
+    for key, sections in columns.items():
+        hm, nl_top, top_si = _column_geometry(sections)
+        hms[key] = hm
+        geo_nl[key] = (nl_top, top_si)
+    skies = _compute_skylight(columns, geo_nl)
+    return {key: (hms[key], skies[key]) for key in columns}
+
+
+def section_to_nbt(section_y: int, block_ids: list[int], biome_ids: list[int], skylight: bytes | None = None):
     """Build one Anvil section compound (as plain dict for nbtlib)."""
     from . import nbt_mini as nbtlib
-    from .nbt_mini import Byte, Compound, Int, List, LongArray, String
+    from .nbt_mini import Byte, ByteArray, Compound, Int, List, LongArray, String
 
     # Block palette
     uniq_blocks: list[int] = []
@@ -269,22 +900,39 @@ def section_to_nbt(section_y: int, block_ids: list[int], biome_ids: list[int]):
         signed = [l - 0x10000000000000000 if l >= 0x8000000000000000 else l for l in longs]
         biomes_tag["data"] = LongArray(signed)
 
-    return Compound({
+    tag = {
         "Y": Byte(section_y),
         "block_states": Compound(bs),
         "biomes": Compound(biomes_tag),
-    })
+    }
+    if skylight is not None:
+        tag["SkyLight"] = ByteArray.from_bytes(skylight)
+    return Compound(tag)
 
 
-def column_to_chunk_nbt(cx: int, cz: int, sections: list[tuple[list[int], list[int]]]):
+def column_to_chunk_nbt(
+    cx: int,
+    cz: int,
+    sections: list[tuple[list[int], list[int]]],
+    hm_vals: dict | None = None,
+    sky: dict | None = None,
+):
     from . import nbt_mini as nbtlib
-    from .nbt_mini import Byte, Compound, Int, List, Long, String
+    from .nbt_mini import Byte, Compound, Int, List, Long, LongArray, String
 
+    if hm_vals is None or sky is None:
+        hm_vals, sky = _heightmaps_and_skylight(sections)
     sec_tags = []
     for i, (blocks, biomes) in enumerate(sections):
         sy = MIN_SECTION_Y + i
         # skip empty air-only sections? WI handles empty; still include for height consistency
-        sec_tags.append(section_to_nbt(sy, blocks, biomes))
+        sec_tags.append(section_to_nbt(sy, blocks, biomes, sky.get(sy)))
+
+    hm_tag = {}
+    for name in HEIGHTMAP_NAMES:
+        longs = write_packed_ids(hm_vals[name], HEIGHTMAP_BITS)
+        signed = [v - 0x10000000000000000 if v >= 0x8000000000000000 else v for v in longs]
+        hm_tag[name] = LongArray(signed)
 
     root = Compound({
         "DataVersion": Int(DATA_VERSION),
@@ -297,7 +945,7 @@ def column_to_chunk_nbt(cx: int, cz: int, sections: list[tuple[list[int], list[i
         "isLightOn": Byte(1),
         "sections": List[Compound](sec_tags),
         "block_entities": List[Compound]([]),
-        "Heightmaps": Compound({}),
+        "Heightmaps": Compound(hm_tag),
         "structures": Compound({"References": Compound({}), "starts": Compound({})}),
     })
     return nbtlib.File(root)
@@ -432,10 +1080,12 @@ class ChunkStore:
         write_level_dat(dest_dir, data_version=DATA_VERSION, name="replay_import")
         # group by region
         by_region: dict[tuple[int, int], dict[tuple[int, int], bytes]] = {}
+        prepared = _prepare_chunk_light(self.columns)
         for (cx, cz), sections in self.columns.items():
             rx, rz = cx >> 5, cz >> 5
             lcx, lcz = cx & 31, cz & 31
-            nbt = column_to_chunk_nbt(cx, cz, sections)
+            hm_vals, sky = prepared[(cx, cz)]
+            nbt = column_to_chunk_nbt(cx, cz, sections, hm_vals, sky)
             by_region.setdefault((rx, rz), {})[(lcx, lcz)] = chunk_nbt_to_compressed(nbt)
         for (rx, rz), chunks in by_region.items():
             path = dest_dir / "region" / f"r.{rx}.{rz}.mca"
