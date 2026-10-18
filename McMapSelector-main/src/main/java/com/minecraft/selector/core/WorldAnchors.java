@@ -1,5 +1,6 @@
 package com.minecraft.selector.core;
 import com.minecraft.selector.nbt.NBTReader;
+import com.minecraft.selector.utils.LogManager;
 import com.minecraft.selector.nbt.NBTReader.*;
 import java.io.File;
 import java.io.IOException;
@@ -72,7 +73,9 @@ public final class WorldAnchors {
                 NBTCompound player=root.get("Pos")!=null?root:(root.get("Data") instanceof NBTCompound?root.getCompound("Data"):root);
                 Anchor a=anchorFromPlayerCompound(player);
                 if(a!=null) return a;
-            } catch(Exception ignored) {}
+            } catch(Exception e) {
+                LogManager.getInstance().warn("Player data parse failed: " + file.getName() + " - " + e.getMessage(), "WorldAnchors");
+            }
         }
         return null;
     }
