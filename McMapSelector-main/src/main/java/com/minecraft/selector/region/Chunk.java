@@ -188,8 +188,7 @@ public class Chunk {
                 if (blockStates.contains("palette")) {
                     NBTReader.NBTList paletteList = blockStates.getList("palette");
                     for (int i = 0; i < paletteList.size(); i++) {
-                        NBTReader.NBTCompound paletteEntry = (NBTReader.NBTCompound) paletteList.get(i);
-                        this.palette.add(Block.fromPalette(paletteEntry));
+                        this.palette.add(Block.fromPaletteTag(paletteList.get(i)));
                     }
                 }
                 
