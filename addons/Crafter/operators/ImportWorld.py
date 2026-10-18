@@ -234,6 +234,31 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         dir_saves = os.path.dirname(worldPath)
         dir_level_dat = os.path.join(worldPath, "level.dat")
         log_step(f"世界路径: {worldPath}")
+        # ReplayMod .mcpr: materialize a temp Anvil world, then continue as usual.
+        self._replay_info = None
+        if worldPath.lower().endswith(".mcpr") and os.path.isfile(worldPath):
+            try:
+                from ..replay.import_replay import materialize_world_from_mcpr
+                temp_world, replay_info = materialize_world_from_mcpr(worldPath)
+                self._replay_info = replay_info
+                log_step(f"检测到 ReplayMod 录像: {worldPath}")
+                log_step(f"临时世界: {temp_world} packets={replay_info.get('packets')} regions={replay_info.get('chunks')}")
+                meta = replay_info.get("meta") or {}
+                if meta.get("mcversion"):
+                    log_step(f"录像 MC 版本: {meta.get('mcversion')} protocol={meta.get('protocol')}")
+                if not replay_info.get("chunks"):
+                    error_log("录像中尚未重建出区块（map_chunk→Anvil 未完成或无回退世界）")
+                    log_stage_end("准备导入", "失败")
+                    self.report({'ERROR'}, "Replay has no reconstructed chunks yet")
+                    return {"CANCELLED"}
+                worldPath = temp_world  # keep prefs.World_Path as the .mcpr for reimport
+                dir_saves = os.path.dirname(worldPath)
+                dir_level_dat = os.path.join(worldPath, "level.dat")
+            except Exception as e:
+                error_log(f"解析 .mcpr 失败: {e}")
+                log_stage_end("准备导入", "失败")
+                self.report({'ERROR'}, f"Failed to read .mcpr: {e}")
+                return {"CANCELLED"}
         if not os.path.exists(dir_level_dat):
             error_log(f"未找到 level.dat，不是有效的世界路径: {dir_level_dat}")
             log_stage_end("准备导入", "失败")
@@ -249,7 +274,19 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         dir_saves = os.path.dirname(worldPath)
         dir_back_saves = os.path.dirname(dir_saves)
 
-        if os.path.basename(dir_back_saves) == ".minecraft":
+        # Temp Anvil from .mcpr is not under .minecraft — use suggested jar from meta.
+        replay_info = getattr(self, "_replay_info", None) or {}
+        suggest_jar = replay_info.get("suggest_jar")
+        if suggest_jar and os.path.isfile(suggest_jar):
+            jarPath = suggest_jar
+            name_version = (replay_info.get("meta") or {}).get("mcversion") or ""
+            addon_prefs.is_Game_Path = False
+            addon_prefs.Custom_Jar_Path = jarPath
+            dir_mods = ""
+            dir_resourcepacks = ""
+            dir_dot_minecraft = ""
+            log_step(f"录像导入使用建议 jar: {jarPath}")
+        elif os.path.basename(dir_back_saves) == ".minecraft":
             dir_dot_minecraft = dir_back_saves
             dir_versions = os.path.join(dir_dot_minecraft,"versions")
             list_versions = os.listdir(dir_versions)
@@ -642,6 +679,17 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             except Exception as _ex:
                 error_log(f"finish_import 异常: {_ex}")
                 import traceback; traceback.print_exc()
+            # ReplayMod: apply camera path from timelines.json after world import
+            replay_info = getattr(self, "_replay_info", None)
+            if replay_info and replay_info.get("timelines"):
+                try:
+                    from ..replay.import_replay import apply_replay_camera
+                    cam = apply_replay_camera(replay_info)
+                    if cam:
+                        log_step(f"已应用录像相机路径: {cam.name}")
+                except Exception as _ex:
+                    error_log(f"应用录像相机失败: {_ex}")
+                    import traceback; traceback.print_exc()
             return {'FINISHED'}
         else:
             error_log("WorldImporter 进程返回失败（退出码非 0）")

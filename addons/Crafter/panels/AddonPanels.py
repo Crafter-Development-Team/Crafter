@@ -40,7 +40,9 @@ class VIEW3D_PT_CrafterImportWorld(bpy.types.Panel):
         box = layout.box()
         addon_prefs = context.preferences.addons[__addon_name__].preferences
 
-        box.prop(addon_prefs, "World_Path")
+        row_world = box.row(align=True)
+        row_world.prop(addon_prefs, "World_Path")
+        row_world.operator("crafter.browse_world_or_replay", text="", icon="FILE_FOLDER")
 
         box.template_list("VIEW3D_UL_CrafterDimensionsList", "", addon_prefs, "Dimensions_List", addon_prefs, "Dimensions_List_index",rows=1)
 

@@ -18,9 +18,11 @@ class CrafterAddonPreferences(AddonPreferences):
     # when the class is registered, i.e. we need to restart blender for the property name to be correctly translated.
 
 # ========== 导入世界属性 ==========
+    # NONE + browse operator: accept world folders and ReplayMod .mcpr files.
+    # DIR_PATH alone cannot pick .mcpr (folder-only browser).
     World_Path: StringProperty(name="World path",
                                default="World path",
-                               subtype="DIR_PATH",
+                               subtype="NONE",
                                update=lambda self, context: self.update_world_path(context)) # type: ignore
     XYZ_1: IntVectorProperty(name="XYZ-1",
                              default=(0,319,0),
