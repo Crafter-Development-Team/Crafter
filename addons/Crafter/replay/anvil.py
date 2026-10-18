@@ -5,8 +5,8 @@ import struct
 import zlib
 from pathlib import Path
 
-import nbtlib
-from nbtlib.tag import Compound, Int, Long, String, Byte, Float, List
+from . import nbt_mini as nbtlib
+from .nbt_mini import Compound, Int, Long, String, Byte, Float, List
 
 
 def write_level_dat(world_dir: Path, *, data_version: int = 3955, name: str = "replay_temp") -> None:

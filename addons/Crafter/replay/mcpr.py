@@ -78,3 +78,24 @@ def iter_packets(zf: zipfile.ZipFile):
     for ts, raw in iter_tmcpr(data):
         pid, poff = read_varint(raw, 0)
         yield TimedPacket(ts, pid, raw[poff:])
+
+
+def iter_play_packets(zf: zipfile.ZipFile):
+    """Yield only play-state packets. ServerReplay/ReplayMod v14 recordings begin with
+    login success + configuration packets (registry_data 0x07 ... finish_configuration 0x03)."""
+    pkts = list(iter_packets(zf))
+    start = 0
+    for i, p in enumerate(pkts[:400]):
+        if p.packet_id == 0x03 and len(p.payload) == 0 and any(q.packet_id == 0x07 for q in pkts[:i]):
+            start = i + 1
+            break
+    state_play = True
+    for p in pkts[start:]:
+        if state_play and p.packet_id == 0x69 and len(p.payload) == 0:  # start_configuration
+            state_play = False
+            continue
+        if not state_play:
+            if p.packet_id == 0x03 and len(p.payload) == 0:
+                state_play = True
+            continue
+        yield p

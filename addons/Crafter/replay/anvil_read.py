@@ -6,8 +6,7 @@ import struct
 import zlib
 from pathlib import Path
 
-import nbtlib
-
+from . import nbt_mini as nbtlib
 from .chunks import (
     BIOME_VOLUME,
     BLOCK_VOLUME,

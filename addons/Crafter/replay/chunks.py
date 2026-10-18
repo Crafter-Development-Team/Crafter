@@ -63,7 +63,7 @@ def load_state_tables() -> tuple[list[dict | None], dict[str, str]]:
 
 def state_id_to_nbt(state_id: int) -> dict:
     """Return nbtlib-tag dict for a block_states palette entry."""
-    from nbtlib.tag import Compound, String
+    from .nbt_mini import Compound, String
 
     table, _ = load_state_tables()
     entry = table[state_id] if 0 <= state_id < len(table) else None
@@ -121,8 +121,7 @@ class Buf:
     def network_nbt(self):
         """Read 1.20.2+ network NBT (root compound has no name). Returns nbtlib.File or None."""
         import io
-        import nbtlib
-
+        from . import nbt_mini as nbtlib
         raw = bytes(self.data[self.off :])
         if not raw:
             raise ValueError("EOF reading network NBT")
@@ -234,8 +233,8 @@ def _palette_bits(n: int, minimum: int = 4) -> int:
 
 def section_to_nbt(section_y: int, block_ids: list[int], biome_ids: list[int]):
     """Build one Anvil section compound (as plain dict for nbtlib)."""
-    import nbtlib
-    from nbtlib.tag import Byte, Compound, Int, List, LongArray, String
+    from . import nbt_mini as nbtlib
+    from .nbt_mini import Byte, Compound, Int, List, LongArray, String
 
     # Block palette
     uniq_blocks: list[int] = []
@@ -278,8 +277,8 @@ def section_to_nbt(section_y: int, block_ids: list[int], biome_ids: list[int]):
 
 
 def column_to_chunk_nbt(cx: int, cz: int, sections: list[tuple[list[int], list[int]]]):
-    import nbtlib
-    from nbtlib.tag import Byte, Compound, Int, List, Long, String
+    from . import nbt_mini as nbtlib
+    from .nbt_mini import Byte, Compound, Int, List, Long, String
 
     sec_tags = []
     for i, (blocks, biomes) in enumerate(sections):
@@ -317,9 +316,13 @@ class ChunkStore:
     protocol: int = 767
     packets_seen: int = 0
     map_chunks: int = 0
+    # (t_ms, x, y, z, old_state, new_state) for block updates after initial chunk load
+    changes: list = field(default_factory=list)
+    _t: int = 0
 
     def handle_packet(self, packet_id: int, payload: bytes, timestamp_ms: int = 0) -> None:
         self.packets_seen += 1
+        self._t = timestamp_ms
         if packet_id == MAP_CHUNK_ID:
             cx, cz, chunk_data, _ = parse_map_chunk_payload(payload)
             sections = read_chunk_data(chunk_data)
@@ -358,24 +361,26 @@ class ChunkStore:
         buf = Buf(payload)
         section_pos = buf.i64()
         # section X,Y,Z packed: (x & 0x3FFFFF) << 42 | (z & 0x3FFFFF) << 20 | (y & 0xFFFFF)
-        sx = section_pos >> 42
+        u = section_pos & 0xFFFFFFFFFFFFFFFF
+        sx = u >> 42
+        sz = (u >> 20) & 0x3FFFFF
+        sy = u & 0xFFFFF
         if sx >= 1 << 21:
             sx -= 1 << 22
-        sz = (section_pos << 22) >> 42
         if sz >= 1 << 21:
             sz -= 1 << 22
-        sy = section_pos << 44 >> 44  # 20 bits signed
+        if sy >= 1 << 19:
+            sy -= 1 << 20
         n = buf.varint()
         for _ in range(n):
             v = buf.varint()  # actually varlong in some versions — use varint for small
-            # encode: blockStateId << 12 | localPos
-            # localPos = x | (z << 4) | (y << 8)
             # In 1.20+: VarLong: state << 12 | pos
             local = v & 0xFFF
             state = v >> 12
-            lx = local & 0xF
+            # 1.16+: (stateId << 12) | (localX << 8 | localZ << 4 | localY)
+            lx = (local >> 8) & 0xF
             lz = (local >> 4) & 0xF
-            ly = (local >> 8) & 0xF
+            ly = local & 0xF
             self.set_block(sx * 16 + lx, sy * 16 + ly, sz * 16 + lz, state)
 
     def set_block(self, x: int, y: int, z: int, state_id: int) -> None:
@@ -390,7 +395,34 @@ class ChunkStore:
         blocks, biomes = col[si]
         lx, ly, lz = x & 15, y & 15, z & 15
         idx = (ly << 8) | (lz << 4) | lx
+        old = blocks[idx]
+        if old != state_id:
+            self.changes.append((self._t, x, y, z, old, state_id))
         blocks[idx] = state_id
+
+    def get_block(self, x: int, y: int, z: int) -> int:
+        col = self.columns.get((x >> 4, z >> 4))
+        si = (y >> 4) - MIN_SECTION_Y
+        if not col or not (0 <= si < NUM_SECTIONS):
+            return 0
+        return col[si][0][((y & 15) << 8) | ((z & 15) << 4) | (x & 15)]
+
+    def block_segments(self):
+        """Per changed position: list of (state, t_from, t_to|None) covering the whole recording.
+        t_from=0 is the initially loaded state."""
+        per: dict = {}
+        for t, x, y, z, old, new in self.changes:
+            per.setdefault((x, y, z), []).append((t, old, new))
+        out = {}
+        for pos, evs in per.items():
+            segs = []
+            cur, t0 = evs[0][1], 0
+            for t, _old, new in evs:
+                segs.append((cur, t0, t))
+                cur, t0 = new, t
+            segs.append((cur, t0, None))
+            out[pos] = segs
+        return out
 
     def write_anvil_world(self, dest_dir: Path) -> int:
         """Write level.dat + region/*.mca. Returns number of chunks written."""
@@ -461,8 +493,8 @@ def encode_chunk_data(sections: list[tuple[list[int], list[int]]]) -> bytes:
 def build_map_chunk_packet(cx: int, cz: int, sections: list[tuple[list[int], list[int]]]) -> bytes:
     """Full map_chunk payload (no packet id). Empty heightmaps as network NBT."""
     import io
-    import nbtlib
-    from nbtlib.tag import Compound
+    from . import nbt_mini as nbtlib
+    from .nbt_mini import Compound
 
     chunk_data = encode_chunk_data(sections)
     # Classic File writes 0A 00 00 <end>; network NBT drops the empty name → 0A 00

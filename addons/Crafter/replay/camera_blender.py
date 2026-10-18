@@ -9,6 +9,9 @@ if TYPE_CHECKING:
     import bpy
 
 
+CAMERA_EYE_HEIGHT = 1.62  # PlayerEntity standing eye height; CameraEntity extends ClientPlayerEntity
+
+
 def apply_camera_timeline(
     tl: Timeline,
     *,
@@ -36,7 +39,12 @@ def apply_camera_timeline(
     cam_data = bpy.data.cameras.new(camera_name)
     # FOV: Blender camera angle is horizontal/vertical depending on sensor_fit; use angle
     cam_data.lens_unit = "FOV"
-    cam_data.angle = math.radians(fov_degrees)
+    # MC FOV is vertical. Set sensor_fit before the angle: assigning .angle under AUTO fit
+    # fixes the focal length against the 36 mm width, which then gave ~50 deg vertical.
+    cam_data.sensor_fit = "VERTICAL"
+    cam_data.angle_y = math.radians(fov_degrees)
+    cam_data.clip_start = 0.05
+    cam_data.clip_end = 2000.0
     cam_obj = bpy.data.objects.new(camera_name, cam_data)
     scene.collection.objects.link(cam_obj)
     scene.camera = cam_obj
@@ -47,9 +55,15 @@ def apply_camera_timeline(
         t_ms = start_ms + (frame - frame_start) / fps * 1000.0
         pose = sample_camera(tl, t_ms)
         # MC Y-up: Blender X=MC X, Y=MC -Z, Z=MC Y
-        cam_obj.location = (pose.x, -pose.z, pose.y)
+        # ReplayMod keys the CameraEntity position; MC renders from its eye (+1.62).
+        cam_obj.location = (pose.x, -pose.z, pose.y + CAMERA_EYE_HEIGHT)
         rx, ry, rz = mc_rot_to_blender_euler(pose.yaw, pose.pitch, pose.roll)
-        cam_obj.rotation_euler = (rx, ry, rz)
+        if abs(pose.roll) > 1e-4:
+            from mathutils import Euler, Matrix
+            m = Euler((rx, ry, rz), "XYZ").to_matrix() @ Matrix.Rotation(math.radians(-pose.roll), 3, "Z")
+            cam_obj.rotation_euler = m.to_euler("XYZ", cam_obj.rotation_euler)
+        else:
+            cam_obj.rotation_euler = (rx, ry, rz)
         cam_obj.keyframe_insert(data_path="location", frame=frame)
         cam_obj.keyframe_insert(data_path="rotation_euler", frame=frame)
 

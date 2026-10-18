@@ -238,8 +238,12 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         self._replay_info = None
         if worldPath.lower().endswith(".mcpr") and os.path.isfile(worldPath):
             try:
-                from ..replay.import_replay import materialize_world_from_mcpr
-                temp_world, replay_info = materialize_world_from_mcpr(worldPath)
+                from ..replay.import_replay import prepare_replay_world
+                box = tuple(addon_prefs.XYZ_1) + tuple(addon_prefs.XYZ_2)
+                # static base world (time-varying blocks cleared) + per-interval block worlds
+                temp_world, replay_info = prepare_replay_world(worldPath, box)
+                log_step(f"录像方块变化: {len(replay_info.get('block_groups') or [])} 组; "
+                         f"实体: {len(replay_info['entities'].visible_tracks()) if replay_info.get('entities') else 0}")
                 self._replay_info = replay_info
                 log_step(f"检测到 ReplayMod 录像: {worldPath}")
                 log_step(f"临时世界: {temp_world} packets={replay_info.get('packets')} regions={replay_info.get('chunks')}")
@@ -501,9 +505,14 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         effective_as_chunk = addon_prefs.notexportFullModel or \
             (addon_prefs.autoPartitionSettings and not addon_prefs.forceFullModel)
 
+        selected_dimension = addon_prefs.Dimensions_List[addon_prefs.Dimensions_List_index].name
+        # .mcpr 临时世界只写入 region/（主世界布局），与当前选中的维度无关
+        _wp = os.path.normpath(worldPath)
+        if any(os.path.basename(d).startswith("crafter_replay_") for d in (_wp, os.path.dirname(_wp))):
+            selected_dimension = "minecraft:overworld"
         worldconfig = {
             "worldPath": worldPath,
-            "selectedDimension": addon_prefs.Dimensions_List[addon_prefs.Dimensions_List_index].name,
+            "selectedDimension": selected_dimension,
             "jarPath": jarPath,
             "versionJsonPath": versionJsonPath,
             "modsPath": modsPath,
@@ -679,16 +688,14 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             except Exception as _ex:
                 error_log(f"finish_import 异常: {_ex}")
                 import traceback; traceback.print_exc()
-            # ReplayMod: apply camera path from timelines.json after world import
+            # ReplayMod: camera path, animated players/mobs, then time-varying blocks
             replay_info = getattr(self, "_replay_info", None)
-            if replay_info and replay_info.get("timelines"):
+            if replay_info:
                 try:
-                    from ..replay.import_replay import apply_replay_camera
-                    cam = apply_replay_camera(replay_info)
-                    if cam:
-                        log_step(f"已应用录像相机路径: {cam.name}")
+                    from ..replay.scene_builder import on_world_imported
+                    on_world_imported(replay_info, self._prefs, log=log_step)
                 except Exception as _ex:
-                    error_log(f"应用录像相机失败: {_ex}")
+                    error_log(f"录像场景构建失败: {_ex}")
                     import traceback; traceback.print_exc()
             return {'FINISHED'}
         else:

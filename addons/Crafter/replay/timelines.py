@@ -135,12 +135,61 @@ def sample_linear(keys: list[CameraKeyframe], t: float) -> CameraKeyframe:
     return keys[-1]
 
 
+def _natural_spline(xs: list[float], ys: list[float]):
+    """Natural cubic spline coefficients (ReplayStudio CubicSplineInterpolator uses a natural
+    cubic spline through keyframes over keyframe time)."""
+    n = len(xs) - 1
+    h = [xs[i + 1] - xs[i] or 1e-6 for i in range(n)]
+    al = [0.0] + [3 / h[i] * (ys[i + 1] - ys[i]) - 3 / h[i - 1] * (ys[i] - ys[i - 1]) for i in range(1, n)]
+    l, mu, z = [1.0] + [0.0] * n, [0.0] * (n + 1), [0.0] * (n + 1)
+    for i in range(1, n):
+        l[i] = 2 * (xs[i + 1] - xs[i - 1]) - h[i - 1] * mu[i - 1]
+        mu[i] = h[i] / l[i]
+        z[i] = (al[i] - h[i - 1] * z[i - 1]) / l[i]
+    l[n] = 1.0
+    c, bb, d = [0.0] * (n + 1), [0.0] * n, [0.0] * n
+    for j in range(n - 1, -1, -1):
+        c[j] = z[j] - mu[j] * c[j + 1]
+        bb[j] = (ys[j + 1] - ys[j]) / h[j] - h[j] * (c[j + 1] + 2 * c[j]) / 3
+        d[j] = (c[j + 1] - c[j]) / (3 * h[j])
+    return bb, c, d
+
+
+_SPLINE_CACHE: dict = {}
+
+
+def _unwrap(vals: list[float]) -> list[float]:
+    out = [vals[0]]
+    for v in vals[1:]:
+        prev = out[-1]
+        out.append(prev + ((v - prev + 180.0) % 360.0 - 180.0))
+    return out
+
+
+def sample_spline(keys: list[CameraKeyframe], t: float) -> CameraKeyframe:
+    if t <= keys[0].time_ms:
+        return keys[0]
+    if t >= keys[-1].time_ms:
+        return keys[-1]
+    ck = tuple((k.time_ms, k.x, k.y, k.z, k.yaw, k.pitch, k.roll) for k in keys)
+    if ck not in _SPLINE_CACHE:
+        xs = [float(k.time_ms) for k in keys]
+        comps = [[k.x for k in keys], [k.y for k in keys], [k.z for k in keys],
+                 _unwrap([k.yaw for k in keys]), [k.pitch for k in keys], [k.roll for k in keys]]
+        _SPLINE_CACHE[ck] = (xs, comps, [_natural_spline(xs, c) for c in comps])
+    xs, comps, coefs = _SPLINE_CACHE[ck]
+    i = max(0, min(len(xs) - 2, next(j for j in range(len(xs) - 1) if xs[j] <= t <= xs[j + 1])))
+    dx = t - xs[i]
+    vals = [comps[k][i] + coefs[k][0][i] * dx + coefs[k][1][i] * dx * dx + coefs[k][2][i] * dx ** 3
+            for k in range(6)]
+    return CameraKeyframe(int(t), *vals)
+
+
 def sample_camera(tl: Timeline, t_ms: float) -> CameraKeyframe:
-    """Sample camera. v1 uses linear; cubic/catmull filled in next iteration."""
+    """Sample camera: linear, or natural cubic spline for cubic-spline / catmull-rom paths."""
     if tl.camera_interp == "linear" or len(tl.camera_keys) < 3:
         return sample_linear(tl.camera_keys, t_ms)
-    # TODO: cubic / catmull-rom matching ReplayStudio; linear is safe fallback
-    return sample_linear(tl.camera_keys, t_ms)
+    return sample_spline(tl.camera_keys, t_ms)
 
 
 def map_replay_time(tl: Timeline, video_t_ms: float) -> int:
@@ -161,14 +210,10 @@ def map_replay_time(tl: Timeline, video_t_ms: float) -> int:
 
 # Minecraft yaw/pitch (degrees) → Blender camera Euler helpers (Y-up RH → Blender Z-up)
 def mc_rot_to_blender_euler(yaw: float, pitch: float, roll: float) -> tuple[float, float, float]:
-    """Return Blender XYZ Euler radians for a camera looking with MC yaw/pitch/roll.
+    """Blender XYZ Euler (radians) for a camera with MC yaw/pitch (degrees).
 
-    MC: yaw 0 looks south (+Z), increases clockwise; pitch + looks down.
-    Blender camera looks -Z local; world Z-up.
+    MC view dir = (-sin(yaw)cos(p), -sin(p), cos(yaw)cos(p)); MC->Blender (x, -z, y).
+    Camera looks down local -Z: Rz(180 - yaw) * Rx(90 - pitch) reproduces that direction.
+    Roll is applied about the view axis by camera_blender (needs mathutils).
     """
-    # Convert to radians; negate yaw for Blender; pitch sign flip
-    yr = math.radians(-yaw + 180.0)
-    pr = math.radians(-pitch)
-    rr = math.radians(roll)
-    # Order applied as XYZ euler on camera: approximate mapping used by mc-world-export style importers
-    return (pr, yr, rr)
+    return (math.radians(90.0 - pitch), 0.0, math.radians(180.0 - yaw))
