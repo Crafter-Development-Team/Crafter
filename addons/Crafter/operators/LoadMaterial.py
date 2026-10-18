@@ -273,6 +273,11 @@ def process_single_material(material, context, classification_list, imported_by_
 
     def _apply_ds_cull():
         '''CI- 组建好后按 doubleSided.json 应用背面剔除（两条分支各自触发）'''
+        # 渲染层 alpha 测试（renderLayer.json）与背面剔除开关无关，同一时机处理
+        try:
+            apply_render_layer_alpha(material, dir_importer)
+        except Exception as ex:
+            warn_log(f"渲染层 alpha 测试失败 [{material.name}]: {ex}")
         if not _ds_enabled:
             return
         try:

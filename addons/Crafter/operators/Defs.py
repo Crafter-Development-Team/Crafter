@@ -1378,6 +1378,110 @@ def apply_double_sided_backface_cull(material, dir_importer):
                 _write_socket_default(node, CI_BACKCULL_INPUT, 1.0)
     return True
 
+# ========== 渲染层 alpha 测试（renderLayer.json）==========
+# 游戏里 cutout 层丢弃 alpha < 0.1 的像素、其余按不透明画；cutout_mipped 阈值 0.5；
+# translucent 才按 alpha 混合。WorldImporter 把导出方块的渲染层写进 renderLayer.json
+# （{"cutout": [方块 id...], "cutout_mipped": [...], ...}）。命中 cutout 类的材质，
+# 在贴图 Alpha 和 CI- 组 Alpha 之间插一个"大于阈值"节点，半透明像素不再显得发虚。
+render_layer_json_name = "renderLayer.json"
+RENDER_LAYER_CUTOFF = {"cutout": 0.1, "cutout_mipped": 0.5}
+ALPHA_CUTOFF_NODE_NAME = "Crafter-alpha-cutoff"
+# renderLayer.json 的按 mtime 失效的读盘缓存：{"stamp": float|None, "cutoff": {方块 id: 阈值}}
+_render_layer_cache = {"stamp": None, "cutoff": {}}
+
+def load_render_layer_cutoffs(dir_importer):
+    '''
+    读取 renderLayer.json，返回 {方块 id: alpha 阈值}（只含 cutout / cutout_mipped）。
+    文件不存在或格式异常时返回空字典。
+    '''
+    path = os.path.join(dir_importer, render_layer_json_name)
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+    except Exception as ex:
+        warn_log(f"renderLayer.json 读取失败: {ex}")
+        return {}
+    if not isinstance(raw, dict):
+        warn_log("renderLayer.json 格式异常（应为对象），已忽略")
+        return {}
+    cutoff = {}
+    for layer, value in RENDER_LAYER_CUTOFF.items():
+        names = raw.get(layer, [])
+        if isinstance(names, list):
+            for name in names:
+                if name:
+                    cutoff[str(name)] = value
+    return cutoff
+
+def material_block_id(name: str):
+    '''
+    材质名 -> 方块 id：先按 material_base_name 去掉 @ 后缀，再去掉 # 与 [ 之后的部分。
+    "yuushya:title_white#0~character_white@ctm/..." -> "yuushya:title_white"
+    '''
+    base = material_base_name(name)
+    for sep in ("#", "["):
+        cut = base.find(sep)
+        if cut != -1:
+            base = base[:cut]
+    return base
+
+def apply_render_layer_alpha(material, dir_importer):
+    '''
+    材质所属方块在 renderLayer.json 里是 cutout / cutout_mipped 时，给 CI- 组的 Alpha
+    输入插入阈值节点（alpha >= 阈值 -> 1，否则 0），与游戏的 alpha 测试一致。
+    重复调用只更新已插入节点的阈值。
+    return: 是否处理了该材质
+    '''
+    if material is None or getattr(material, "library", None) is not None:
+        return False
+    path = os.path.join(dir_importer, render_layer_json_name)
+    try:
+        stamp = os.path.getmtime(path)
+    except OSError:
+        return False
+    global _render_layer_cache
+    if _render_layer_cache.get("stamp") != stamp:
+        _render_layer_cache["stamp"] = stamp
+        _render_layer_cache["cutoff"] = load_render_layer_cutoffs(dir_importer)
+    threshold = _render_layer_cache["cutoff"].get(material_block_id(material.name))
+    if threshold is None:
+        return False
+    node_tree = getattr(material, "node_tree", None)
+    if node_tree is None:
+        return False
+    nodes, links = node_tree.nodes, node_tree.links
+    done = False
+    for node in list(nodes):
+        if node.type != "GROUP" or getattr(node, "node_tree", None) is None:
+            continue
+        if not node.node_tree.name.startswith("CI-") or "Alpha" not in node.inputs:
+            continue
+        socket = node.inputs["Alpha"]
+        if not socket.is_linked:
+            continue   # 叠加层帧里的 CI 故意不接 Alpha，保持不动
+        link = socket.links[0]
+        src = link.from_node
+        if src.type == "MATH" and src.name.startswith(ALPHA_CUTOFF_NODE_NAME):
+            src.inputs[1].default_value = threshold - 1e-4
+            done = True
+            continue
+        node_cut = nodes.new("ShaderNodeMath")
+        node_cut.name = ALPHA_CUTOFF_NODE_NAME
+        node_cut.label = "alpha cutout"
+        node_cut.operation = "GREATER_THAN"
+        node_cut.inputs[1].default_value = threshold - 1e-4   # 游戏: alpha < 阈值才丢弃
+        node_cut.location = (node.location.x - 200, node.location.y - 300)
+        if node.parent is not None:
+            node_cut.parent = node.parent
+        from_socket = link.from_socket
+        links.remove(link)
+        links.new(from_socket, node_cut.inputs[0])
+        links.new(node_cut.outputs[0], socket)
+        done = True
+    return done
+
 def link_CI_output(group_CI, node_output_EEVEE, node_output_Cycles, links):
     '''
     group_CI: 材质组节点
