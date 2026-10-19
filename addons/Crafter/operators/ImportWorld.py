@@ -1003,7 +1003,7 @@ def finish_import(ctx, prefs, imported_time, worldconfig, prepared_time,
     if not is_custom:
         if undivided:
             jh.setdefault(dot_minecraftPath, [{}])
-            ul = jh[dot_minecraftPath][0].setdefault(save, {})
+            ul = jh[dot_minecraftPath][0].setdefault(save, {"settings": []})
             js = ul.setdefault("settings", [])
             ul["version"] = version
         else:
@@ -1156,7 +1156,7 @@ class VIEW3D_OT_UseCrafterHistoryWorlds(bpy.types.Operator):
                     #加入新找到的save
                     for save in os.listdir(os.path.join(root, "saves")):
                         if os.path.isdir(os.path.join(root, "saves", save)):
-                            json_history_worlds[root][0].setdefault(save, {})
+                            json_history_worlds[root][0].setdefault(save, {"settings": []})
             else:
                 dir_versions = dir_root_2_dir_versions(dir_root=root)
                 #添加版本
@@ -1710,7 +1710,7 @@ class VIEW3D_OT_CrafterReloadHistoryWorldsList(bpy.types.Operator):#刷新 历�
                     if len(addon_prefs.History_World_Saves_List) > 0:
                         if addon_prefs.History_World_Saves_List_index < 0 or addon_prefs.History_World_Saves_List_index >= len(addon_prefs.History_World_Saves_List):
                             addon_prefs.History_World_Saves_List_index = 0
-                        for settings in json_history_worlds[addon_prefs.History_World_Roots_List[addon_prefs.History_World_Roots_List_index].name][0][addon_prefs.History_World_Saves_List[addon_prefs.History_World_Saves_List_index].name]["settings"]:
+                        for settings in json_history_worlds[addon_prefs.History_World_Roots_List[addon_prefs.History_World_Roots_List_index].name][0][addon_prefs.History_World_Saves_List[addon_prefs.History_World_Saves_List_index].name].get("settings", []):
                             history_world_setting = addon_prefs.History_World_Settings_List.add()
                             history_world_setting.name = f"{settings[0][0]} {settings[0][1]} {settings[0][2]} {settings[1][0]} {settings[1][1]} {settings[1][2]}" 
             else:

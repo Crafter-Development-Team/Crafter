@@ -43,6 +43,19 @@ def nbt_block_to_state_id(entry) -> int:
     if "Properties" in entry:
         props = {str(k): str(v) for k, v in dict(entry["Properties"]).items()}
     key = (name, tuple(sorted(props.items())))
+    if key in rev:
+        return rev[key]
+    # Auto-extend for modded blocks (yuushya:*, etc.) so they survive map_chunk round-trip.
+    from .chunks import extend_state_table, load_state_tables
+    e = {"Name": name}
+    if props:
+        e["Properties"] = props
+    n = extend_state_table([e])
+    if n:
+        table, _ = load_state_tables()
+        sid = len(table) - 1
+        rev[key] = sid
+        return sid
     return rev.get(key, 0)
 
 
@@ -66,6 +79,8 @@ def _read_packed(longs, bits, count):
 
 
 def section_nbt_to_ids(sec) -> tuple[list[int], list[int]]:
+    if "block_states" not in sec:
+        return [0] * BLOCK_VOLUME, [0] * BIOME_VOLUME
     bs = sec["block_states"]
     pal = list(bs["palette"])
     state_ids_pal = [nbt_block_to_state_id(e) for e in pal]
