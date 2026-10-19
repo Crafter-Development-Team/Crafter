@@ -273,7 +273,7 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
         mats[full] = m
         return m
 
-    def enable_bloom(scene=None, *, threshold=0.75, size=8, mix=0.42):
+    def enable_bloom(scene=None, *, threshold=0.85, size=7, mix=0.32):
         """EEVEE Next has no use_bloom — add compositor Glare (Fog Glow) for flame bloom."""
         import bpy
         scene = scene or bpy.context.scene
@@ -328,8 +328,11 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
         coll.objects.link(ob)
         ob.parent = parent
         ob.location = loc
+        try:
+            ob.visible_shadow = False  # 粒子不投阴影
+        except Exception:
+            pass
         if track and cam is not None:
-            # Damped track: local +Z toward camera (works with parenting)
             c = ob.constraints.new("DAMPED_TRACK")
             c.target = cam
             c.track_axis = "TRACK_Z"
@@ -352,6 +355,10 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
         coll.objects.link(ob)
         ob.parent = parent
         ob.location = loc
+        try:
+            ob.visible_shadow = False
+        except Exception:
+            pass
         return ob
 
     def pick_sprite(kind: str) -> Path | None:
@@ -462,10 +469,10 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
             objs.append(ob)
             # tiny chips near crack for polish (stage >= 3)
             if stage >= 2 and root_tex and left > 2:
-                for ci in range(min(4, left)):
+                for ci in range(min(7, left)):
                     dpath = pick_debris(burst.block_state)
                     dmat = mat_tex(f"digchip_{dpath.name if dpath else ci}", dpath, alpha_clip=True)
-                    size = 0.06 + rng.random() * 0.06
+                    size = 0.07 + rng.random() * 0.09
                     dx = (rng.random() - 0.5) * 0.7
                     dy = 0.35 + rng.random() * 0.4
                     dz = (rng.random() - 0.5) * 0.7
@@ -484,7 +491,7 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
         if kind in ("destroy_block", "block", "falling_dust"):
             # sprint dust stays low; destroy_block sprays higher
             is_destroy = kind == "destroy_block"
-            n = min(burst.count + (8 if is_destroy else 0), 32, left)
+            n = min(burst.count + (12 if is_destroy else 0), 36, left)
             for i in range(n):
                 path = pick_debris(burst.block_state)
                 mat = mat_tex(f"deb_{path.name if path else 'x'}_{i%4}", path, alpha_clip=True)
@@ -547,7 +554,7 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
                     dy = rng.random() * (burst.oy or 0.15) + 0.02
                 dz = (rng.random() - 0.5) * 2 * (burst.oz or 0.2)
                 emit = 0.0 if trail else 0.02
-                amul = 0.42 if trail else (0.5 if kind == "large_smoke" else 0.48)
+                amul = 0.32 if trail else (0.4 if kind == "large_smoke" else 0.38)
                 if sd is not None:
                     mat = mat_seq(
                         f"sm_{kind}", sd, emit=emit, alpha_clip=False,
@@ -663,8 +670,8 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
                     created += 1
                 # 软 bloom 板：抬高+更透，减少贴地方块感
                 if left > 0:
-                    mat = mat_fire("bloom_plate", color=(1.0, 0.45, 0.08), strength=11.0, soft=0.72)
-                    ob = billboard(f"PB{bi}_bloom", 1.55, mat, group, (0, 0.95, 0))
+                    mat = mat_fire("bloom_plate", color=(1.0, 0.5, 0.12), strength=7.0, soft=0.82)
+                    ob = billboard(f"PB{bi}_bloom", 1.2, mat, group, (0, 1.15, 0))
                     objs.append(ob)
                     left -= 1
                     created += 1
