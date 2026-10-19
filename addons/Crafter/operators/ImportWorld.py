@@ -245,8 +245,17 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             try:
                 from ..replay.import_replay import prepare_replay_world
                 box = tuple(addon_prefs.XYZ_1) + tuple(addon_prefs.XYZ_2)
+                # A .mcpr in replays/ carries no game-root hint. The only game root
+                # we can offer is the one behind the last-used jar (Custom_Jar_Path);
+                # otherwise the user is asked to pick a jar after this returns.
+                game_roots = []
+                if getattr(addon_prefs, "Custom_Jar_Path", ""):
+                    from ..replay.game_dirs import discover_game_dirs_from_jar
+                    root, _rp, _mods = discover_game_dirs_from_jar(addon_prefs.Custom_Jar_Path)
+                    if root:
+                        game_roots.append(root)
                 # static base world (time-varying blocks cleared) + per-interval block worlds
-                temp_world, replay_info = prepare_replay_world(worldPath, box)
+                temp_world, replay_info = prepare_replay_world(worldPath, box, game_roots=game_roots)
                 log_step(f"录像方块变化: {len(replay_info.get('block_groups') or [])} 组; "
                          f"实体: {len(replay_info['entities'].visible_tracks()) if replay_info.get('entities') else 0}")
                 self._replay_info = replay_info
@@ -302,9 +311,10 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
                 dir_dot_minecraft = dir_dot_minecraft or d_m
                 dir_resourcepacks = dir_resourcepacks or d_rp
                 dir_mods = dir_mods or d_mods
-            if dir_mods and os.path.isdir(dir_mods):
-                addon_prefs.use_Custom_mods_Path = True
-                addon_prefs.Custom_mods_Path = dir_mods
+            # Do NOT touch use_Custom_mods_Path / Custom_mods_Path here: those are
+            # persisted addon preferences, so writing them would leak this replay's
+            # mods dir into every later import (and hard-fail once the dir is gone).
+            # dir_mods is stored on the operator (self.modsPath) below instead.
             log_step(f"录像导入使用建议 jar: {jarPath}")
             if dir_dot_minecraft:
                 log_step(f"从 jar 推断游戏根目录: {dir_dot_minecraft}")

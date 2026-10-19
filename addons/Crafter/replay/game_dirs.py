@@ -84,3 +84,24 @@ def apply_jar_suggestions(info: dict, jar_path: str) -> None:
         info["suggest_resourcepacks"] = rp
     if mods:
         info["suggest_mods"] = mods
+
+
+def find_jar_for_version(version: str, *, extra_roots: list[str] | None = None) -> str:
+    """Locate a client jar for ``version`` under a known game root.
+
+    Tries each root in ``extra_roots`` (a ``.minecraft``/instance dir, i.e. the
+    parent of ``versions``), then ``CRAFTER_PIPELINE_MC``. Returns "" when
+    nothing matches, so the caller can fall back to a manual jar pick.
+    """
+    if not version:
+        return ""
+    roots = [r for r in (extra_roots or []) if r]
+    env_root = os.environ.get("CRAFTER_PIPELINE_MC", "").strip()
+    if env_root:
+        roots.append(env_root)
+    for root in roots:
+        for name in (f"{version}.jar", "client.jar"):
+            cand = os.path.join(root, "versions", version, name)
+            if os.path.isfile(cand):
+                return cand
+    return ""

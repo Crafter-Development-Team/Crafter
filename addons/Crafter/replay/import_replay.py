@@ -61,13 +61,18 @@ def materialize_world_from_mcpr(mcpr_path: str, dest_dir: str | None = None) -> 
     info["world"] = dest_dir
     ver = (info.get("meta") or {}).get("mcversion") or ""
     from .game_dirs import apply_jar_suggestions
-    for cand in (
-        Path(f"/workspace/crafter-pipeline/mc/versions/{ver}/{ver}.jar"),
-        Path(f"/workspace/crafter-pipeline/mc/versions/{ver}/client.jar"),
-    ):
-        if cand.is_file():
-            apply_jar_suggestions(info, str(cand))
-            break
+    # Optional headless/CI hook: a game root (the dir holding versions/) supplied
+    # by the caller. Empty on a normal desktop install, where ImportWorld.py picks
+    # the jar from the .mcpr path via discover_game_dirs_from_jar instead.
+    pipeline_root = os.environ.get("CRAFTER_PIPELINE_MC", "").strip()
+    if pipeline_root and ver:
+        for cand in (
+            Path(pipeline_root) / "versions" / ver / f"{ver}.jar",
+            Path(pipeline_root) / "versions" / ver / "client.jar",
+        ):
+            if cand.is_file():
+                apply_jar_suggestions(info, str(cand))
+                break
 
     if store.map_chunks:
         n = store.write_anvil_world(Path(dest_dir))
@@ -183,12 +188,25 @@ def frame_quantizer(info: dict, fps: int = 30, max_groups: int = 96):
 
 
 def prepare_replay_world(mcpr_path: str, box, work_root: str | None = None, focus=None, focus_radius: float = 0,
-                         fps: int = 30):
+                         fps: int = 30, game_roots: list[str] | None = None):
     """Full replay preparation used by Crafter: parse, split static/time-varying, return info.
-    info['world'] = base Anvil world; info['block_groups'] = interval mini worlds."""
+    info['world'] = base Anvil world; info['block_groups'] = interval mini worlds.
+
+    ``game_roots`` are candidate ``.minecraft``/instance dirs used to resolve the
+    client jar for the replay's MC version when the .mcpr itself gives no hint.
+    """
     if work_root is None:
         work_root = tempfile.mkdtemp(prefix="crafter_replay_")
     world, info = materialize_world_from_mcpr(mcpr_path, os.path.join(work_root, "final"))
+    # The .mcpr lives in replays/, so it carries no game-root hint. Resolve the
+    # jar from the caller's game roots (or CRAFTER_PIPELINE_MC) before handing
+    # info to ImportWorld, which otherwise falls into launcher-specific paths.
+    if not info.get("suggest_jar"):
+        from .game_dirs import apply_jar_suggestions, find_jar_for_version
+        ver = (info.get("meta") or {}).get("mcversion") or ""
+        jar = find_jar_for_version(ver, extra_roots=game_roots)
+        if jar:
+            apply_jar_suggestions(info, jar)
     segs = info.get("block_segments") or {}
     ents = info.get("entities")
     if focus is None and ents is not None:
