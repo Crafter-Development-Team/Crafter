@@ -134,8 +134,8 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
         except Exception:
             pass
 
-    def mat_tex(key: str, path: Path | None, *, emit=0.0, alpha_clip=False, tint=None, warm=0.0, alpha_mul=1.0):
-        full_key = key if alpha_mul >= 0.999 else f"{key}_a{alpha_mul:.2f}"
+    def mat_tex(key: str, path: Path | None, *, emit=0.0, alpha_clip=False, tint=None, warm=0.0, alpha_mul=1.0, soft_edge=False):
+        full_key = key if alpha_mul >= 0.999 and not soft_edge else f"{key}_a{alpha_mul:.2f}{'s' if soft_edge else ''}"
         if full_key in mats:
             return mats[full_key]
         m = bpy.data.materials.new(f"PTex_{full_key}")
@@ -152,7 +152,7 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
             img = bpy.data.images.load(str(path), check_existing=True)
             img.alpha_mode = "STRAIGHT"
             tex.image = img
-            tex.interpolation = "Closest"
+            tex.interpolation = "Linear" if soft_edge else "Closest"
             color_out = tex.outputs["Color"]
             if warm > 0:
                 mix = nodes.new("ShaderNodeMixRGB")
@@ -164,6 +164,37 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
             links.new(color_out, bsdf.inputs["Base Color"])
             if "Alpha" in bsdf.inputs:
                 a_out = tex.outputs["Alpha"]
+                if soft_edge:
+                    # UV 径向衰减，软化硬白边
+                    tc = nodes.new("ShaderNodeTexCoord")
+                    sep = nodes.new("ShaderNodeSeparateXYZ")
+                    links.new(tc.outputs["UV"], sep.inputs["Vector"])
+                    subx = nodes.new("ShaderNodeMath"); subx.operation = "SUBTRACT"
+                    subx.inputs[1].default_value = 0.5
+                    links.new(sep.outputs["X"], subx.inputs[0])
+                    suby = nodes.new("ShaderNodeMath"); suby.operation = "SUBTRACT"
+                    suby.inputs[1].default_value = 0.5
+                    links.new(sep.outputs["Y"], suby.inputs[0])
+                    sqx = nodes.new("ShaderNodeMath"); sqx.operation = "MULTIPLY"
+                    links.new(subx.outputs[0], sqx.inputs[0]); links.new(subx.outputs[0], sqx.inputs[1])
+                    sqy = nodes.new("ShaderNodeMath"); sqy.operation = "MULTIPLY"
+                    links.new(suby.outputs[0], sqy.inputs[0]); links.new(suby.outputs[0], sqy.inputs[1])
+                    add = nodes.new("ShaderNodeMath"); add.operation = "ADD"
+                    links.new(sqx.outputs[0], add.inputs[0]); links.new(sqy.outputs[0], add.inputs[1])
+                    # falloff = saturate(1 - 4*r^2)
+                    mul4 = nodes.new("ShaderNodeMath"); mul4.operation = "MULTIPLY"
+                    mul4.inputs[1].default_value = 4.0
+                    links.new(add.outputs[0], mul4.inputs[0])
+                    one_m = nodes.new("ShaderNodeMath"); one_m.operation = "SUBTRACT"
+                    one_m.inputs[0].default_value = 1.0
+                    links.new(mul4.outputs[0], one_m.inputs[1])
+                    clamp = nodes.new("ShaderNodeClamp")
+                    clamp.inputs["Min"].default_value = 0.0
+                    clamp.inputs["Max"].default_value = 1.0
+                    links.new(one_m.outputs[0], clamp.inputs["Value"])
+                    am = nodes.new("ShaderNodeMath"); am.operation = "MULTIPLY"
+                    links.new(a_out, am.inputs[0]); links.new(clamp.outputs[0], am.inputs[1])
+                    a_out = am.outputs[0]
                 if alpha_mul < 0.999:
                     mathn = nodes.new("ShaderNodeMath")
                     mathn.operation = "MULTIPLY"
@@ -171,7 +202,7 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
                     links.new(a_out, mathn.inputs[0])
                     a_out = mathn.outputs[0]
                 links.new(a_out, bsdf.inputs["Alpha"])
-            _finish_mat(m, alpha_clip)
+            _finish_mat(m, alpha_clip if not soft_edge else False)
             try:
                 bsdf.inputs["Emission Color"].default_value = (*col, 1)
                 bsdf.inputs["Emission Strength"].default_value = emit
@@ -194,14 +225,16 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
         return m
 
     def mat_seq(key: str, seq_dir: Path, *, emit=0.0, alpha_clip=False, tint=None,
-                warm=0.0, frame_start=1, frame_offset=0, fps_div=1, alpha_mul=1.0):
+                warm=0.0, frame_start=1, frame_offset=0, fps_div=1, alpha_mul=1.0, soft_edge=False):
         """序列帧：用 offset 选静态图（Image SEQUENCE 在 EEVEE 易粉红丢贴图）。"""
         full_key = f"{key}_o{frame_offset}_s{frame_start}"
         frames = sorted(seq_dir.glob("*.png"))
         if not frames:
-            return mat_tex(key, None, emit=emit, alpha_clip=alpha_clip, tint=tint, warm=warm, alpha_mul=alpha_mul)
+            return mat_tex(key, None, emit=emit, alpha_clip=alpha_clip, tint=tint, warm=warm,
+                           alpha_mul=alpha_mul, soft_edge=soft_edge)
         fp = frames[int(frame_offset) % len(frames)]
-        return mat_tex(full_key, fp, emit=emit, alpha_clip=alpha_clip, tint=tint, warm=warm, alpha_mul=alpha_mul)
+        return mat_tex(full_key, fp, emit=emit, alpha_clip=alpha_clip, tint=tint, warm=warm,
+                       alpha_mul=alpha_mul, soft_edge=soft_edge)
 
     def seq_dir_for(kind: str) -> Path | None:
         if not root_tex:
@@ -467,18 +500,19 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
                 pass
             ob = crack_cube(f"PB{bi}_crack", mat, group, (0, 0, 0), scale=1.04)
             objs.append(ob)
-            # tiny chips near crack for polish (stage >= 3)
-            if stage >= 2 and root_tex and left > 2:
-                for ci in range(min(7, left)):
+            # 各破坏阶段都喷碎屑；晚期更多
+            if root_tex and left > 2:
+                n_chip = min(3 + stage, 9, left)
+                for ci in range(n_chip):
                     dpath = pick_debris(burst.block_state)
                     dmat = mat_tex(f"digchip_{dpath.name if dpath else ci}", dpath, alpha_clip=True)
-                    size = 0.07 + rng.random() * 0.09
-                    dx = (rng.random() - 0.5) * 0.7
-                    dy = 0.35 + rng.random() * 0.4
-                    dz = (rng.random() - 0.5) * 0.7
+                    size = 0.06 + rng.random() * (0.08 + stage * 0.008)
+                    dx = (rng.random() - 0.5) * 0.75
+                    dy = 0.3 + rng.random() * 0.45
+                    dz = (rng.random() - 0.5) * 0.75
                     cob = billboard(f"PB{bi}_chip{ci}", size, dmat, group, (dx, dy, dz))
                     drift(cob, (dx, dy, dz),
-                          ((rng.random()-0.5)*0.55, 0.35+rng.random()*0.45, (rng.random()-0.5)*0.55),
+                          ((rng.random()-0.5)*0.5, 0.3+rng.random()*0.5, (rng.random()-0.5)*0.5),
                           burst.t, life, g=5.0)
                     objs.append(cob)
                     left -= 1
@@ -521,9 +555,11 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
                 for i in range(min(3, left)):
                     if sd:
                         mat = mat_seq(f"sprintdust", sd, emit=0.0, alpha_clip=False,
-                                      frame_start=fr_on, frame_offset=rng.randint(0, 5))
+                                      frame_start=fr_on, frame_offset=rng.randint(0, 5),
+                                      alpha_mul=0.28, soft_edge=True)
                     else:
-                        mat = mat_tex(f"sprintdust_{i}", pick_sprite("poof"), alpha_clip=False)
+                        mat = mat_tex(f"sprintdust_{i}", pick_sprite("poof"), alpha_clip=False,
+                                      alpha_mul=0.28, soft_edge=True)
                     ob = billboard(f"PB{bi}_puff{i}", 0.22 + rng.random() * 0.12, mat, group,
                                    ((rng.random()-0.5)*0.3, 0.05 + rng.random()*0.08, (rng.random()-0.5)*0.3))
                     objs.append(ob)
@@ -554,16 +590,18 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
                     dy = rng.random() * (burst.oy or 0.15) + 0.02
                 dz = (rng.random() - 0.5) * 2 * (burst.oz or 0.2)
                 emit = 0.0 if trail else 0.02
-                amul = 0.32 if trail else (0.4 if kind == "large_smoke" else 0.38)
+                amul = 0.22 if trail else (0.35 if kind == "large_smoke" else 0.30)
+                se = bool(trail or kind in ("poof", "cloud", "white_smoke"))
                 if sd is not None:
                     mat = mat_seq(
                         f"sm_{kind}", sd, emit=emit, alpha_clip=False,
                         frame_start=fr_on, frame_offset=rng.randint(0, 7),
-                        alpha_mul=amul,
+                        alpha_mul=amul, soft_edge=se,
                     )
                 else:
                     path = pick_sprite(kind)
-                    mat = mat_tex(f"sm_{kind}_{path.stem if path else i}", path, alpha_clip=False, emit=emit, alpha_mul=amul)
+                    mat = mat_tex(f"sm_{kind}_{path.stem if path else i}", path, alpha_clip=False,
+                                  emit=emit, alpha_mul=amul, soft_edge=se)
                 ob = billboard(f"PB{bi}_{i}", size, mat, group, (dx, dy, dz))
                 if not trail:
                     drift(ob, (dx, dy, dz),
@@ -591,7 +629,7 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
                 dx = r * math.sin(phi) * math.cos(theta)
                 dy = r * math.cos(phi) * 0.7 + abs(rng.random()) * 0.5
                 dz = r * math.sin(phi) * math.sin(theta)
-                emit = 6.5 if kind.startswith("explo") else 5.0
+                emit = 5.0 if kind.startswith("explo") else 4.5
                 warm = 0.75 if kind.startswith("explo") else 0.45
                 clip = False if kind.startswith("explo") else True
                 if sd is not None:
@@ -633,7 +671,7 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
                     dx, dy, dz = math.cos(theta) * r, 0.2 + rng.random() * 0.9, math.sin(theta) * r
                     if flame_sd and i % 2 == 0:
                         mat = mat_seq(
-                            "flame_punch", flame_sd, emit=10.0, alpha_clip=False,
+                            "flame_punch", flame_sd, emit=6.5, alpha_clip=False,
                             tint=(1.0, 0.4, 0.05), warm=0.7,
                             frame_start=fr_on, frame_offset=rng.randint(0, 3),
                         )
@@ -643,47 +681,37 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
                         path = rng.choice(sp) if sp else None
                         mat = mat_tex(
                             f"spark_{path.stem if path else i}", path,
-                            emit=12.0, alpha_clip=True, tint=(1.0, 0.85, 0.3), warm=0.4,
+                            emit=7.0, alpha_clip=True, tint=(1.0, 0.85, 0.3), warm=0.35,
                         )
                         size = 0.18 + rng.random() * 0.15
                     else:
-                        mat = mat_tex(f"core_orange_{i}", None, emit=8.0, tint=(1.0, 0.35, 0.0))
-                        size = 0.25
+                        continue  # 无贴图则跳过，勿生成硬白方
                     ob = billboard(f"PB{bi}_fire{i}", size, mat, group, (dx, dy, dz))
                     objs.append(ob)
                     left -= 1
                     created += 1
-                # 软核：少硬白方块，多 bloom 板
-                for i in range(min(8, left)):
+                # 无固体白核：只用 glow 贴图 bloom（多片、抬高）
+                glow = None
+                if root_tex:
+                    gp = root_tex / "particle" / "generic_0.png"
+                    if gp.is_file():
+                        glow = gp
+                for bi_g in range(min(3, left)):
                     theta = rng.random() * math.tau
-                    r = radius * rng.random() * 0.4
-                    dx = math.cos(theta) * r
-                    dz = math.sin(theta) * r
-                    dy = 0.35 + rng.random() * 0.7
-                    if i % 4 == 0:
-                        col, strength, size, soft = (1.0, 0.95, 0.55), 16.0, 0.4 + rng.random() * 0.25, 0.28
-                    elif i % 4 == 1:
-                        col, strength, size, soft = (1.0, 0.45, 0.02), 14.0, 0.4 + rng.random() * 0.3, 0.22
-                    else:
-                        col, strength, size, soft = (1.0, 0.22, 0.0), 10.0, 0.3 + rng.random() * 0.25, 0.25
-                    mat = mat_fire(f"core_{i%4}", color=col, strength=strength, soft=soft)
-                    ob = billboard(f"PB{bi}_core{i}", size, mat, group, (dx, dy, dz))
-                    objs.append(ob)
-                    left -= 1
-                    created += 1
-                # 软圆形 bloom：generic 光晕贴图 + 高 soft，避免硬方板
-                if left > 0:
-                    glow = None
-                    if root_tex:
-                        gp = root_tex / "particle" / "generic_0.png"
-                        if gp.is_file():
-                            glow = gp
+                    r = radius * (0.05 + rng.random() * 0.25)
+                    dx, dz = math.cos(theta) * r, math.sin(theta) * r
+                    dy = 0.9 + rng.random() * 0.6
                     if glow:
-                        mat = mat_tex("bloom_glow", glow, emit=9.0, alpha_clip=False,
-                                      tint=(1.0, 0.55, 0.12), warm=0.55, alpha_mul=0.55)
+                        mat = mat_tex(
+                            f"bloom_glow_{bi_g}", glow, emit=6.0 + bi_g, alpha_clip=False,
+                            tint=(1.0, 0.5, 0.1), warm=0.5, alpha_mul=0.4, soft_edge=True,
+                        )
                     else:
-                        mat = mat_fire("bloom_plate", color=(1.0, 0.5, 0.12), strength=7.0, soft=0.82)
-                    ob = billboard(f"PB{bi}_bloom", 1.35, mat, group, (0, 1.2, 0))
+                        # 无贴图时也用高 soft，绝不硬白方
+                        mat = mat_fire(f"bloom_soft_{bi_g}", color=(1.0, 0.45, 0.08),
+                                       strength=5.0, soft=0.88)
+                    size = 1.0 + rng.random() * 0.5
+                    ob = billboard(f"PB{bi}_bloom{bi_g}", size, mat, group, (dx, dy, dz))
                     objs.append(ob)
                     left -= 1
                     created += 1
