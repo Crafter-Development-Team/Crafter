@@ -1,6 +1,8 @@
 """Vanilla-ish particle bursts: textured billboards + dig crack overlays (EEVEE)."""
 from __future__ import annotations
 
+import os
+
 import json
 import math
 import random
@@ -87,7 +89,8 @@ def _block_tex_name(state_id: int | None, states: list) -> str:
 
 
 def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, seed=1,
-                    tex_root: str | Path | None = None, jar: str | None = None):
+                    tex_root: str | Path | None = None, jar: str | None = None,
+                    resourcepacks: list[str] | None = None):
     """Spawn billboard sprites + dig cracks for ParticleStore bursts."""
     import bpy
 
@@ -99,11 +102,21 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
             bpy.context.scene.collection.objects.link(mc_space)
             mc_space.rotation_euler = (math.pi / 2, 0, 0)
 
+    packs = [p for p in (resourcepacks or []) if p]
     root_tex = Path(tex_root) if tex_root else _default_tex_root()
-    if root_tex is None and jar:
-        # extract on demand via zip
-        root_tex = Path(bpy.app.tempdir or "/tmp") / "crafter_particle_tex"
-        _ensure_from_jar(jar, root_tex)
+    if jar or packs:
+        dest = Path(bpy.app.tempdir or "/tmp") / "crafter_particle_tex"
+        if root_tex is None or packs:
+            # Writable cache: jar fills gaps, packs override (highest priority wins).
+            if root_tex and root_tex.is_dir() and packs:
+                import shutil
+                dest.mkdir(parents=True, exist_ok=True)
+                for sub in ("particle", "block", "seq", "debris"):
+                    src = root_tex / sub
+                    if src.is_dir():
+                        shutil.copytree(src, dest / sub, dirs_exist_ok=True)
+            _ensure_from_jar(jar or "", dest, packs)
+            root_tex = dest
 
     bursts = store.in_box(box) if hasattr(store, "in_box") else list(store.bursts)
     if not bursts:
@@ -813,7 +826,28 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
     return [root]
 
 
-def _ensure_from_jar(jar: str, dest: Path):
+def _particle_asset_wanted(name: str, want_pref) -> bool:
+    if not name.endswith(".png"):
+        return False
+    if any(name.startswith(p) or name == p.rstrip("_") for p in want_pref):
+        return True
+    if "/textures/particle/" in name:
+        return True
+    if "destroy_stage_" in name or name.endswith("/dirt.png") or name.endswith("/stone.png"):
+        return True
+    return False
+
+
+def _write_particle_asset(dest: Path, name: str, data: bytes, *, overwrite: bool = False):
+    bn = name.rsplit("/", 1)[-1]
+    sub = "block" if ("destroy_stage" in bn or bn in ("dirt.png", "stone.png")) else "particle"
+    out = dest / sub / bn
+    if overwrite or not out.exists():
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(data)
+
+
+def _ensure_from_jar(jar: str, dest: Path, resourcepacks: list[str] | None = None):
     import zipfile
     dest.mkdir(parents=True, exist_ok=True)
     (dest / "particle").mkdir(exist_ok=True)
@@ -827,19 +861,35 @@ def _ensure_from_jar(jar: str, dest: Path):
         "assets/minecraft/textures/block/dirt.png",
         "assets/minecraft/textures/block/stone.png",
     )
-    with zipfile.ZipFile(jar) as zf:
-        for name in zf.namelist():
-            if not any(name.startswith(p) or name == p.rstrip("_") for p in want_pref):
-                # simpler
-                if "/textures/particle/" not in name and "destroy_stage_" not in name and not name.endswith("/dirt.png") and not name.endswith("/stone.png"):
+    if jar and os.path.isfile(jar):
+        with zipfile.ZipFile(jar) as zf:
+            for name in zf.namelist():
+                if not _particle_asset_wanted(name, want_pref):
                     continue
-            if not name.endswith(".png"):
-                continue
-            bn = name.rsplit("/", 1)[-1]
-            sub = "block" if ("destroy_stage" in bn or bn in ("dirt.png", "stone.png")) else "particle"
-            out = dest / sub / bn
-            if not out.exists():
-                out.write_bytes(zf.read(name))
+                _write_particle_asset(dest, name, zf.read(name), overwrite=False)
+    # Packs override jar: low priority first so highest-priority pack wins.
+    packs = [p for p in (resourcepacks or []) if p]
+    for pack in reversed(packs):
+        if os.path.isdir(pack):
+            base = Path(pack)
+            for pref in (
+                "assets/minecraft/textures/particle",
+                "assets/minecraft/textures/block",
+            ):
+                folder = base.joinpath(*pref.split("/"))
+                if not folder.is_dir():
+                    continue
+                for fp in folder.glob("*.png"):
+                    name = f"{pref}/{fp.name}"
+                    if not _particle_asset_wanted(name, want_pref):
+                        continue
+                    _write_particle_asset(dest, name, fp.read_bytes(), overwrite=True)
+        elif os.path.isfile(pack) and zipfile.is_zipfile(pack):
+            with zipfile.ZipFile(pack) as zf:
+                for name in zf.namelist():
+                    if not _particle_asset_wanted(name, want_pref):
+                        continue
+                    _write_particle_asset(dest, name, zf.read(name), overwrite=True)
 
 
 def _frame_at(frame_times, t):
