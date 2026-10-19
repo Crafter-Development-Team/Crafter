@@ -478,8 +478,8 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
                     dz = (rng.random() - 0.5) * 0.7
                     cob = billboard(f"PB{bi}_chip{ci}", size, dmat, group, (dx, dy, dz))
                     drift(cob, (dx, dy, dz),
-                          ((rng.random()-0.5)*1.2, 0.6+rng.random()*0.8, (rng.random()-0.5)*1.2),
-                          burst.t, life)
+                          ((rng.random()-0.5)*0.55, 0.35+rng.random()*0.45, (rng.random()-0.5)*0.55),
+                          burst.t, life, g=5.0)
                     objs.append(cob)
                     left -= 1
                     created += 1
@@ -593,16 +593,18 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
                 dz = r * math.sin(phi) * math.sin(theta)
                 emit = 6.5 if kind.startswith("explo") else 5.0
                 warm = 0.75 if kind.startswith("explo") else 0.45
+                clip = False if kind.startswith("explo") else True
                 if sd is not None:
                     mat = mat_seq(
                         f"exseq_{kind}",
                         sd,
                         emit=emit,
-                        alpha_clip=True,
+                        alpha_clip=clip,
                         tint=(1.0, 0.55, 0.12),
                         warm=warm,
                         frame_start=fr_on,
                         frame_offset=rng.randint(0, 12),
+                        alpha_mul=0.85 if kind.startswith("explo") else 1.0,
                     )
                 else:
                     path = pick_sprite("flame" if is_flame else kind)
@@ -610,9 +612,10 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
                         f"ex_{kind}_{path.stem if path else i}_{i}",
                         path,
                         emit=emit,
-                        alpha_clip=True,
+                        alpha_clip=clip,
                         tint=(1.0, 0.5, 0.08),
                         warm=warm,
+                        alpha_mul=0.85 if kind.startswith("explo") else 1.0,
                     )
                 ob = billboard(f"PB{bi}_{i}", size, mat, group, (dx, dy, dz))
                 if is_flame:
@@ -668,10 +671,19 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
                     objs.append(ob)
                     left -= 1
                     created += 1
-                # 软 bloom 板：抬高+更透，减少贴地方块感
+                # 软圆形 bloom：generic 光晕贴图 + 高 soft，避免硬方板
                 if left > 0:
-                    mat = mat_fire("bloom_plate", color=(1.0, 0.5, 0.12), strength=7.0, soft=0.82)
-                    ob = billboard(f"PB{bi}_bloom", 1.2, mat, group, (0, 1.15, 0))
+                    glow = None
+                    if root_tex:
+                        gp = root_tex / "particle" / "generic_0.png"
+                        if gp.is_file():
+                            glow = gp
+                    if glow:
+                        mat = mat_tex("bloom_glow", glow, emit=9.0, alpha_clip=False,
+                                      tint=(1.0, 0.55, 0.12), warm=0.55, alpha_mul=0.55)
+                    else:
+                        mat = mat_fire("bloom_plate", color=(1.0, 0.5, 0.12), strength=7.0, soft=0.82)
+                    ob = billboard(f"PB{bi}_bloom", 1.35, mat, group, (0, 1.2, 0))
                     objs.append(ob)
                     left -= 1
                     created += 1
