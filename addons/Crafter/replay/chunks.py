@@ -169,13 +169,23 @@ def extend_state_table(entries: list[dict]) -> int:
     return added
 
 
-def state_id_to_nbt(state_id: int) -> dict:
-    """Return nbtlib-tag dict for a block_states palette entry."""
+def state_id_to_nbt(state_id: int, *, strict: bool = False) -> dict:
+    """Return nbtlib-tag dict for a block_states palette entry.
+
+    Unknown/OOB ids become air unless strict=True (then ValueError). Silent air
+    used to hide CRAFTER_REPLAY_STATE_EXT mismatches when building synthetic
+    .mcpr under a polluted table — set strict in Anvil write path.
+    """
     from .nbt_mini import Compound, String
 
     table, _ = load_state_tables()
     entry = table[state_id] if 0 <= state_id < len(table) else None
     if not entry:
+        if strict and state_id != 0:
+            raise ValueError(
+                f"state id {state_id} missing from table (len={len(table)}); "
+                f"load CRAFTER_REPLAY_STATE_EXT that matches the .mcpr builder"
+            )
         return {"Name": String("minecraft:air")}
     out: dict[str, Any] = {"Name": String(str(entry["Name"]))}
     if "Properties" in entry:
@@ -923,7 +933,7 @@ def section_to_nbt(section_y: int, block_ids: list[int], biome_ids: list[int], s
             index_of[sid] = len(uniq_blocks)
             uniq_blocks.append(sid)
     block_indices = [index_of[s] for s in block_ids]
-    block_palette = List[Compound]([Compound(state_id_to_nbt(s)) for s in uniq_blocks])
+    block_palette = List[Compound]([Compound(state_id_to_nbt(s, strict=True)) for s in uniq_blocks])
     bs: dict[str, Any] = {"palette": block_palette}
     bb = _palette_bits(len(uniq_blocks), 4)
     if bb > 0:
