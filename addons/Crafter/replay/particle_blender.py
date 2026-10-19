@@ -629,7 +629,7 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
                 dx = r * math.sin(phi) * math.cos(theta)
                 dy = r * math.cos(phi) * 0.7 + abs(rng.random()) * 0.5
                 dz = r * math.sin(phi) * math.sin(theta)
-                emit = 2.0 if kind.startswith("explo") else 3.0
+                emit = 1.8 if kind.startswith("explo") else 2.8
                 warm = 0.75 if kind.startswith("explo") else 0.45
                 clip = False
                 se = kind.startswith("explo")
@@ -643,7 +643,7 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
                         warm=warm * 0.6 if se else warm,
                         frame_start=fr_on,
                         frame_offset=rng.randint(0, 12),
-                        alpha_mul=0.65 if se else 1.0,
+                        alpha_mul=0.55 if se else 1.0,
                         soft_edge=se,
                     )
                 else:
@@ -655,7 +655,7 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
                         alpha_clip=clip,
                         tint=(1.0, 0.5, 0.08),
                         warm=warm * 0.6 if se else warm,
-                        alpha_mul=0.65 if se else 1.0,
+                        alpha_mul=0.55 if se else 1.0,
                         soft_edge=se,
                     )
                 ob = billboard(f"PB{bi}_{i}", size, mat, group, (dx, dy, dz))
@@ -671,10 +671,10 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
                 for i in range(min(4, left)):
                     theta = rng.random() * math.tau
                     r = radius * (0.08 + rng.random() * 0.4)
-                    dx, dy, dz = math.cos(theta) * r, 0.35 + rng.random() * 0.7, math.sin(theta) * r
+                    dx, dy, dz = math.cos(theta) * r, 0.55 + rng.random() * 0.75, math.sin(theta) * r
                     if flame_sd and i % 2 == 0:
                         mat = mat_seq(
-                            "flame_punch", flame_sd, emit=3.0, alpha_clip=False,
+                            "flame_punch", flame_sd, emit=2.2, alpha_clip=False,
                             tint=(1.0, 0.4, 0.05), warm=0.45,
                             frame_start=fr_on, frame_offset=rng.randint(0, 3),
                             alpha_mul=0.75,
@@ -685,8 +685,8 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
                         path = rng.choice(sp) if sp else None
                         mat = mat_tex(
                             f"spark_{path.stem if path else i}", path,
-                            emit=3.2, alpha_clip=True, tint=(1.0, 0.85, 0.3), warm=0.25,
-                            alpha_mul=0.7,
+                            emit=2.4, alpha_clip=True, tint=(1.0, 0.85, 0.3), warm=0.2,
+                            alpha_mul=0.55,
                         )
                         size = 0.12 + rng.random() * 0.1
                     else:
@@ -705,7 +705,7 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
                     theta = rng.random() * math.tau
                     r = radius * (0.05 + rng.random() * 0.25)
                     dx, dz = math.cos(theta) * r, math.sin(theta) * r
-                    dy = 0.9 + rng.random() * 0.6
+                    dy = 1.15 + rng.random() * 0.55
                     if glow:
                         mat = mat_tex(
                             f"bloom_glow_{bi_g}", glow, emit=3.0 + bi_g * 0.3, alpha_clip=False,
@@ -776,7 +776,7 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
                     mat = mat_tex(f"crit_{kind}_{i}", path, emit=2.2, alpha_clip=True, tint=(1.0, 0.95, 0.6), alpha_mul=0.75)
                 size = 0.12 + rng.random() * 0.1
                 dx = (rng.random() - 0.5) * 2 * (burst.ox or 0.35)
-                dy = abs(rng.random()) * (burst.oy or 0.35) + 0.05
+                dy = abs(rng.random()) * (burst.oy or 0.35) + 0.25
                 dz = (rng.random() - 0.5) * 2 * (burst.oz or 0.35)
                 ob = billboard(f"PB{bi}_crit{i}", size, mat, group, (dx, dy, dz))
                 drift(ob, (dx, dy, dz),
