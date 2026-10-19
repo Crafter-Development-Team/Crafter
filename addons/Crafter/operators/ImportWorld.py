@@ -291,10 +291,27 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             name_version = (replay_info.get("meta") or {}).get("mcversion") or ""
             addon_prefs.is_Game_Path = False
             addon_prefs.Custom_Jar_Path = jarPath
-            dir_mods = ""
-            dir_resourcepacks = ""
-            dir_dot_minecraft = ""
+            from ..replay.game_dirs import discover_game_dirs_from_jar
+            dir_dot_minecraft = replay_info.get("suggest_dot_minecraft") or ""
+            dir_resourcepacks = replay_info.get("suggest_resourcepacks") or ""
+            dir_mods = replay_info.get("suggest_mods") or ""
+            if not (dir_dot_minecraft or dir_resourcepacks or dir_mods):
+                dir_dot_minecraft, dir_resourcepacks, dir_mods = discover_game_dirs_from_jar(jarPath)
+            elif not dir_dot_minecraft or not dir_resourcepacks or not dir_mods:
+                d_m, d_rp, d_mods = discover_game_dirs_from_jar(jarPath)
+                dir_dot_minecraft = dir_dot_minecraft or d_m
+                dir_resourcepacks = dir_resourcepacks or d_rp
+                dir_mods = dir_mods or d_mods
+            if dir_mods and os.path.isdir(dir_mods):
+                addon_prefs.use_Custom_mods_Path = True
+                addon_prefs.Custom_mods_Path = dir_mods
             log_step(f"录像导入使用建议 jar: {jarPath}")
+            if dir_dot_minecraft:
+                log_step(f"从 jar 推断游戏根目录: {dir_dot_minecraft}")
+            if dir_resourcepacks:
+                log_step(f"从 jar 推断资源包目录: {dir_resourcepacks}")
+            if dir_mods:
+                log_step(f"从 jar 推断 mods 目录: {dir_mods}")
         elif os.path.basename(dir_back_saves) == ".minecraft":
             dir_dot_minecraft = dir_back_saves
             dir_versions = os.path.join(dir_dot_minecraft,"versions")
@@ -336,16 +353,22 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         self.dot_minecraftPath = dir_dot_minecraft
         log_step(f"存档名: {self.save} | 版本: {self.version or '(未隔离)'}")
         #获取资源包
-        if os.path.exists(dir_resourcepacks):
+        if dir_resourcepacks and os.path.exists(dir_resourcepacks):
             list_resourcepacks = os.listdir(dir_resourcepacks)
             log_step(f"资源包目录: {dir_resourcepacks}（{len(list_resourcepacks)} 项）")
         else:
             list_resourcepacks = []
-            warn_log(f"资源包目录不存在: {dir_resourcepacks}")
+            if dir_resourcepacks:
+                warn_log(f"资源包目录不存在: {dir_resourcepacks}")
+            else:
+                warn_log("未找到资源包目录（录像 jar 旁无 resourcepacks）")
         dir_json_resourcepacks = os.path.join(dir_cafter_data, "resourcepacks.json")
         log_stage_end("准备导入", "路径与版本检查完成")
 
-        log_stage_begin("扫描资源包", dir_saves)
+        # Replay: key by .mcpr abs path (stable). Normal worlds: saves parent.
+        from ..replay.game_dirs import resourcepacks_json_key
+        rp_key = resourcepacks_json_key(os.path.normpath(addon_prefs.World_Path))
+        log_stage_begin("扫描资源包", rp_key)
         if os.path.exists(dir_json_resourcepacks):
             with open(dir_json_resourcepacks, "r", encoding="utf-8") as file:
                 json_resourcepacks = json.load(file)
@@ -354,29 +377,29 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         for dir_saves_old in list(json_resourcepacks):
             if not os.path.exists(dir_saves_old):
                 del json_resourcepacks[dir_saves_old]
-        json_resourcepacks.setdefault(dir_saves,[[],[]])
-        resourcepacks_use_copy = json_resourcepacks[dir_saves][0].copy()
-        resourcepacks_unuse_copy = json_resourcepacks[dir_saves][1].copy()
-        json_resourcepacks[dir_saves][0] =[]
-        json_resourcepacks[dir_saves][1] =[]
+        json_resourcepacks.setdefault(rp_key,[[],[]])
+        resourcepacks_use_copy = json_resourcepacks[rp_key][0].copy()
+        resourcepacks_unuse_copy = json_resourcepacks[rp_key][1].copy()
+        json_resourcepacks[rp_key][0] =[]
+        json_resourcepacks[rp_key][1] =[]
 
         new_zip_count = 0
         for resourcepack in list_resourcepacks:
             dir_resourcepack = os.path.join(dir_resourcepacks, resourcepack)
             if (not dir_resourcepack in resourcepacks_use_copy) and (not dir_resourcepack in resourcepacks_unuse_copy):
                 if dir_resourcepack.endswith(".zip"):
-                    json_resourcepacks[dir_saves][0].append(dir_resourcepack)
+                    json_resourcepacks[rp_key][0].append(dir_resourcepack)
                     new_zip_count += 1
         for dir_resourcepack in resourcepacks_use_copy:
             if os.path.exists(dir_resourcepack):
-                json_resourcepacks[dir_saves][0].append(dir_resourcepack)
+                json_resourcepacks[rp_key][0].append(dir_resourcepack)
         for dir_resourcepack in resourcepacks_unuse_copy:
             if os.path.exists(dir_resourcepack):
-                json_resourcepacks[dir_saves][1].append(dir_resourcepack)
+                json_resourcepacks[rp_key][1].append(dir_resourcepack)
     
         with open (dir_json_resourcepacks, "w", encoding="utf-8") as file:
             json.dump(json_resourcepacks, file, indent=4)
-        log_step(f"新增资源包 {new_zip_count} 个，启用 {len(json_resourcepacks[dir_saves][0])} 个，禁用 {len(json_resourcepacks[dir_saves][1])} 个")
+        log_step(f"新增资源包 {new_zip_count} 个，启用 {len(json_resourcepacks[rp_key][0])} 个，禁用 {len(json_resourcepacks[rp_key][1])} 个")
         log_step(f"已写入: {dir_json_resourcepacks}")
         log_stage_end("扫描资源包", "资源包列表更新完成")
         
@@ -393,7 +416,8 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             bpy.ops.object.mode_set(mode='OBJECT')
         if (not addon_prefs.is_Game_Path) or addon_prefs.Custom_Path:
             log_step("使用自定义路径模式")
-            addon_prefs.Game_Resources_List.clear()
+            # Keep Game_Resources_List from invoke (reload_game_resources) so WI
+            # still receives resourcepacksPaths for replay / custom-jar imports.
             worldPath = self.worldPath
             if not os.path.exists(addon_prefs.Custom_Jar_Path):
                 error_log(f"自定义 jar 路径不存在: {addon_prefs.Custom_Jar_Path}")
@@ -421,6 +445,9 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
                     return {"CANCELLED"}
                 modsPath = addon_prefs.Custom_mods_Path
                 log_step(f"mods: {modsPath}")
+            elif getattr(self, "modsPath", "") and os.path.isdir(self.modsPath):
+                modsPath = self.modsPath
+                log_step(f"mods (从 jar 推断): {modsPath}")
             else:
                 modsPath = "None"
                 log_step("未启用自定义 mods")
@@ -1324,7 +1351,8 @@ class VIEW3D_OT_CrafterBanGameResource(bpy.types.Operator):
             json_resourcepacks = json.load(file)
 
         worldPath = os.path.normpath(addon_prefs.World_Path)
-        dir_saves = os.path.dirname(worldPath)
+        from ..replay.game_dirs import resourcepacks_json_key
+        dir_saves = resourcepacks_json_key(worldPath)
         use_list = json_resourcepacks[dir_saves][0].copy()
         unuse_list = json_resourcepacks[dir_saves][1].copy()
         json_resourcepacks[dir_saves][0] = []
@@ -1368,7 +1396,8 @@ class VIEW3D_OT_CrafterUseGameResource(bpy.types.Operator):
             json_resourcepacks = json.load(file)
 
         worldPath = os.path.normpath(addon_prefs.World_Path)
-        dir_saves = os.path.dirname(worldPath)
+        from ..replay.game_dirs import resourcepacks_json_key
+        dir_saves = resourcepacks_json_key(worldPath)
         use_list = json_resourcepacks[dir_saves][0].copy()
         unuse_list = json_resourcepacks[dir_saves][1].copy()
         json_resourcepacks[dir_saves][0] = []
@@ -1413,7 +1442,8 @@ class VIEW3D_OT_CrafterUpGameResource(bpy.types.Operator):#提高 游戏资源�
             json_resourcepacks = json.load(file)
 
         worldPath = os.path.normpath(addon_prefs.World_Path)
-        dir_saves = os.path.dirname(worldPath)
+        from ..replay.game_dirs import resourcepacks_json_key
+        dir_saves = resourcepacks_json_key(worldPath)
         target_name = addon_prefs.Game_Resources_List[addon_prefs.Game_Resources_List_index].name
         for i in range(len(json_resourcepacks[dir_saves][0])):
             if json_resourcepacks[dir_saves][0][i] == target_name:
@@ -1446,7 +1476,8 @@ class VIEW3D_OT_CrafterDownGameResource(bpy.types.Operator):#降低 游戏资源
             json_resourcepacks = json.load(file)
 
         worldPath = os.path.normpath(addon_prefs.World_Path)
-        dir_saves = os.path.dirname(worldPath)
+        from ..replay.game_dirs import resourcepacks_json_key
+        dir_saves = resourcepacks_json_key(worldPath)
         target_name = addon_prefs.Game_Resources_List[addon_prefs.Game_Resources_List_index].name
         for i in range(len(json_resourcepacks[dir_saves][0])):
             if json_resourcepacks[dir_saves][0][i] == target_name:
@@ -1605,7 +1636,8 @@ class VIEW3D_OT_CrafterReloadGameResources(bpy.types.Operator):#刷新 游戏资
         dir_json_resourcepacks = os.path.join(dir_cafter_data, "resourcepacks.json")
 
         worldPath = os.path.normpath(addon_prefs.World_Path)
-        dir_saves = os.path.dirname(worldPath)
+        from ..replay.game_dirs import resourcepacks_json_key
+        dir_saves = resourcepacks_json_key(worldPath)
         
         addon_prefs.Game_Resources_List.clear()
         addon_prefs.Game_unuse_Resources_List.clear()
@@ -1633,7 +1665,8 @@ class VIEW3D_OT_CrafterReloadGameResources(bpy.types.Operator):#刷新 游戏资
         icons_game_unuse_resource.clear()
 
         worldPath = os.path.normpath(addon_prefs.World_Path)
-        dir_saves = os.path.dirname(worldPath)
+        from ..replay.game_dirs import resourcepacks_json_key
+        dir_saves = resourcepacks_json_key(worldPath)
         dir_back_saves = os.path.dirname(dir_saves)
         dir_resourcepacks = os.path.join(dir_back_saves, "resourcepacks")
         

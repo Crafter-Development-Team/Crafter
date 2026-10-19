@@ -60,12 +60,13 @@ def materialize_world_from_mcpr(mcpr_path: str, dest_dir: str | None = None) -> 
     data_version = 3955
     info["world"] = dest_dir
     ver = (info.get("meta") or {}).get("mcversion") or ""
+    from .game_dirs import apply_jar_suggestions
     for cand in (
         Path(f"/workspace/crafter-pipeline/mc/versions/{ver}/{ver}.jar"),
         Path(f"/workspace/crafter-pipeline/mc/versions/{ver}/client.jar"),
     ):
         if cand.is_file():
-            info["suggest_jar"] = str(cand)
+            apply_jar_suggestions(info, str(cand))
             break
 
     if store.map_chunks:

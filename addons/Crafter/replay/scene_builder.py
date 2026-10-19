@@ -41,9 +41,16 @@ def on_world_imported(info: dict, prefs, *, fps: int = 30, log=print):
         cam = apply_replay_camera(info, fps=fps)
         log(f"replay camera: {cam.name if cam else None}")
     jar = info.get("suggest_jar") or getattr(prefs, "Custom_Jar_Path", "")
+    packs = []
+    if getattr(prefs, "Game_Resources", False):
+        packs = [i.name for i in prefs.Game_Resources_List if getattr(i, "name", None) and os.path.exists(i.name)]
     ents = info.get("entities")
     if ents and jar and os.path.isfile(jar):
-        tex = TextureCache(jar, os.path.join(info.get("work_root") or info["world"], "_textures"))
+        tex = TextureCache(
+            jar,
+            os.path.join(info.get("work_root") or info["world"], "_textures"),
+            resourcepacks=packs,
+        )
         roots = build_entities(ents, ft, tex, box=info.get("box"), log=log)
         log(f"replay entities: {len(roots)}")
     parts = info.get("particles")
@@ -55,12 +62,14 @@ def on_world_imported(info: dict, prefs, *, fps: int = 30, log=print):
         proots = build_particles(
             parts, ft, box=info.get("box"), log=log,
             tex_root=tex_root, jar=jar if jar and os.path.isfile(jar) else None,
+            resourcepacks=packs,
         )
         log(f"replay particles: {len(proots)} roots, {len(parts.bursts)} bursts")
     groups = info.get("block_groups") or []
     if groups:
         _state.update(queue=list(groups), ft=ft, prefs=prefs, log=log, busy=False,
-                      saved=(tuple(prefs.XYZ_1), tuple(prefs.XYZ_2)), before=None, done=0)
+                      saved=(tuple(prefs.XYZ_1), tuple(prefs.XYZ_2)), before=None, done=0,
+                      suggest_mods=info.get("suggest_mods") or "")
         bpy.app.timers.register(_tick_groups, first_interval=0.5)
 
 
@@ -111,6 +120,11 @@ def _tick_groups():
     win = bpy.context.window_manager.windows[0]
     area = next((a for a in win.screen.areas if a.type == "VIEW_3D"), win.screen.areas[0])
     with bpy.context.temp_override(window=win, screen=win.screen, area=area):
+        mods = ""
+        if getattr(p, "use_Custom_mods_Path", False) and getattr(p, "Custom_mods_Path", ""):
+            mods = p.Custom_mods_Path
+        elif _state.get("suggest_mods"):
+            mods = _state["suggest_mods"]
         bpy.ops.crafter.import_surface_world("EXEC_DEFAULT", worldPath=g["world"],
-                                             jarPath=p.Custom_Jar_Path, modsPath="")
+                                             jarPath=p.Custom_Jar_Path, modsPath=mods or "")
     return 1.0

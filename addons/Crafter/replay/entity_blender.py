@@ -52,20 +52,48 @@ def models():
     return _MODELS
 
 
+def _read_pack_asset(pack_path: str, asset: str) -> bytes | None:
+    """Read asset from a resource pack (folder or zip). Returns None if missing."""
+    if not pack_path:
+        return None
+    if os.path.isdir(pack_path):
+        fp = os.path.join(pack_path, *asset.split("/"))
+        if os.path.isfile(fp):
+            with open(fp, "rb") as f:
+                return f.read()
+        return None
+    if os.path.isfile(pack_path) and zipfile.is_zipfile(pack_path):
+        try:
+            with zipfile.ZipFile(pack_path) as zf:
+                return zf.read(asset)
+        except KeyError:
+            return None
+    return None
+
+
 class TextureCache:
-    def __init__(self, jar: str, cache_dir: str):
+    def __init__(self, jar: str, cache_dir: str, resourcepacks: list[str] | None = None):
         self.jar = zipfile.ZipFile(jar)
         self.dir = Path(cache_dir)
         self.dir.mkdir(parents=True, exist_ok=True)
         self.images = {}
+        # Highest priority first (matches Game_Resources_List / WI order).
+        self.packs = [p for p in (resourcepacks or []) if p]
 
     def path(self, rel: str) -> str | None:
         out = self.dir / rel.replace("/", "_")
-        if not out.exists():
-            try:
-                out.write_bytes(self.jar.read("assets/minecraft/textures/" + rel))
-            except KeyError:
-                return None
+        if out.exists():
+            return str(out)
+        asset = "assets/minecraft/textures/" + rel
+        for pack in self.packs:
+            data = _read_pack_asset(pack, asset)
+            if data is not None:
+                out.write_bytes(data)
+                return str(out)
+        try:
+            out.write_bytes(self.jar.read(asset))
+        except KeyError:
+            return None
         return str(out)
 
     def skin(self, url: str | None) -> str | None:
