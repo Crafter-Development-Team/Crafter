@@ -306,7 +306,7 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
         mats[full] = m
         return m
 
-    def enable_bloom(scene=None, *, threshold=0.85, size=7, mix=0.32):
+    def enable_bloom(scene=None, *, threshold=0.95, size=6, mix=0.22):
         """EEVEE Next has no use_bloom — add compositor Glare (Fog Glow) for flame bloom."""
         import bpy
         scene = scene or bpy.context.scene
@@ -552,7 +552,7 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
             if not is_destroy and root_tex and left > 0:
                 sd = seq_dir_for("poof") or seq_dir_for("smoke")
                 fr_on = _frame_at(frame_times, burst.t)
-                for i in range(min(3, left)):
+                for i in range(min(6, left)):
                     if sd:
                         mat = mat_seq(f"sprintdust", sd, emit=0.0, alpha_clip=False,
                                       frame_start=fr_on, frame_offset=rng.randint(0, 5),
@@ -560,8 +560,8 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
                     else:
                         mat = mat_tex(f"sprintdust_{i}", pick_sprite("poof"), alpha_clip=False,
                                       alpha_mul=0.28, soft_edge=True)
-                    ob = billboard(f"PB{bi}_puff{i}", 0.22 + rng.random() * 0.12, mat, group,
-                                   ((rng.random()-0.5)*0.3, 0.05 + rng.random()*0.08, (rng.random()-0.5)*0.3))
+                    ob = billboard(f"PB{bi}_puff{i}", 0.26 + rng.random() * 0.14, mat, group,
+                                   ((rng.random()-0.5)*0.45, 0.04 + rng.random()*0.1, (rng.random()-0.5)*0.45))
                     objs.append(ob)
                     left -= 1
                     created += 1
@@ -569,18 +569,18 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
             continue
 
         if kind in ("smoke", "large_smoke", "white_smoke", "poof", "cloud"):
-            n = min(max(burst.count, 3), 16, left)
             fr_on = _frame_at(frame_times, burst.t)
             sd = seq_dir_for(kind)
             # 短烟/冲刺尘：更小更贴地
             trail = kind in ("smoke", "white_smoke", "poof") and (
                 burst.count <= 3 or (burst.ox or 0) <= 0.15 or (burst.oy or 0) <= 0.1
             )
+            n = min(max(burst.count, 6 if trail else 3), 18 if trail else 16, left)
             for i in range(n):
                 if kind == "large_smoke":
                     size = 0.45 * (0.7 + rng.random() * 0.6)
                 elif trail:
-                    size = 0.14 + rng.random() * 0.08
+                    size = 0.16 + rng.random() * 0.1
                 else:
                     size = 0.28 * (0.7 + rng.random() * 0.6)
                 dx = (rng.random() - 0.5) * 2 * (burst.ox or 0.2)
@@ -590,7 +590,7 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
                     dy = rng.random() * (burst.oy or 0.15) + 0.02
                 dz = (rng.random() - 0.5) * 2 * (burst.oz or 0.2)
                 emit = 0.0 if trail else 0.02
-                amul = 0.22 if trail else (0.35 if kind == "large_smoke" else 0.30)
+                amul = 0.28 if trail else (0.35 if kind == "large_smoke" else 0.30)
                 se = bool(trail or kind in ("poof", "cloud", "white_smoke"))
                 if sd is not None:
                     mat = mat_seq(
@@ -629,7 +629,7 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
                 dx = r * math.sin(phi) * math.cos(theta)
                 dy = r * math.cos(phi) * 0.7 + abs(rng.random()) * 0.5
                 dz = r * math.sin(phi) * math.sin(theta)
-                emit = 5.0 if kind.startswith("explo") else 4.5
+                emit = 3.2 if kind.startswith("explo") else 3.5
                 warm = 0.75 if kind.startswith("explo") else 0.45
                 clip = False if kind.startswith("explo") else True
                 if sd is not None:
@@ -665,27 +665,29 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
             if kind.startswith("explo") and root_tex and left > 0:
                 flame_sd = seq_dir_for("flame")
                 spark_dir = root_tex / "seq" / "spark"
-                for i in range(min(8, left)):
+                for i in range(min(4, left)):
                     theta = rng.random() * math.tau
-                    r = radius * (0.05 + rng.random() * 0.45)
-                    dx, dy, dz = math.cos(theta) * r, 0.2 + rng.random() * 0.9, math.sin(theta) * r
+                    r = radius * (0.08 + rng.random() * 0.4)
+                    dx, dy, dz = math.cos(theta) * r, 0.35 + rng.random() * 0.7, math.sin(theta) * r
                     if flame_sd and i % 2 == 0:
                         mat = mat_seq(
-                            "flame_punch", flame_sd, emit=6.5, alpha_clip=False,
-                            tint=(1.0, 0.4, 0.05), warm=0.7,
+                            "flame_punch", flame_sd, emit=3.0, alpha_clip=False,
+                            tint=(1.0, 0.4, 0.05), warm=0.45,
                             frame_start=fr_on, frame_offset=rng.randint(0, 3),
+                            alpha_mul=0.75,
                         )
-                        size = 0.22 + rng.random() * 0.22
+                        size = 0.16 + rng.random() * 0.14
                     elif spark_dir.is_dir():
                         sp = sorted(spark_dir.glob("*.png"))
                         path = rng.choice(sp) if sp else None
                         mat = mat_tex(
                             f"spark_{path.stem if path else i}", path,
-                            emit=7.0, alpha_clip=True, tint=(1.0, 0.85, 0.3), warm=0.35,
+                            emit=3.2, alpha_clip=True, tint=(1.0, 0.85, 0.3), warm=0.25,
+                            alpha_mul=0.7,
                         )
-                        size = 0.18 + rng.random() * 0.15
+                        size = 0.12 + rng.random() * 0.1
                     else:
-                        continue  # 无贴图则跳过，勿生成硬白方
+                        continue
                     ob = billboard(f"PB{bi}_fire{i}", size, mat, group, (dx, dy, dz))
                     objs.append(ob)
                     left -= 1
@@ -703,8 +705,8 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
                     dy = 0.9 + rng.random() * 0.6
                     if glow:
                         mat = mat_tex(
-                            f"bloom_glow_{bi_g}", glow, emit=4.5 + bi_g * 0.5, alpha_clip=False,
-                            tint=(1.0, 0.5, 0.1), warm=0.5, alpha_mul=0.4, soft_edge=True,
+                            f"bloom_glow_{bi_g}", glow, emit=3.0 + bi_g * 0.3, alpha_clip=False,
+                            tint=(1.0, 0.5, 0.1), warm=0.4, alpha_mul=0.35, soft_edge=True,
                         )
                     else:
                         # 无贴图时也用高 soft，绝不硬白方
@@ -719,7 +721,7 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
                 explo_dir = root_tex / "seq" / "explosion"
                 if explo_dir.is_dir() and left > 4:
                     life_fr = max(8, _frame_at(frame_times, burst.t + life) - fr_on)
-                    for k in range(3):
+                    for k in range(1):
                         theta = rng.random() * math.tau
                         r = radius * (0.2 + rng.random() * 0.4)
                         loc = (math.cos(theta) * r, 0.4 + rng.random() * 0.5, math.sin(theta) * r)
@@ -728,7 +730,7 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
                         def _mf(fp, i, _k=k):
                             return mat_tex(
                                 f"flipbook_{_k}_{fp.stem}", fp,
-                                emit=4.0, alpha_clip=False, tint=(1.0, 0.45, 0.05), warm=0.55, alpha_mul=0.8,
+                                emit=2.5, alpha_clip=False, tint=(1.0, 0.45, 0.05), warm=0.4, alpha_mul=0.65,
                             )
                         fobjs = flip_book(f"PB{bi}_flip{k}", explo_dir, _mf, group, loc, size, fr_on, life_fr)
                         # flip 已 bake 可见性，勿再进 vis()
@@ -758,17 +760,17 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
             continue
 
         if kind in ("crit", "enchanted_hit"):
-            n = min(max(burst.count, 4), 16, left)
+            n = min(max(burst.count, 3), 10, left)
             sd = seq_dir_for(kind)
             fr_on = _frame_at(frame_times, burst.t)
             for i in range(n):
                 if sd:
-                    mat = mat_seq(f"crit_{kind}", sd, emit=4.5, alpha_clip=True,
-                                  tint=(1.0, 0.95, 0.6), warm=0.15,
+                    mat = mat_seq(f"crit_{kind}", sd, emit=2.2, alpha_clip=True,
+                                  tint=(1.0, 0.95, 0.6), warm=0.1,
                                   frame_start=fr_on, frame_offset=rng.randint(0, 7))
                 else:
                     path = pick_sprite(kind) or pick_sprite("crit")
-                    mat = mat_tex(f"crit_{kind}_{i}", path, emit=4.5, alpha_clip=True, tint=(1.0, 0.95, 0.6))
+                    mat = mat_tex(f"crit_{kind}_{i}", path, emit=2.2, alpha_clip=True, tint=(1.0, 0.95, 0.6), alpha_mul=0.75)
                 size = 0.12 + rng.random() * 0.1
                 dx = (rng.random() - 0.5) * 2 * (burst.ox or 0.35)
                 dy = abs(rng.random()) * (burst.oy or 0.35) + 0.05
