@@ -1049,7 +1049,7 @@ def finish_import(ctx, prefs, imported_time, worldconfig, prepared_time,
     if not is_custom:
         if undivided:
             jh.setdefault(dot_minecraftPath, [{}])
-            ul = jh[dot_minecraftPath][0].setdefault(save, {})
+            ul = jh[dot_minecraftPath][0].setdefault(save, {"settings": []})
             js = ul.setdefault("settings", [])
             ul["version"] = version
         else:

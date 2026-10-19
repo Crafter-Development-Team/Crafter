@@ -74,3 +74,44 @@ def apply_camera_timeline(
                 kp.interpolation = "LINEAR"
 
     return cam_obj
+
+
+def apply_replay_atmosphere(scene=None, *, mist_start: float = 40.0, mist_depth: float = 120.0,
+                            fog_color=(0.78, 0.86, 0.95)):
+    """MC/ReplayMod-like distance fog via Mist pass + compositor MixRGB.
+
+    Does not enable sun shadows (EEVEE canopy shadows read as gray haze). Safe to call
+    from the headless driver; opt-in for interactive use (replaces scene compositor).
+    World VolumeScatter blacks out EEVEE Next — do not use it for fog.
+    """
+    import bpy
+    scene = scene or bpy.context.scene
+    w = scene.world
+    if w is None:
+        w = bpy.data.worlds.new("World")
+        scene.world = w
+    w.mist_settings.use_mist = True
+    w.mist_settings.start = mist_start
+    w.mist_settings.depth = mist_depth
+    w.mist_settings.falloff = "QUADRATIC"
+    scene.view_layers[0].use_pass_mist = True
+    try:
+        scene.eevee.use_gtao = True
+        scene.eevee.gtao_distance = 4.0
+        scene.eevee.gtao_quality = 0.5
+    except Exception:
+        pass
+    scene.use_nodes = True
+    nt = scene.node_tree
+    nt.nodes.clear()
+    rl = nt.nodes.new("CompositorNodeRLayers")
+    fog = nt.nodes.new("CompositorNodeRGB")
+    fog.outputs[0].default_value = (*fog_color, 1.0)
+    mix = nt.nodes.new("CompositorNodeMixRGB")
+    mix.blend_type = "MIX"
+    comp = nt.nodes.new("CompositorNodeComposite")
+    nt.links.new(rl.outputs["Mist"], mix.inputs["Fac"])
+    nt.links.new(rl.outputs["Image"], mix.inputs[1])
+    nt.links.new(fog.outputs[0], mix.inputs[2])
+    nt.links.new(mix.outputs["Image"], comp.inputs["Image"])
+    return True

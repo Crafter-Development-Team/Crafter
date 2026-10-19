@@ -97,6 +97,7 @@ _SKY_FULL = b"\xff" * 2048
 _SKY_FLOOR_MARGIN = 20
 
 _STATE_TABLE: list[dict | None] | None = None
+_EXT_SEEN: set | None = None
 _BIOME_TABLE: dict[str, str] | None = None
 
 
@@ -115,19 +116,76 @@ def _tables_path() -> Path:
 def load_state_tables() -> tuple[list[dict | None], dict[str, str]]:
     global _STATE_TABLE, _BIOME_TABLE
     if _STATE_TABLE is None:
+        import os
         raw = json.loads(_tables_path().read_text())
         _STATE_TABLE = raw["blockStates"]
         _BIOME_TABLE = {str(k): v for k, v in raw["biomes"].items()}
+        ext = os.environ.get("CRAFTER_REPLAY_STATE_EXT") or ""
+        if ext and Path(ext).is_file():
+            data = json.loads(Path(ext).read_text())
+            entries = data["blockStates"] if isinstance(data, dict) and "blockStates" in data else data
+            if isinstance(entries, list) and entries:
+                extend_state_table(entries)
     return _STATE_TABLE, _BIOME_TABLE
 
 
-def state_id_to_nbt(state_id: int) -> dict:
-    """Return nbtlib-tag dict for a block_states palette entry."""
+def _state_key(entry: dict) -> tuple:
+    name = str(entry.get("Name") or "minecraft:air")
+    props = entry.get("Properties") or {}
+    if hasattr(props, "items"):
+        props = {str(k): str(v) for k, v in dict(props).items()}
+    else:
+        props = {}
+    return (name, tuple(sorted(props.items())))
+
+
+def extend_state_table(entries: list[dict]) -> int:
+    """Append unique {Name, Properties?} states; keep vanilla IDs stable. Returns # added."""
+    global _STATE_TABLE, _FLAG_TABLE, _LIGHT_TABLE, _BIOME_TABLE, _EXT_SEEN
+    if _STATE_TABLE is None:
+        raw = json.loads(_tables_path().read_text())
+        _STATE_TABLE = raw["blockStates"]
+        if _BIOME_TABLE is None:
+            _BIOME_TABLE = {str(k): v for k, v in raw["biomes"].items()}
+    if "_EXT_SEEN" not in globals() or _EXT_SEEN is None:
+        _EXT_SEEN = {_state_key(e) for e in _STATE_TABLE if e}
+    added = 0
+    for e in entries:
+        if not e:
+            continue
+        key = _state_key(e)
+        if key in _EXT_SEEN:
+            continue
+        name, props_t = key
+        entry: dict = {"Name": name}
+        if props_t:
+            entry["Properties"] = {k: v for k, v in props_t}
+        _STATE_TABLE.append(entry)
+        _EXT_SEEN.add(key)
+        added += 1
+    if added:
+        _FLAG_TABLE = None
+        _LIGHT_TABLE = None
+    return added
+
+
+def state_id_to_nbt(state_id: int, *, strict: bool = False) -> dict:
+    """Return nbtlib-tag dict for a block_states palette entry.
+
+    Unknown/OOB ids become air unless strict=True (then ValueError). Silent air
+    used to hide CRAFTER_REPLAY_STATE_EXT mismatches when building synthetic
+    .mcpr under a polluted table — set strict in Anvil write path.
+    """
     from .nbt_mini import Compound, String
 
     table, _ = load_state_tables()
     entry = table[state_id] if 0 <= state_id < len(table) else None
     if not entry:
+        if strict and state_id != 0:
+            raise ValueError(
+                f"state id {state_id} missing from table (len={len(table)}); "
+                f"load CRAFTER_REPLAY_STATE_EXT that matches the .mcpr builder"
+            )
         return {"Name": String("minecraft:air")}
     out: dict[str, Any] = {"Name": String(str(entry["Name"]))}
     if "Properties" in entry:
@@ -875,7 +933,7 @@ def section_to_nbt(section_y: int, block_ids: list[int], biome_ids: list[int], s
             index_of[sid] = len(uniq_blocks)
             uniq_blocks.append(sid)
     block_indices = [index_of[s] for s in block_ids]
-    block_palette = List[Compound]([Compound(state_id_to_nbt(s)) for s in uniq_blocks])
+    block_palette = List[Compound]([Compound(state_id_to_nbt(s, strict=True)) for s in uniq_blocks])
     bs: dict[str, Any] = {"palette": block_palette}
     bb = _palette_bits(len(uniq_blocks), 4)
     if bb > 0:
