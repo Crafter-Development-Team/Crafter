@@ -32,6 +32,7 @@ def on_world_imported(info: dict, prefs, *, fps: int = 30, log=print):
     import bpy
     from .import_replay import apply_replay_camera
     from .entity_blender import TextureCache, build_entities
+    from .particle_blender import build_particles
     scene = bpy.context.scene
     ft = frame_times(info, fps)
     scene.render.fps = fps
@@ -45,6 +46,10 @@ def on_world_imported(info: dict, prefs, *, fps: int = 30, log=print):
         tex = TextureCache(jar, os.path.join(info.get("work_root") or info["world"], "_textures"))
         roots = build_entities(ents, ft, tex, box=info.get("box"), log=log)
         log(f"replay entities: {len(roots)}")
+    parts = info.get("particles")
+    if parts and getattr(parts, "bursts", None):
+        proots = build_particles(parts, ft, box=info.get("box"), log=log)
+        log(f"replay particles: {len(proots)} roots, {len(parts.bursts)} bursts")
     groups = info.get("block_groups") or []
     if groups:
         _state.update(queue=list(groups), ft=ft, prefs=prefs, log=log, busy=False,

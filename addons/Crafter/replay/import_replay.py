@@ -7,6 +7,7 @@ import tempfile
 from pathlib import Path
 
 from .mcpr import open_mcpr, read_meta, read_timelines_raw, iter_play_packets
+from .particles import ParticleStore
 from .timelines import parse_timelines
 from .anvil import write_level_dat
 
@@ -40,10 +41,13 @@ def materialize_world_from_mcpr(mcpr_path: str, dest_dir: str | None = None) -> 
             info["timelines"] = parse_timelines(raw_tl)
         from .entities import EntityStore
         ents = EntityStore()
+        parts = ParticleStore()
         for pkt in iter_play_packets(zf):
             info["packets"] += 1
             store.handle_packet(pkt.packet_id, pkt.payload, pkt.timestamp_ms)
             ents.handle(pkt.packet_id, pkt.payload, pkt.timestamp_ms)
+            parts.handle(pkt.packet_id, pkt.payload, pkt.timestamp_ms)
+        info["particles"] = parts
         info["entities"] = ents
         info["block_segments"] = store.block_segments()
         info["chunk_store"] = store
