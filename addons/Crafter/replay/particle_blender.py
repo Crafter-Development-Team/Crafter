@@ -118,7 +118,17 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
     MAX_INST = 900
     left = MAX_INST
 
-    def mat_tex(key: str, path: Path | None, *, emit=0.0, alpha_clip=False, tint=None):
+    def _finish_mat(m, alpha_clip):
+        try:
+            m.blend_method = "CLIP" if alpha_clip else "BLEND"
+            if hasattr(m, "shadow_method"):
+                m.shadow_method = "NONE"
+            if hasattr(m, "use_backface_culling"):
+                m.use_backface_culling = False
+        except Exception:
+            pass
+
+    def mat_tex(key: str, path: Path | None, *, emit=0.0, alpha_clip=False, tint=None, warm=0.0):
         if key in mats:
             return mats[key]
         m = bpy.data.materials.new(f"PTex_{key}")
@@ -136,20 +146,24 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
             img.alpha_mode = "STRAIGHT"
             tex.image = img
             tex.interpolation = "Closest"
-            links.new(tex.outputs["Color"], bsdf.inputs["Base Color"])
+            color_out = tex.outputs["Color"]
+            if warm > 0:
+                mix = nodes.new("ShaderNodeMixRGB")
+                mix.blend_type = "MIX"
+                mix.inputs["Fac"].default_value = warm
+                mix.inputs["Color2"].default_value = (1.0, 0.35, 0.02, 1)
+                links.new(color_out, mix.inputs["Color1"])
+                color_out = mix.outputs["Color"]
+            links.new(color_out, bsdf.inputs["Base Color"])
             if "Alpha" in bsdf.inputs:
                 links.new(tex.outputs["Alpha"], bsdf.inputs["Alpha"])
-            try:
-                m.blend_method = "CLIP" if alpha_clip else "BLEND"
-                if hasattr(m, "shadow_method"):
-                    m.shadow_method = "NONE"
-                if hasattr(m, "use_backface_culling"):
-                    m.use_backface_culling = False
-            except Exception:
-                pass
+            _finish_mat(m, alpha_clip)
             try:
                 bsdf.inputs["Emission Color"].default_value = (*col, 1)
                 bsdf.inputs["Emission Strength"].default_value = emit
+                # also feed warmed color into emission when punchy
+                if warm > 0 and emit > 0:
+                    links.new(color_out, bsdf.inputs["Emission Color"])
             except Exception:
                 pass
         else:
@@ -165,7 +179,131 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
         mats[key] = m
         return m
 
+    def mat_seq(key: str, seq_dir: Path, *, emit=0.0, alpha_clip=False, tint=None,
+                warm=0.0, frame_start=1, frame_offset=0, fps_div=1):
+        """Animated sprite sheet via Blender Image Sequence (flip)."""
+        # unique key per offset so particles desync
+        full_key = f"{key}_o{frame_offset}_s{frame_start}"
+        if full_key in mats:
+            return mats[full_key]
+        frames = sorted(seq_dir.glob("*.png"))
+        if not frames:
+            return mat_tex(key, None, emit=emit, alpha_clip=alpha_clip, tint=tint, warm=warm)
+        first = frames[0]
+        m = bpy.data.materials.new(f"PSeq_{full_key}")
+        m.use_nodes = True
+        nt = m.node_tree
+        nodes, links = nt.nodes, nt.links
+        nodes.clear()
+        out = nodes.new("ShaderNodeOutputMaterial")
+        bsdf = nodes.new("ShaderNodeBsdfPrincipled")
+        links.new(bsdf.outputs["BSDF"], out.inputs["Surface"])
+        col = tint or (1, 1, 1)
+        tex = nodes.new("ShaderNodeTexImage")
+        img = bpy.data.images.load(str(first), check_existing=False)
+        img.source = "SEQUENCE"
+        img.alpha_mode = "STRAIGHT"
+        tex.image = img
+        tex.interpolation = "Closest"
+        iu = tex.image_user
+        iu.frame_duration = max(1, len(frames))
+        iu.frame_start = int(frame_start)
+        iu.frame_offset = int(frame_offset)
+        iu.use_auto_refresh = True
+        iu.use_cyclic = True
+        color_out = tex.outputs["Color"]
+        if warm > 0:
+            mix = nodes.new("ShaderNodeMixRGB")
+            mix.blend_type = "MIX"
+            mix.inputs["Fac"].default_value = warm
+            mix.inputs["Color2"].default_value = (1.0, 0.28, 0.0, 1)
+            links.new(color_out, mix.inputs["Color1"])
+            color_out = mix.outputs["Color"]
+        links.new(color_out, bsdf.inputs["Base Color"])
+        if "Alpha" in bsdf.inputs:
+            links.new(tex.outputs["Alpha"], bsdf.inputs["Alpha"])
+        _finish_mat(m, alpha_clip)
+        try:
+            if warm > 0 and emit > 0:
+                links.new(color_out, bsdf.inputs["Emission Color"])
+            else:
+                bsdf.inputs["Emission Color"].default_value = (*col, 1)
+            bsdf.inputs["Emission Strength"].default_value = emit
+        except Exception:
+            pass
+        bsdf.inputs["Roughness"].default_value = 1.0
+        mats[full_key] = m
+        return m
+
+    def seq_dir_for(kind: str) -> Path | None:
+        if not root_tex:
+            return None
+        mapping = {
+            "explosion": "explosion",
+            "explosion_emitter": "explosion",
+            "smoke": "big_smoke",
+            "large_smoke": "big_smoke",
+            "white_smoke": "generic",
+            "poof": "generic",
+            "cloud": "generic",
+            "flame": "flame",
+        }
+        name = mapping.get(kind)
+        if not name:
+            return None
+        d = root_tex / "seq" / name
+        return d if d.is_dir() and any(d.glob("*.png")) else None
+
+    def flip_book(name_prefix, seq_dir, mat_factory, parent, loc, size, fr_on, life_frames, *, n_show=None):
+        """Fallback flip: one billboard per sprite frame, visibility-stepped."""
+        frames = sorted(seq_dir.glob("*.png"))
+        if not frames:
+            return []
+        if n_show:
+            frames = frames[:n_show]
+        out_objs = []
+        step = max(1, life_frames // max(1, len(frames)))
+        for i, fp in enumerate(frames):
+            mat = mat_factory(fp, i)
+            ob = billboard(f"{name_prefix}_{i}", size, mat, parent, loc)
+            f_a = fr_on + i * step
+            f_b = fr_on + (i + 1) * step
+            f0 = frame_times[0][0]
+            bake_visibility(ob, [(f0, False), (f_a, True), (f_b, False)])
+            out_objs.append(ob)
+        return out_objs
+
+    def mat_fire(key: str, *, color=(1.0, 0.35, 0.02), strength=20.0):
+        """Untextured additive-ish fire core (Principled emission only)."""
+        if key in mats:
+            return mats[key]
+        m = bpy.data.materials.new(f"PFire_{key}")
+        m.use_nodes = True
+        nt = m.node_tree
+        nodes, links = nt.nodes, nt.links
+        nodes.clear()
+        out = nodes.new("ShaderNodeOutputMaterial")
+        emit = nodes.new("ShaderNodeEmission")
+        emit.inputs["Color"].default_value = (*color, 1)
+        emit.inputs["Strength"].default_value = strength
+        # soft circular falloff via soft alpha on transparent mix
+        trans = nodes.new("ShaderNodeBsdfTransparent")
+        mix = nodes.new("ShaderNodeMixShader")
+        mix.inputs["Fac"].default_value = 0.15  # mostly emit
+        links.new(trans.outputs["BSDF"], mix.inputs[1])
+        links.new(emit.outputs["Emission"], mix.inputs[2])
+        links.new(mix.outputs["Shader"], out.inputs["Surface"])
+        try:
+            m.blend_method = "BLEND"
+            if hasattr(m, "shadow_method"):
+                m.shadow_method = "NONE"
+        except Exception:
+            pass
+        mats[key] = m
+        return m
+
     def billboard(name, size, mat, parent, loc, *, track=True):
+
         me = bpy.data.meshes.new(name)
         s = size * 0.5
         me.from_pydata(
@@ -303,13 +441,21 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
 
         if kind in ("smoke", "large_smoke", "white_smoke", "poof", "cloud"):
             n = min(max(burst.count, 3), 16, left)
+            fr_on = _frame_at(frame_times, burst.t)
+            sd = seq_dir_for(kind)
             for i in range(n):
-                path = pick_sprite(kind)
-                mat = mat_tex(f"sm_{kind}_{path.stem if path else i}", path, alpha_clip=False, emit=0.02)
                 size = (0.45 if kind == "large_smoke" else 0.28) * (0.7 + rng.random() * 0.6)
                 dx = (rng.random() - 0.5) * 2 * (burst.ox or 0.2)
                 dy = rng.random() * (burst.oy or 0.15) + 0.02
                 dz = (rng.random() - 0.5) * 2 * (burst.oz or 0.2)
+                if sd is not None:
+                    mat = mat_seq(
+                        f"sm_{kind}", sd, emit=0.02, alpha_clip=False,
+                        frame_start=fr_on, frame_offset=rng.randint(0, 7),
+                    )
+                else:
+                    path = pick_sprite(kind)
+                    mat = mat_tex(f"sm_{kind}_{path.stem if path else i}", path, alpha_clip=False, emit=0.02)
                 ob = billboard(f"PB{bi}_{i}", size, mat, group, (dx, dy, dz))
                 objs.append(ob)
                 left -= 1
@@ -320,44 +466,129 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
         if kind in ("explosion", "explosion_emitter", "flame"):
             n = min(max(burst.count, 10), 36 if kind != "flame" else 12, left)
             radius = burst.radius or (burst.ox or 1.0)
+            fr_on = _frame_at(frame_times, burst.t)
+            sd = seq_dir_for(kind if kind != "flame" else "flame")
             for i in range(n):
-                path = pick_sprite(kind if kind != "flame" else "flame")
-                emit = 2.5 if kind.startswith("explo") else 1.5
-                mat = mat_tex(
-                    f"ex_{kind}_{path.stem if path else i}",
-                    path,
-                    emit=emit,
-                    alpha_clip=True,
-                    tint=(1.0, 0.7, 0.3),
-                )
-                size = (0.9 if kind == "explosion_emitter" else 0.55) * (0.6 + rng.random() * 0.8)
+                size = (1.05 if kind == "explosion_emitter" else 0.65) * (0.6 + rng.random() * 0.9)
                 if kind == "flame":
-                    size *= 0.45
-                # spherical scatter
+                    size *= 0.55
                 theta = rng.random() * math.tau
                 phi = rng.random() * math.pi
-                r = radius * (0.15 + rng.random() * 0.85)
+                r = radius * (0.12 + rng.random() * 0.9)
                 dx = r * math.sin(phi) * math.cos(theta)
-                dy = r * math.cos(phi) * 0.7 + abs(rng.random()) * 0.4
+                dy = r * math.cos(phi) * 0.7 + abs(rng.random()) * 0.5
                 dz = r * math.sin(phi) * math.sin(theta)
+                emit = 9.0 if kind.startswith("explo") else 5.0
+                warm = 0.75 if kind.startswith("explo") else 0.45
+                if sd is not None:
+                    mat = mat_seq(
+                        f"exseq_{kind}",
+                        sd,
+                        emit=emit,
+                        alpha_clip=True,
+                        tint=(1.0, 0.55, 0.12),
+                        warm=warm,
+                        frame_start=fr_on,
+                        frame_offset=rng.randint(0, 12),
+                    )
+                else:
+                    path = pick_sprite(kind if kind != "flame" else "flame")
+                    mat = mat_tex(
+                        f"ex_{kind}_{path.stem if path else i}_{i}",
+                        path,
+                        emit=emit,
+                        alpha_clip=True,
+                        tint=(1.0, 0.5, 0.08),
+                        warm=warm,
+                    )
                 ob = billboard(f"PB{bi}_{i}", size, mat, group, (dx, dy, dz))
                 objs.append(ob)
                 left -= 1
                 created += 1
-            # extra smoke ring for TNT
+            # Punch: dedicated flame + spark cores
             if kind.startswith("explo") and root_tex and left > 0:
-                for i in range(min(10, left)):
-                    path = pick_sprite("large_smoke")
-                    mat = mat_tex(f"exsmoke_{path.stem if path else i}", path, alpha_clip=True)
-                    size = 0.7 * (0.7 + rng.random())
-                    ang = i / 10 * math.tau
-                    dx = math.cos(ang) * radius * 0.5
-                    dz = math.sin(ang) * radius * 0.5
-                    ob = billboard(f"PB{bi}_sm{i}", size, mat, group, (dx, 0.3 + rng.random() * 0.5, dz))
+                flame_sd = seq_dir_for("flame")
+                spark_dir = root_tex / "seq" / "spark"
+                for i in range(min(14, left)):
+                    theta = rng.random() * math.tau
+                    r = radius * (0.05 + rng.random() * 0.45)
+                    dx, dy, dz = math.cos(theta) * r, 0.2 + rng.random() * 0.9, math.sin(theta) * r
+                    if flame_sd and i % 2 == 0:
+                        mat = mat_seq(
+                            "flame_punch", flame_sd, emit=10.0, alpha_clip=False,
+                            tint=(1.0, 0.4, 0.05), warm=0.7,
+                            frame_start=fr_on, frame_offset=rng.randint(0, 3),
+                        )
+                        size = 0.35 + rng.random() * 0.35
+                    elif spark_dir.is_dir():
+                        sp = sorted(spark_dir.glob("*.png"))
+                        path = rng.choice(sp) if sp else None
+                        mat = mat_tex(
+                            f"spark_{path.stem if path else i}", path,
+                            emit=12.0, alpha_clip=True, tint=(1.0, 0.85, 0.3), warm=0.4,
+                        )
+                        size = 0.18 + rng.random() * 0.15
+                    else:
+                        mat = mat_tex(f"core_orange_{i}", None, emit=8.0, tint=(1.0, 0.35, 0.0))
+                        size = 0.25
+                    ob = billboard(f"PB{bi}_fire{i}", size, mat, group, (dx, dy, dz))
                     objs.append(ob)
                     left -= 1
                     created += 1
-            vis(objs, burst.t, life + 100)
+                # Hot untextured fire cores (punchy orange)
+                for i in range(min(10, left)):
+                    theta = rng.random() * math.tau
+                    r = radius * rng.random() * 0.35
+                    dx = math.cos(theta) * r
+                    dz = math.sin(theta) * r
+                    dy = 0.15 + rng.random() * 0.7
+                    # yellow-white core vs deep orange rim
+                    col = (1.0, 0.85, 0.25) if i % 3 == 0 else (1.0, 0.28, 0.0)
+                    mat = mat_fire(f"core_{i%3}_{col[1]:.2f}", color=col, strength=25.0 if i % 3 == 0 else 18.0)
+                    size = 0.4 + rng.random() * 0.55
+                    ob = billboard(f"PB{bi}_core{i}", size, mat, group, (dx, dy, dz))
+                    objs.append(ob)
+                    left -= 1
+                    created += 1
+                # Explicit flip-book billboards (visibility-stepped) so stills differ across frames
+                explo_dir = root_tex / "seq" / "explosion"
+                if explo_dir.is_dir() and left > 4:
+                    life_fr = max(8, _frame_at(frame_times, burst.t + life) - fr_on)
+                    for k in range(3):
+                        theta = rng.random() * math.tau
+                        r = radius * (0.2 + rng.random() * 0.4)
+                        loc = (math.cos(theta) * r, 0.4 + rng.random() * 0.5, math.sin(theta) * r)
+                        size = 0.9 + rng.random() * 0.4
+
+                        def _mf(fp, i, _k=k):
+                            return mat_tex(
+                                f"flipbook_{_k}_{fp.stem}", fp,
+                                emit=8.0, alpha_clip=True, tint=(1.0, 0.45, 0.05), warm=0.7,
+                            )
+                        fobjs = flip_book(f"PB{bi}_flip{k}", explo_dir, _mf, group, loc, size, fr_on, life_fr)
+                        objs.extend(fobjs)
+                        left -= len(fobjs)
+                        created += len(fobjs)
+                # smoke ring (animated)
+                smoke_sd = seq_dir_for("large_smoke")
+                for i in range(min(10, left)):
+                    ang = i / 10 * math.tau
+                    dx = math.cos(ang) * radius * 0.55
+                    dz = math.sin(ang) * radius * 0.55
+                    if smoke_sd:
+                        mat = mat_seq(
+                            "exsmoke", smoke_sd, emit=0.05, alpha_clip=False,
+                            frame_start=fr_on, frame_offset=rng.randint(0, 8),
+                        )
+                    else:
+                        path = pick_sprite("large_smoke")
+                        mat = mat_tex(f"exsmoke_{path.stem if path else i}", path, alpha_clip=False)
+                    size = 0.75 * (0.7 + rng.random())
+                    ob = billboard(f"PB{bi}_sm{i}", size, mat, group, (dx, 0.35 + rng.random() * 0.5, dz))
+                    objs.append(ob)
+                    left -= 1
+                    created += 1
+            vis(objs, burst.t, life + 150)
             continue
 
         # generic fallback: billboard with generic sprite or tinted plane
