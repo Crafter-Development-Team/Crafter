@@ -48,7 +48,14 @@ def on_world_imported(info: dict, prefs, *, fps: int = 30, log=print):
         log(f"replay entities: {len(roots)}")
     parts = info.get("particles")
     if parts and getattr(parts, "bursts", None):
-        proots = build_particles(parts, ft, box=info.get("box"), log=log)
+        tex_root = os.path.join(os.path.dirname(__file__), "particle_tex")
+        if not os.path.isdir(tex_root):
+            alt = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..", "cache", "particle_tex"))
+            tex_root = alt if os.path.isdir(alt) else None
+        proots = build_particles(
+            parts, ft, box=info.get("box"), log=log,
+            tex_root=tex_root, jar=jar if jar and os.path.isfile(jar) else None,
+        )
         log(f"replay particles: {len(proots)} roots, {len(parts.bursts)} bursts")
     groups = info.get("block_groups") or []
     if groups:
