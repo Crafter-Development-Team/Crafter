@@ -502,14 +502,14 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
             objs.append(ob)
             # 各破坏阶段都喷碎屑；晚期更多
             if root_tex and left > 2:
-                n_chip = min(3 + stage, 9, left)
+                n_chip = min(5 + stage * 2, 14, left)
                 for ci in range(n_chip):
                     dpath = pick_debris(burst.block_state)
                     dmat = mat_tex(f"digchip_{dpath.name if dpath else ci}", dpath, alpha_clip=True)
-                    size = 0.06 + rng.random() * (0.08 + stage * 0.008)
-                    dx = (rng.random() - 0.5) * 0.75
-                    dy = 0.3 + rng.random() * 0.45
-                    dz = (rng.random() - 0.5) * 0.75
+                    size = 0.09 + rng.random() * (0.12 + stage * 0.01)
+                    dx = (rng.random() - 0.5) * 1.1
+                    dy = 0.45 + rng.random() * 0.55
+                    dz = (rng.random() - 0.5) * 1.1
                     cob = billboard(f"PB{bi}_chip{ci}", size, dmat, group, (dx, dy, dz))
                     drift(cob, (dx, dy, dz),
                           ((rng.random()-0.5)*0.5, 0.3+rng.random()*0.5, (rng.random()-0.5)*0.5),
@@ -665,7 +665,7 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
             if kind.startswith("explo") and root_tex and left > 0:
                 flame_sd = seq_dir_for("flame")
                 spark_dir = root_tex / "seq" / "spark"
-                for i in range(min(14, left)):
+                for i in range(min(8, left)):
                     theta = rng.random() * math.tau
                     r = radius * (0.05 + rng.random() * 0.45)
                     dx, dy, dz = math.cos(theta) * r, 0.2 + rng.random() * 0.9, math.sin(theta) * r
@@ -675,7 +675,7 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
                             tint=(1.0, 0.4, 0.05), warm=0.7,
                             frame_start=fr_on, frame_offset=rng.randint(0, 3),
                         )
-                        size = 0.35 + rng.random() * 0.35
+                        size = 0.22 + rng.random() * 0.22
                     elif spark_dir.is_dir():
                         sp = sorted(spark_dir.glob("*.png"))
                         path = rng.choice(sp) if sp else None
@@ -696,14 +696,14 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
                     gp = root_tex / "particle" / "generic_0.png"
                     if gp.is_file():
                         glow = gp
-                for bi_g in range(min(3, left)):
+                for bi_g in range(min(2, left)):
                     theta = rng.random() * math.tau
                     r = radius * (0.05 + rng.random() * 0.25)
                     dx, dz = math.cos(theta) * r, math.sin(theta) * r
                     dy = 0.9 + rng.random() * 0.6
                     if glow:
                         mat = mat_tex(
-                            f"bloom_glow_{bi_g}", glow, emit=6.0 + bi_g, alpha_clip=False,
+                            f"bloom_glow_{bi_g}", glow, emit=4.5 + bi_g * 0.5, alpha_clip=False,
                             tint=(1.0, 0.5, 0.1), warm=0.5, alpha_mul=0.4, soft_edge=True,
                         )
                     else:
@@ -728,7 +728,7 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
                         def _mf(fp, i, _k=k):
                             return mat_tex(
                                 f"flipbook_{_k}_{fp.stem}", fp,
-                                emit=6.0, alpha_clip=True, tint=(1.0, 0.45, 0.05), warm=0.7,
+                                emit=4.0, alpha_clip=False, tint=(1.0, 0.45, 0.05), warm=0.55, alpha_mul=0.8,
                             )
                         fobjs = flip_book(f"PB{bi}_flip{k}", explo_dir, _mf, group, loc, size, fr_on, life_fr)
                         # flip 已 bake 可见性，勿再进 vis()
