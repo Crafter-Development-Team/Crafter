@@ -615,12 +615,12 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
 
         if kind in ("explosion", "explosion_emitter", "flame", "small_flame"):
             is_flame = kind in ("flame", "small_flame")
-            n = min(max(burst.count, 10), 36 if not is_flame else 12, left)
+            n = min(max(burst.count, 6), 18 if not is_flame else 10, left)
             radius = burst.radius or (burst.ox or 1.0)
             fr_on = _frame_at(frame_times, burst.t)
             sd = seq_dir_for("flame" if is_flame else kind)
             for i in range(n):
-                size = (1.05 if kind == "explosion_emitter" else 0.65) * (0.6 + rng.random() * 0.9)
+                size = (0.75 if kind == "explosion_emitter" else 0.45) * (0.55 + rng.random() * 0.7)
                 if is_flame:
                     size *= 0.5 if kind == "small_flame" else 0.55
                 theta = rng.random() * math.tau
@@ -629,9 +629,10 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
                 dx = r * math.sin(phi) * math.cos(theta)
                 dy = r * math.cos(phi) * 0.7 + abs(rng.random()) * 0.5
                 dz = r * math.sin(phi) * math.sin(theta)
-                emit = 3.2 if kind.startswith("explo") else 3.5
+                emit = 2.0 if kind.startswith("explo") else 3.0
                 warm = 0.75 if kind.startswith("explo") else 0.45
-                clip = False if kind.startswith("explo") else True
+                clip = False
+                se = kind.startswith("explo")
                 if sd is not None:
                     mat = mat_seq(
                         f"exseq_{kind}",
@@ -639,10 +640,11 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
                         emit=emit,
                         alpha_clip=clip,
                         tint=(1.0, 0.55, 0.12),
-                        warm=warm,
+                        warm=warm * 0.6 if se else warm,
                         frame_start=fr_on,
                         frame_offset=rng.randint(0, 12),
-                        alpha_mul=0.85 if kind.startswith("explo") else 1.0,
+                        alpha_mul=0.65 if se else 1.0,
+                        soft_edge=se,
                     )
                 else:
                     path = pick_sprite("flame" if is_flame else kind)
@@ -652,8 +654,9 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
                         emit=emit,
                         alpha_clip=clip,
                         tint=(1.0, 0.5, 0.08),
-                        warm=warm,
-                        alpha_mul=0.85 if kind.startswith("explo") else 1.0,
+                        warm=warm * 0.6 if se else warm,
+                        alpha_mul=0.65 if se else 1.0,
+                        soft_edge=se,
                     )
                 ob = billboard(f"PB{bi}_{i}", size, mat, group, (dx, dy, dz))
                 if is_flame:
@@ -721,7 +724,7 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
                 explo_dir = root_tex / "seq" / "explosion"
                 if explo_dir.is_dir() and left > 4:
                     life_fr = max(8, _frame_at(frame_times, burst.t + life) - fr_on)
-                    for k in range(1):
+                    for k in range(0):  # polish9: skip flip crescents
                         theta = rng.random() * math.tau
                         r = radius * (0.2 + rng.random() * 0.4)
                         loc = (math.cos(theta) * r, 0.4 + rng.random() * 0.5, math.sin(theta) * r)
