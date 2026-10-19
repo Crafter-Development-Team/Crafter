@@ -617,8 +617,8 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
                     removed_obj += 1
                 except:
                     pass
-        # 旧的 tint/overlay/doubleSided 元数据一并清理，避免和本次导出的 objs 不匹配
-        for _old_meta in ("tint.json", "overlay.json", "doubleSided.json"):
+        # 旧的 tint/overlay/doubleSided/renderLayer 元数据一并清理，避免和本次导出的 objs 不匹配
+        for _old_meta in ("tint.json", "overlay.json", "doubleSided.json", "renderLayer.json"):
             try:
                 _old_meta_path = os.path.join(dir_importer, _old_meta)
                 if os.path.exists(_old_meta_path):
