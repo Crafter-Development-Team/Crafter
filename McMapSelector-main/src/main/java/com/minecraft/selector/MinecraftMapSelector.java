@@ -1,8 +1,14 @@
 package com.minecraft.selector;
 
 import com.minecraft.selector.core.MapRenderer;
+import com.minecraft.selector.core.BlockColors;
+import com.minecraft.selector.core.ResourceOptions;
+import com.minecraft.selector.core.RenderedMap;
+import com.minecraft.selector.core.SelectionSeed;
+import com.minecraft.selector.core.ImportLod;
+import com.minecraft.selector.gui.SelectionMath;
 import com.minecraft.selector.gui.MinecraftMapGUI;
-import com.minecraft.selector.gui.UIThemeManager;
+import com.minecraft.selector.utils.WorldPathResolver;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
@@ -20,14 +26,37 @@ import java.util.stream.Collectors;
 public class MinecraftMapSelector {
     
     public static void main(String[] args) {
-        // 初始化UI主题系统
-        UIThemeManager.getInstance().initializeTheme();
-
+        // YbandLog 现在是缓冲写入：退出时把尾巴刷到 %TEMP%\crafter-yband.log。
+        Runtime.getRuntime().addShutdownHook(new Thread(com.minecraft.selector.core.YbandLog::flush, "yband-log-flush"));
+        for(String arg:args)if("--validate-selection".equals(arg)) {System.exit(com.minecraft.selector.core.SelectionValidator.run(args,System.out,System.err));return;}
+        final boolean multiBox=java.util.Arrays.asList(args).contains("--multi-box");
+        final boolean includeWaypoints=java.util.Arrays.asList(args).contains("--include-waypoints");
+        args=java.util.Arrays.stream(args).filter(a->!a.equals("--multi-box")&&!a.equals("--include-waypoints")).toArray(String[]::new);
         System.out.println("Minecraft地图选择器 - Java版本");
         System.out.println("接收到的参数数量: " + args.length);
         for (int i = 0; i < args.length; i++) {
             System.out.println("参数[" + i + "]: " + args[i]);
         }
+
+        SelectionMath.Bounds parsedSelection=null;
+        try {parsedSelection=SelectionSeed.parse(args);}
+        catch(IllegalArgumentException e) {System.err.println("Ignoring invalid selection seed: "+e.getMessage());}
+        final SelectionMath.Bounds initialSelection=parsedSelection;
+        args=SelectionSeed.withoutFlags(args);
+        ImportLod parsedImportLod=ImportLod.DEFAULT;
+        try {parsedImportLod=ImportLod.parse(args);}
+        catch(IllegalArgumentException e) {System.err.println("Ignoring invalid import LOD seed: "+e.getMessage());}
+        final ImportLod initialImportLod=parsedImportLod;
+        args=ImportLod.withoutFlags(args);
+        try {
+            ResourceOptions.setLaunch(ResourceOptions.parse(args));
+        } catch (IllegalArgumentException e) {
+            // Bad --jar-path / mods (common when Blender resolves a stale Windows path)
+            // must not abort before the Swing GUI is scheduled — that looks like "click does nothing".
+            System.err.println("Ignoring invalid resource options: " + e.getMessage());
+            ResourceOptions.setLaunch(new ResourceOptions());
+        }
+        args=ResourceOptions.withoutResourceFlags(args);
 
         // 检查是否是Blender集成模式
         final String worldPath;
@@ -76,16 +105,16 @@ public class MinecraftMapSelector {
             System.out.println("启动图形界面...");
             javax.swing.SwingUtilities.invokeLater(() -> {
                 try {
-                    new MinecraftMapGUI().setVisible(true);
+                    MinecraftMapGUI gui=new MinecraftMapGUI();gui.setSelectionExportOptions(multiBox,includeWaypoints);gui.setInitialSelectionSeed(initialSelection);gui.setInitialImportLod(initialImportLod);gui.setVisible(true);
                 } catch (Exception e) {
                     System.err.println("启动GUI失败: " + e.getMessage());
                     e.printStackTrace();
                     showUsage();
                 }
             });
-        } else if (worldPath != null && outputFile != null) {
+        } else if (worldPath != null) {
             // Blender集成模式，启动GUI但自动加载世界
-            System.out.println("启动Blender集成模式...");
+            System.out.println(outputFile==null?"启动世界预览...":"启动Blender集成模式...");
             System.out.printf("世界路径: %s\n", worldPath);
             System.out.printf("输出文件: %s\n", outputFile);
             if (jarPath != null) {
@@ -95,7 +124,7 @@ public class MinecraftMapSelector {
             javax.swing.SwingUtilities.invokeLater(() -> {
                 try {
                     MinecraftMapGUI gui = new MinecraftMapGUI(worldPath, outputFile, jarPath, minY, maxY);
-                    gui.setVisible(true);
+                    gui.setSelectionExportOptions(multiBox,includeWaypoints);gui.setInitialSelectionSeed(initialSelection);gui.setInitialImportLod(initialImportLod);gui.setVisible(true);
                 } catch (Exception e) {
                     System.err.println("启动Blender集成模式失败: " + e.getMessage());
                     e.printStackTrace();
@@ -103,26 +132,43 @@ public class MinecraftMapSelector {
             });
         } else if (args.length >= 1 && !args[0].startsWith("--")) {
             // 有参数且不是选项，运行命令行模式
-            runCommandLine(args);
+            int code = runCommandLine(args);
+            if (code != 0) System.exit(code);
         } else {
             showUsage();
         }
     }
     
+    private static MapRenderer.SurfaceMode parseSurfaceMode(String[] args, int index) {
+        return args.length > index ? MapRenderer.SurfaceMode.valueOf(args[index].toUpperCase(Locale.ROOT)) : MapRenderer.SurfaceMode.AUTO;
+    }
+
     /**
      * 运行命令行模式
      */
-    private static void runCommandLine(String[] args) {
+    private static int runCommandLine(String[] args) {
         long overallStartTime = System.currentTimeMillis();
 
         String mcaFilePath = args[0];
-
-        // 检查是否为存档目录
         File inputFile = new File(mcaFilePath);
         if (inputFile.isDirectory()) {
-            renderWorld(inputFile, args, overallStartTime);
-            return;
+            String invalid = WorldPathResolver.explainInvalidSave(mcaFilePath);
+            if (invalid != null) {
+                System.err.println(invalid);
+                return 1;
+            }
+            BlockColors.initializeColorsFromSavePath(mcaFilePath,ResourceOptions.launch());
+            return renderWorld(inputFile, args, overallStartTime);
         }
+        if (!inputFile.isFile()) {
+            System.err.println("输入路径不存在 / Path not found: " + mcaFilePath);
+            return 1;
+        }
+        if (inputFile.length() == 0 && mcaFilePath.toLowerCase(Locale.ROOT).endsWith(".mca")) {
+            System.out.println("该 .mca 为 0 字节未生成区块占位，无内容可渲染 — 这是正常情况。");
+            return 0;
+        }
+        BlockColors.initializeColorsFromSavePath(mcaFilePath,ResourceOptions.launch());
 
         // 生成默认输出文件名（基于输入文件名和时间戳）
         String defaultBaseName = generateDefaultOutputName(mcaFilePath);
@@ -174,7 +220,7 @@ public class MinecraftMapSelector {
         };
         
         // 创建地图渲染器
-        MapRenderer renderer = new MapRenderer(maxWorkers, progressCallback);
+        MapRenderer renderer = new MapRenderer(maxWorkers, progressCallback, parseSurfaceMode(args, 6),ResourceOptions.launch().renderY);
         
         try {
             // 读取区域文件
@@ -190,6 +236,7 @@ public class MinecraftMapSelector {
                 BufferedImage image = renderer.renderToPng(topBlocks, sampleInterval);
                 if (image != null) {
                     saveImageToPng(image, imageOutput);
+                    saveColorReport(imageOutput);
                 }
                 
                 // 输出总体统计信息
@@ -197,42 +244,53 @@ public class MinecraftMapSelector {
                 System.out.println("\n所有处理完成!");
                 System.out.println("总耗时: " + (totalTime / 1000.0) + "秒");
             } else {
-                System.err.println("区域文件读取失败");
+                System.err.println("区域文件读取失败 / Failed to read region file: " + mcaFilePath);
+                return 1;
             }
             
         } catch (Exception e) {
             System.err.println("处理过程中出错: " + e.getMessage());
             e.printStackTrace();
+            return 1;
         } finally {
             renderer.shutdown();
         }
+        return 0;
     }
     
     /**
      * 渲染整个存档目录（world/region/*.mca）
      * 将相邻的 region 聚合成簇，每簇渲染为一张合并大图
+     * @return 0 on success, non-zero on failure
      */
-    private static void renderWorld(File worldDir, String[] args, long overallStartTime) {
-        File regionDir = new File(worldDir, "region");
-        if (!regionDir.isDirectory()) {
-            System.err.println("不是有效的存档目录（缺少 region 文件夹）: " + worldDir.getAbsolutePath());
-            return;
+    private static int renderWorld(File worldDir, String[] args, long overallStartTime) {
+        // 26.1+: dimensions/minecraft/overworld/region；旧布局: region/
+        WorldPathResolver.RegionResolve resolve = WorldPathResolver.resolveRegionDir(worldDir.getAbsolutePath(), "minecraft:overworld");
+        if (resolve.usedLegacyFallback() && resolve.getNote() != null) {
+            System.out.println(resolve.getNote());
+        }
+        File regionDir = resolve.getRegionDir();
+        if (!resolve.isFound() || !regionDir.isDirectory()) {
+            System.err.println(resolve.missingMessage("minecraft:overworld"));
+            System.err.println("存档: " + worldDir.getAbsolutePath());
+            return 1;
         }
 
         File[] mcaFiles = regionDir.listFiles((dir, name) -> name.toLowerCase().endsWith(".mca"));
         if (mcaFiles == null || mcaFiles.length == 0) {
-            System.err.println("region 文件夹中没有 .mca 文件: " + regionDir.getAbsolutePath());
-            return;
+            System.err.println("region 文件夹中没有 .mca 文件 / No .mca in region: " + regionDir.getAbsolutePath());
+            return 1;
         }
 
         int maxWorkers = args.length > 1 ? Integer.parseInt(args[1]) : Math.min(Runtime.getRuntime().availableProcessors(), 8);
         int sampleInterval = args.length > 2 ? Integer.parseInt(args[2]) : 1;
 
-        // 解析所有 mca 文件的 region 坐标，跳过 0 字节空文件
+        // 解析所有 mca 文件的 region 坐标；0 字节是未生成区块占位，静默跳过（不是错误）
         List<RegionFile> regionFiles = new ArrayList<>();
+        int placeholderCount = 0;
         for (File mca : mcaFiles) {
             if (mca.length() == 0) {
-                System.out.println("跳过空文件: " + mca.getName());
+                placeholderCount++;
                 continue;
             }
             int[] coord = parseRegionCoord(mca.getName());
@@ -244,8 +302,18 @@ public class MinecraftMapSelector {
         }
 
         if (regionFiles.isEmpty()) {
-            System.err.println("没有可渲染的 region 文件");
-            return;
+            // 有 .mca 文件名但全是 0 字节占位：正常未探索世界，不报错。
+            if (placeholderCount > 0) {
+                System.out.println("region 内仅有未生成区块占位（" + placeholderCount
+                    + " 个 0 字节 .mca），无内容可渲染 — 这是正常情况。");
+                return 0;
+            }
+            System.err.println("region 文件夹中没有可渲染的 .mca 文件 / No renderable .mca in region: "
+                + regionDir.getAbsolutePath());
+            return 1;
+        }
+        if (placeholderCount > 0) {
+            System.out.println("已跳过 " + placeholderCount + " 个未生成区块占位（0 字节 .mca）");
         }
 
         // 按邻接关系聚类（曼哈顿距离 1 视为相邻）
@@ -256,7 +324,7 @@ public class MinecraftMapSelector {
         // 默认输出文件名前缀
         String defaultBaseName = worldDir.getName() + "_map_" + System.currentTimeMillis();
 
-        MapRenderer renderer = new MapRenderer(maxWorkers, createProgressCallback());
+        MapRenderer renderer = new MapRenderer(maxWorkers, createProgressCallback(), parseSurfaceMode(args, 5),ResourceOptions.launch().renderY);
         int clusterIndex = 0;
         for (List<RegionFile> cluster : clusters) {
             clusterIndex++;
@@ -270,6 +338,7 @@ public class MinecraftMapSelector {
 
         long totalTime = System.currentTimeMillis() - overallStartTime;
         System.out.println("\n所有处理完成! 总耗时: " + (totalTime / 1000.0) + "秒");
+        return 0;
     }
 
     /**
@@ -299,7 +368,7 @@ public class MinecraftMapSelector {
         System.out.println("输出图像大小: " + width + "x" + height + " 像素");
 
         // 初始化整图数组为 air
-        MapRenderer.BlockInfo air = new MapRenderer.BlockInfo("air", -64);
+        MapRenderer.BlockInfo air = MapRenderer.EMPTY;
         MapRenderer.BlockInfo[][] merged = new MapRenderer.BlockInfo[height][width];
         for (MapRenderer.BlockInfo[] row : merged) {
             Arrays.fill(row, air);
@@ -332,6 +401,7 @@ public class MinecraftMapSelector {
         BufferedImage image = renderer.renderToPng(merged, sampleInterval);
         if (image != null) {
             saveImageToPng(image, imageOutput);
+            saveColorReport(imageOutput);
         }
     }
 
@@ -358,13 +428,14 @@ public class MinecraftMapSelector {
                         heights[i][j] = blockInfo.getHeight();
                     } else {
                         blockIds[i][j] = "air";
-                        heights[i][j] = -64;
+                        heights[i][j] = RenderedMap.NO_HEIGHT;
                     }
                 }
             }
 
             data.put("blocks", blockIds);
             data.put("heights", heights);
+            data.put("noHeight", RenderedMap.NO_HEIGHT);
             data.put("width", topBlocks[0].length);
             data.put("height", topBlocks.length);
             data.put("originX", originX);   // 左上角世界 X 坐标
@@ -490,13 +561,14 @@ public class MinecraftMapSelector {
                         heights[i][j] = blockInfo.getHeight();
                     } else {
                         blockIds[i][j] = "air";
-                        heights[i][j] = -64;
+                        heights[i][j] = RenderedMap.NO_HEIGHT;
                     }
                 }
             }
 
             data.put("blocks", blockIds);
             data.put("heights", heights);
+            data.put("noHeight", RenderedMap.NO_HEIGHT);
             data.put("width", topBlocks[0].length);
             data.put("height", topBlocks.length);
 
@@ -513,6 +585,12 @@ public class MinecraftMapSelector {
         }
     }
     
+    private static void saveColorReport(String imagePath) {
+        BlockColors.snapshot().logSummary();
+        try {new ObjectMapper().writerWithDefaultPrettyPrinter().writeValue(new File(imagePath+".colors.json"),BlockColors.snapshot().usageReport());}
+        catch(IOException e) {throw new IllegalStateException("Cannot write color report",e);}
+    }
+
     /**
      * 保存图像为PNG文件
      */
@@ -578,12 +656,21 @@ public class MinecraftMapSelector {
         System.out.println("  java -jar minecraft-map-selector.jar                                    # 启动GUI");
         System.out.println("  java -jar minecraft-map-selector.jar <mca文件路径> [选项...]              # 命令行模式");
         System.out.println();
+        System.out.println("资源选项（CLI / GUI / Blender 通用，可重复；后面的资源包覆盖前面的）:");
+        System.out.println("  --jar-path <jar> --mods-dir <dir> --mod-jar <jar> --resource-pack <zip>");
+        System.out.println("  --render-y <Y> 以指定 Y 为顶层向下渲染；默认 AUTO");
+        System.out.println("  --no-auto-resources 禁用资源自动发现；每张图另存 .png.colors.json 命中统计");
+        System.out.println("Blender GUI: --world-path <world> --output-file <coordinates.json> [--min-y Y --max-y Y]");
+        System.out.println("预设选区: --min-x X --max-x X --min-z Z --max-z Z (四项必须同时提供)");
+        System.out.println("--multi-box 附加 boxes 列表；--include-waypoints 显式附加 POI；根坐标始终是包围盒");
+        System.out.println("无界面 CI: --validate-selection coordinates.json --max-columns N (退出码 0/1)");
         System.out.println("命令行选项:");
         System.out.println("  <mca文件路径>        必需，.mca区域文件路径");
         System.out.println("  [输出JSON文件路径]   可选，默认为<区域名>_map_<时间戳>.json");
         System.out.println("  [输出图像文件路径]   可选，默认为<区域名>_map_<时间戳>.png");
         System.out.println("  [线程数]            可选，默认为CPU核心数或8（取较小值）");
         System.out.println("  [区域大小]          可选，以区块为单位，默认32（即32x32区块）");
+        System.out.println("  [表面模式]          最后可选参数 AUTO / TOP，默认 AUTO（所有维度均取顶部表面）");
         System.out.println("  [采样间隔]          可选，每隔多少个方块采样一次，默认1（全采样）");
         System.out.println();
         System.out.println("示例:");

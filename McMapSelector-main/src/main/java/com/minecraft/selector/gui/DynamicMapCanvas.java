@@ -5,6 +5,9 @@ import com.minecraft.selector.core.DynamicRegionManager.RegionTile;
 import com.minecraft.selector.utils.LogManager;
 
 import javax.swing.*;
+import com.minecraft.selector.core.RenderedMap;
+import com.minecraft.selector.core.SelectionYFit;
+import java.util.function.Consumer;
 import java.awt.*;
 import java.awt.event.*;
 import java.awt.image.BufferedImage;
@@ -16,7 +19,105 @@ import java.util.List;
  * 动态地图画布
  * 支持动态加载和显示地图区域
  */
-public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.RegionLoadListener {
+public class DynamicMapCanvas extends JPanel implements SelectionCanvas, DynamicRegionManager.RegionLoadListener {
+
+    private SelectionShape selectionShape=new SelectionShape();
+    private final SelectionGestures gestures=new SelectionGestures();
+    private final MinimapInset minimap=new MinimapInset();
+    private SelectionCanvas thisCanvas(){return this;}
+    public SelectionShape getSelectionShape(){return selectionShape.copy();}
+    public void setSelectionShape(SelectionShape shape,boolean remember){if(remember)selectionHistory.remember(getSelectionBounds(),selectionShape);SelectionShape copy=shape.copy();applyBounds(copy.bounds(),false);selectionShape=copy;repaint();}
+    private final SelectionHistory selectionHistory = new SelectionHistory();
+    private SelectionMath.Snap snapMode = SelectionMath.Snap.NONE;
+    private SelectionMath.Bounds resizeOriginal;
+    private Point resizeGrabWorld;
+    private boolean squareGesture;
+    private int gridMode;
+    private Consumer<SelectionMath.Bounds> selectionChangeListener;
+    private Consumer<String> commandListener;
+    private Consumer<Point> lodCenterListener;
+    /** 中键拖动 LOD 中心进行中（按下时置位，松开清除）。 */
+    private boolean lodDragging;
+
+    public void setSelectionChangeListener(Consumer<SelectionMath.Bounds> listener) {selectionChangeListener=listener;}
+    public void setCommandListener(Consumer<String> listener) {commandListener=listener;}
+    public void setLodCenterListener(Consumer<Point> listener) {lodCenterListener=listener;}
+    private void command(String name) {if(commandListener!=null) commandListener.accept(name);else if("grid".equals(name)) setGridMode((gridMode+1)%3);}
+    public SelectionMath.Bounds getSelectionBounds() {return hasValidSelection?SelectionMath.normalized(currentMinX,currentMinZ,currentMaxX,currentMaxZ):null;}
+    public void restoreSelectionBounds(SelectionMath.Bounds b) {if(java.util.Objects.equals(getSelectionBounds(),b)&&selectionShape.isEmpty()) return;selectionHistory.remember(getSelectionBounds(),selectionShape);applyBounds(b,false);}
+    public void setSelectionBounds(SelectionMath.Bounds bounds) {
+        if(java.util.Objects.equals(getSelectionBounds(),bounds)&&selectionShape.isEmpty()) return;
+        selectionHistory.remember(getSelectionBounds(),selectionShape);applyBounds(bounds,true);
+    }
+    private void applyBounds(SelectionMath.Bounds bounds,boolean applySnap) {applyBounds(bounds,applySnap,false);}
+    private void applyBounds(SelectionMath.Bounds bounds,boolean applySnap,boolean square) {
+        selectionShape=new SelectionShape();
+        corner1=null;corner2=null;
+        if(bounds==null) {hasValidSelection=false;selectionWorldStart=null;selectionWorldEnd=null;selectionRect=null;}
+        else {
+            if(applySnap) bounds=SelectionMath.constrain(bounds,snapMode,square);
+            currentMinX=bounds.minX;currentMinZ=bounds.minZ;currentMaxX=bounds.maxX;currentMaxZ=bounds.maxZ;
+            hasValidSelection=true;selectionWorldStart=new Point(currentMinX,currentMinZ);selectionWorldEnd=new Point(currentMaxX,currentMaxZ);
+        }
+        if(selectionChangeListener!=null) selectionChangeListener.accept(getSelectionBounds());
+        refreshHover();repaint();
+    }
+    public void setSquareGesture(boolean square) {
+        squareGesture=square;
+        if(hoverPoint!=null) {
+            if(resizeHandle!=HANDLE_NONE) resizeTo(screenToWorldCoordinates(hoverPoint),square);
+            else if(selecting) updateSelection(hoverPoint);
+        }
+    }
+    public void resetSelection() {overlays.resetSelectionTool();gestures.cancel();resetPosCorner();selecting=false;resizeHandle=HANDLE_NONE;applyBounds(null,false);selectionHistory.clear();}
+    public void nudgeSelection(int direction,boolean shrink,int step) {
+        SelectionMath.Bounds b=getSelectionBounds();if(b==null) return;
+        SelectionMath.Bounds next=SelectionMath.nudge(b,direction,shrink,step);
+        if(!next.equals(b)) {selectionHistory.remember(b,selectionShape);applyBounds(next,false);}
+    }
+    public void undoSelection() {gestures.cancel();if(selectionHistory.canUndo()) {selecting=false;resizeHandle=HANDLE_NONE;SelectionShape previous=selectionHistory.shape();applyBounds(selectionHistory.undo(),false);selectionShape=previous;repaint();}}
+    public void setSnapMode(SelectionMath.Snap snap) {snapMode=snap;SelectionMath.Bounds b=getSelectionBounds();if(b!=null) setSelectionBounds(SelectionMath.snap(b,snap));}
+    public void setGridMode(int mode) {gridMode=Math.floorMod(mode,3);repaint();}
+    public void selectVisible() {SelectionMath.Bounds b=visibleBounds();if(b!=null) setSelectionBounds(b);}
+    private void resizeTo(Point world,boolean square) {
+        if(world==null||resizeOriginal==null||resizeGrabWorld==null) return;
+        boolean west=resizeHandle==3||resizeHandle==5||resizeHandle==7,north=resizeHandle==1||resizeHandle==5||resizeHandle==6;
+        Point target=new Point(SelectionMath.clamp((long)(west?resizeOriginal.minX:resizeOriginal.maxX)+world.x-resizeGrabWorld.x),
+            SelectionMath.clamp((long)(north?resizeOriginal.minZ:resizeOriginal.maxZ)+world.y-resizeGrabWorld.y));
+        applyBounds(SelectionMath.resize(resizeOriginal,resizeHandle,target,square),true,square);
+    }
+
+    private ViewOverlays overlays=new ViewOverlays();
+    private Point pos1,corner1,corner2;
+    public void setOverlays(ViewOverlays value) {overlays=value;overlays.resetSelectionTool();repaint();}
+    public void resetPosCorner() {pos1=null;corner1=null;corner2=null;}
+    private void posClick(Point world) {
+        if(world==null) return;
+        if(pos1==null) {pos1=world;repaint();}
+        else {Point first=pos1;setSelectionBounds(SelectionMath.normalized(first.x,first.y,world.x,world.y));corner1=first;corner2=world;pos1=null;}
+    }
+    private Point hoverPoint;
+    private Consumer<String> hoverListener;
+
+    public void setHoverListener(Consumer<String> listener) { hoverListener = listener; }
+
+    public String getHoverText(Point point) {
+        if (point == null || regionManager == null) return "X: —  Y: —  Z: —";
+        Point world = screenToWorldCoordinates(point);
+        RegionTile tile = regionManager.getLoadedRegion(new Point(Math.floorDiv(world.x, 512), Math.floorDiv(world.y, 512)));
+        int y = tile == null ? RenderedMap.NO_HEIGHT :
+            tile.getHeightAt(Math.floorMod(world.x, 512), Math.floorMod(world.y, 512));
+        // 逐列方块状态 / 生物群系元数据已移除（每块 +4 MB），悬停只显示坐标与表面高度。
+        return String.format("X: %d  Y: %s  Z: %d", world.x,
+            y == RenderedMap.NO_HEIGHT ? "—" : Integer.toString(y), world.y);
+    }
+
+    private void refreshHover() {
+        String text = getHoverText(hoverPoint)+(hoverPoint==null?"":overlays.tooltip(hoverPoint,this::worldToScreenCoordinates));
+        setToolTipText(hoverPoint == null ? null : text);
+        if (hoverListener != null) hoverListener.accept(text);
+    }
+
     private final LogManager logManager;
     private DynamicRegionManager regionManager;
     
@@ -64,8 +165,11 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
     private static final Color GRID_COLOR = new Color(128, 128, 128, 100);
     
     // 状态
-    private boolean showGrid = false;
+
     private boolean showLoadingIndicator = true;
+    /** 加载指示的延迟阈值：短于它就别闪（换带时的短暂重载不该糊一片 Loading） */
+    private static final long LOADING_INDICATOR_DELAY_MS = 400;
+    private final java.util.Map<Point, Long> loadingSince = new java.util.concurrent.ConcurrentHashMap<>();
     private Rectangle lastViewport = new Rectangle();
     
     // 防抖相关
@@ -76,11 +180,15 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
     public DynamicMapCanvas() {
         this.logManager = LogManager.getInstance();
         
-        setBackground(Color.BLACK);
+        setBackground(CheckerBackground.DARK);
         setPreferredSize(new Dimension(800, 600));
         
+        addComponentListener(new java.awt.event.ComponentAdapter() {
+            @Override public void componentResized(java.awt.event.ComponentEvent event) {requestViewportUpdate();}
+        });
         setupMouseListeners();
         setupKeyListeners();
+        SelectionBindings.install(this,this,this::command);
         
         // 防抖定时器 - 只有在停止移动后才更新视口
         viewportUpdateTimer = new Timer(VIEWPORT_UPDATE_DELAY, e -> {
@@ -97,7 +205,8 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
     /**
      * 设置区域管理器
      */
-    public void setRegionManager(DynamicRegionManager regionManager) {
+    public void setRegionManager(DynamicRegionManager regionManager) {setRegionManager(regionManager,true);}
+    public void setRegionManager(DynamicRegionManager regionManager,boolean loadImmediately) {
         if (this.regionManager != null) {
             this.regionManager.removeRegionLoadListener(this);
         }
@@ -108,9 +217,10 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
         
         if (regionManager != null) {
             regionManager.addRegionLoadListener(this);
-            updateViewportIfNeeded();
+            if(loadImmediately) updateViewportIfNeeded();
         }
         
+        refreshHover();
         repaint();
     }
     
@@ -119,13 +229,43 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
      */
     private void setupMouseListeners() {
         addMouseListener(new MouseAdapter() {
+            @Override public void mouseClicked(MouseEvent e) {
+                if(SwingUtilities.isLeftMouseButton(e)&&e.getClickCount()==2&&!overlays.posMode&&!minimap.contains(e.getPoint())) zoomAt(e.getPoint(),1.2);
+            }
+
+            @Override
+            public void mouseExited(MouseEvent e) {
+                hoverPoint = null;
+                refreshHover();
+            }
+
             @Override
             public void mousePressed(MouseEvent e) {
+                requestFocusInWindow();
+                squareGesture=e.isShiftDown();
+                hoverPoint=e.getPoint();
+                if(overlays.minimap&&SwingUtilities.isLeftMouseButton(e)&&minimap.contains(e.getPoint())) {Point target=minimap.worldAt(e.getPoint());if(target!=null)jumpToWorldCoordinate(target);return;}
+                // Special-shape gestures stay implemented, but are not dispatched by the GUI.
+                overlays.resetSelectionTool();
+                gestures.cancel();
+                // 中键：拖动 LOD 中心（LOD 叠加层可见时）。旧的"设为地表高度"已移除。
+                if(SwingUtilities.isMiddleMouseButton(e)) {
+                    if(overlays.importLodVisible) {
+                        lodDragging=true;
+                        setCursor(Cursor.getPredefinedCursor(Cursor.MOVE_CURSOR));
+                        dragLodCenterTo(e.getPoint());
+                    }
+                    return;
+                }
+                if(overlays.posMode&&SwingUtilities.isLeftMouseButton(e)) {posClick(screenToWorldCoordinates(e.getPoint()));return;}
                 if (SwingUtilities.isLeftMouseButton(e)) {
                     // 先检查是否点击到已选区域的线框/角点（可拖拽调整）
                     if (hasValidSelection) {
                         int handle = hitTestResizeHandle(e.getPoint());
                         if (handle != HANDLE_NONE) {
+                            selectionHistory.remember(getSelectionBounds(),selectionShape);
+                            resizeOriginal=getSelectionBounds();
+                            resizeGrabWorld=screenToWorldCoordinates(e.getPoint());
                             resizeHandle = handle;
                             return; // 进入调整模式，不启动地图拖拽
                         }
@@ -141,15 +281,20 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
             
             @Override
             public void mouseReleased(MouseEvent e) {
+                squareGesture=e.isShiftDown();
+                if(gestures.release(e,screenToWorldCoordinates(e.getPoint()),thisCanvas(),snapMode)){if(hasValidSelection&&selectionCallback!=null)selectionCallback.onSelectionComplete(currentMinX,currentMinZ,currentMaxX,currentMaxZ);refreshHover();return;}
+                if(lodDragging) { dragLodCenterTo(e.getPoint()); lodDragging=false; setCursor(Cursor.getDefaultCursor()); return; }
                 if (SwingUtilities.isLeftMouseButton(e)) {
                     if (resizeHandle != HANDLE_NONE) {
                         // 结束选区调整：归一化坐标并通知回调
+                        resizeTo(screenToWorldCoordinates(e.getPoint()),e.isShiftDown());
                         normalizeSelection();
                         resizeHandle = HANDLE_NONE;
                         setCursor(Cursor.getDefaultCursor());
                         if (selectionCallback != null) {
                             selectionCallback.onSelectionComplete(currentMinX, currentMinZ, currentMaxX, currentMaxZ);
                         }
+                        refreshHover();
                         repaint();
                         return;
                     }
@@ -165,20 +310,15 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
         addMouseMotionListener(new MouseMotionAdapter() {
             @Override
             public void mouseDragged(MouseEvent e) {
+                hoverPoint = e.getPoint();
+                squareGesture=e.isShiftDown();
+                if(gestures.update(e,screenToWorldCoordinates(e.getPoint()),thisCanvas(),snapMode))return;
+                if(lodDragging) { dragLodCenterTo(e.getPoint()); return; }
                 if (resizeHandle != HANDLE_NONE && hasValidSelection) {
                     // 拖拽调整选区边界
                     Point world = screenToWorldCoordinates(e.getPoint());
-                    switch (resizeHandle) {
-                        case HANDLE_N: currentMinZ = world.y; break;
-                        case HANDLE_S: currentMaxZ = world.y; break;
-                        case HANDLE_W: currentMinX = world.x; break;
-                        case HANDLE_E: currentMaxX = world.x; break;
-                        case HANDLE_NW: currentMinX = world.x; currentMinZ = world.y; break;
-                        case HANDLE_NE: currentMaxX = world.x; currentMinZ = world.y; break;
-                        case HANDLE_SW: currentMinX = world.x; currentMaxZ = world.y; break;
-                        case HANDLE_SE: currentMaxX = world.x; currentMaxZ = world.y; break;
-                        default: break;
-                    }
+                    resizeTo(world,e.isShiftDown());
+                    refreshHover();
                     repaint();
                     return;
                 }
@@ -192,6 +332,7 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
                     viewOffset.y += deltaY;
                     
                     lastMousePos = currentPos;
+                    refreshHover();
                     repaint();
                     requestViewportUpdate(); // 使用防抖更新
                 } else if (SwingUtilities.isRightMouseButton(e) && selecting) {
@@ -202,6 +343,8 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
             
             @Override
             public void mouseMoved(MouseEvent e) {
+                hoverPoint = e.getPoint();
+                refreshHover();
                 // 鼠标悬停在线框/角点上时显示调整光标
                 if (hasValidSelection && resizeHandle == HANDLE_NONE) {
                     int handle = hitTestResizeHandle(e.getPoint());
@@ -238,6 +381,7 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
             viewOffset.x = (int) (mousePos.x - worldX * scale);
             viewOffset.y = (int) (mousePos.y - worldY * scale);
             
+            refreshHover();
             repaint();
             requestViewportUpdate(); // 使用防抖更新
         });
@@ -251,6 +395,7 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
         addKeyListener(new KeyAdapter() {
             @Override
             public void keyPressed(KeyEvent e) {
+                if(e.isControlDown() || e.isAltDown() || e.getKeyCode()==KeyEvent.VK_G) return;
                 int moveSpeed = (int) (20 / scale);
                 
                 switch (e.getKeyCode()) {
@@ -270,9 +415,7 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
                     case KeyEvent.VK_RIGHT:
                         viewOffset.x -= moveSpeed;
                         break;
-                    case KeyEvent.VK_G:
-                        showGrid = !showGrid;
-                        break;
+
                     case KeyEvent.VK_L:
                         showLoadingIndicator = !showLoadingIndicator;
                         break;
@@ -280,6 +423,7 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
                         resetView();
                         break;
                 }
+                refreshHover();
                 repaint();
                 requestViewportUpdate(); // 使用防抖更新
             }
@@ -292,6 +436,7 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
     public void resetView() {
         scale = 1.0;
         viewOffset = new Point(getWidth() / 2, getHeight() / 2);
+        refreshHover();
         repaint();
     }
     
@@ -300,6 +445,27 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
      * 为避免极远孤立区域(如异常坐标的region)导致地图缩放过小，
      * 使用"main cluster"(与大多数区域相邻的连续区域)来计算边界。
      */
+    public void showInitialViewport(double[] player) {
+        if(regionManager==null) return;
+        Set<Point> regions=regionManager.getAvailableRegions();
+        if(regions.isEmpty()) {
+            regionManager.updateViewport(new Rectangle(0,0,1,1));return;
+        }
+        Point anchor=regions.stream().min(java.util.Comparator.comparingDouble(p -> {
+            double x=player==null?0:player[0],z=player==null?0:player[2];
+            return Math.pow(p.x*512.0+256-x,2)+Math.pow(p.y*512.0+256-z,2);
+        })).get();
+        double x=player==null?anchor.x*512.0+256:player[0];
+        double z=player==null?anchor.y*512.0+256:player[2];
+        if(!regions.contains(new Point((int)Math.floor(x/512),(int)Math.floor(z/512)))) {
+            x=anchor.x*512.0+256;z=anchor.y*512.0+256;
+        }
+        scale=1.0;
+        viewOffset.x=getWidth()/2-(int)x;viewOffset.y=getHeight()/2-(int)z;
+        lastViewport=new Rectangle();viewportUpdateTimer.stop();
+        updateViewportIfNeeded();repaint();
+    }
+
     public void fitToWindow() {
         if (regionManager == null) return;
         
@@ -363,6 +529,7 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
         viewOffset.x = getWidth() / 2 - (int) (centerWorldX * scale);
         viewOffset.y = getHeight() / 2 - (int) (centerWorldZ * scale);
         
+        refreshHover();
         repaint();
         requestViewportUpdate();
     }
@@ -419,6 +586,7 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
         viewOffset.x = getWidth() / 2 - (int) (worldCoord.x * scale);
         viewOffset.y = getHeight() / 2 - (int) (worldCoord.y * scale);
 
+        refreshHover();
         repaint();
 
         // 立即更新视口（不等防抖），让目标区域的加载尽快开始
@@ -443,7 +611,7 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
      * 检查是否需要更新视口
      */
     private void updateViewportIfNeeded() {
-        if (regionManager == null) return;
+        if (regionManager == null || getWidth()<=0 || getHeight()<=0) return;
         
         Rectangle currentViewport = calculateWorldViewport();
         
@@ -460,6 +628,11 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
      */
     private boolean hasSignificantViewportChange(Rectangle current, Rectangle last) {
         if (last.isEmpty()) return true;
+        // Crossing a region edge matters even for small moves now that loading is viewport-only.
+        if(Math.floorDiv(current.x,512)!=Math.floorDiv(last.x,512) ||
+           Math.floorDiv(current.y,512)!=Math.floorDiv(last.y,512) ||
+           Math.floorDiv((long)current.x+current.width-1,512)!=Math.floorDiv((long)last.x+last.width-1,512) ||
+           Math.floorDiv((long)current.y+current.height-1,512)!=Math.floorDiv((long)last.y+last.height-1,512)) return true;
         
         // 计算变化阈值（区域大小的1/4）
         int threshold = REGION_SIZE / 4;
@@ -492,22 +665,55 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
         g2d.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_SPEED);
         g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_OFF);
         
+        // 空地先铺棋盘底：图案固定在屏幕坐标上，拖动/缩放地图时不动
+        CheckerBackground.paint(g2d, getWidth(), getHeight());
+        
         try {
             if (regionManager != null) {
                 drawRegions(g2d);
-                if (showGrid) {
+                if (gridMode!=0) {
                     drawGrid(g2d);
                 }
                 drawSelection(g2d);
                 drawStatusInfo(g2d);
+                overlays.drawOre(g2d,this::worldToScreenCoordinates,scale);
+                SelectionGestures.draw(g2d,selectionShape,this::worldToScreenCoordinates,scale);
+                overlays.drawInView(g2d,getVisibleRect(),scale,this::worldToScreenCoordinates,getSelectionBounds(),pos1,corner1,corner2);
+                if(overlays.minimap){java.util.List<MinimapInset.Tile> tiles=new java.util.ArrayList<>();for(Point p:regionManager.getAvailableRegions()){RegionTile t=regionManager.peekLoadedRegion(p);long x=(long)p.x*512,z=(long)p.y*512;tiles.add(new MinimapInset.Tile(new SelectionMath.Bounds(SelectionMath.clamp(x),SelectionMath.clamp(z),SelectionMath.clamp(x+511),SelectionMath.clamp(z+511)),t==null?null:t.peekImage()));}
+                    Rectangle view=getVisibleRect();Point a=screenToWorldCoordinates(new Point(view.x,view.y)),b=screenToWorldCoordinates(new Point(view.x+view.width-1,view.y+view.height-1));minimap.draw(g2d,view,tiles,SelectionMath.normalized(a.x,a.y,b.x,b.y));
+                }else minimap.clear();
             } else {
-                drawNoDataMessage(g2d);
+                minimap.clear();drawNoDataMessage(g2d);
             }
         } finally {
             g2d.dispose();
         }
     }
     
+    /**
+     * 一块瓦片上的兴趣带高亮：按屏幕坐标叠紫棋盘（图案锚在屏幕原点，所以拖动/缩放时不动）。
+     * 逐行把连续的高亮像素并成一段再 fillRect；边界用 floor 与 drawImage 的最近邻缩放对齐，
+     * 否则缩放后瓦片之间会露出 1~3 像素的缝。
+     */
+    private void drawTileHighlight(Graphics2D g2d, RenderedMap map, int originX, int originY, double pixelScale) {
+        int mapWidth = map.getWidth(), mapHeight = map.getHeight();
+        g2d.setPaint(CheckerBackground.highlightPaint());
+        for (int z = 0; z < mapHeight; z++) {
+            int rowTop = originY + (int) Math.floor(z * pixelScale);
+            int rowBottom = originY + (int) Math.floor((z + 1) * pixelScale);
+            int rowHeight = Math.max(1, rowBottom - rowTop);
+            int x = 0;
+            while (x < mapWidth) {
+                if (!map.isHighlighted(x, z)) { x++; continue; }
+                int start = x;
+                while (x < mapWidth && map.isHighlighted(x, z)) x++;
+                int left = originX + (int) Math.floor(start * pixelScale);
+                int right = originX + (int) Math.floor(x * pixelScale);
+                g2d.fillRect(left, rowTop, Math.max(1, right - left), rowHeight);
+            }
+        }
+    }
+
     /**
      * 绘制区域
      */
@@ -529,16 +735,28 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
                 int screenWidth = (int) (REGION_SIZE * scale);
                 int screenHeight = (int) (REGION_SIZE * scale);
                 
-                RegionTile tile = regionManager.getLoadedRegion(regionCoord);
+                // 绘制期间只读，不触发重渲染：paint 里排队 refresh 会造成"重绘引发重绘"，
+                // 瓦片一块块回来时看起来就是按顺序闪。过期检测交给非绘制的取用路径。
+                RegionTile tile = regionManager.peekLoadedRegion(regionCoord);
                 if (tile != null) {
                     // 绘制已加载的区域
                     BufferedImage image = tile.getImage();
                     // 使用+1像素重叠来消除缝隙
                     g2d.drawImage(image, screenX, screenY, screenWidth + 1, screenHeight + 1, null);
+                    if(overlays.night||overlays.contours||overlays.gaps)
+                        g2d.drawImage(ViewLayers.overlay(image,overlays.night,overlays.contours,overlays.gaps),screenX,screenY,screenWidth+1,screenHeight+1,null);
+                    // 兴趣带高亮：同样按屏幕坐标叠紫棋盘（图案不随地图移动）
+                    if (image instanceof RenderedMap) {
+                        // 用图像"实际绘制尺寸"(screenWidth+1) 算缩放：否则瓦片交界处会空出 1 像素露底
+                        drawTileHighlight(g2d, (RenderedMap) image, screenX, screenY,
+                            (double) (screenWidth + 1) / REGION_SIZE);
+                    }
                     
                 } else if (availableRegions.contains(regionCoord)) {
                     if (regionManager.isRegionLoading(regionCoord)) {
-                        // 绘制加载中的区域
+                        // 绘制加载中的区域：没超过阈值就什么都不画（旧瓦片/棋盘保持不动）
+                        long since = loadingSince.computeIfAbsent(regionCoord, k -> System.currentTimeMillis());
+                        if (System.currentTimeMillis() - since < LOADING_INDICATOR_DELAY_MS) continue;
                         g2d.setColor(LOADING_COLOR);
                         g2d.fillRect(screenX, screenY, screenWidth, screenHeight);
                         
@@ -552,7 +770,9 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
                             g2d.drawString(text, textX, textY);
                         }
                     } else {
-                        // 绘制未加载但可用的区域
+                        // 绘制未加载但可用的区域：同样延迟
+                        long since = loadingSince.computeIfAbsent(regionCoord, k -> System.currentTimeMillis());
+                        if (System.currentTimeMillis() - since < LOADING_INDICATOR_DELAY_MS) continue;
                         g2d.setColor(LOADING_COLOR);
                         g2d.fillRect(screenX, screenY, screenWidth, screenHeight);
                         
@@ -571,30 +791,9 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
      * 绘制网格
      */
     private void drawGrid(Graphics2D g2d) {
-        g2d.setColor(GRID_COLOR);
-        g2d.setStroke(new BasicStroke(1.0f));
-        
-        Rectangle viewport = calculateWorldViewport();
-        
-        // 绘制垂直线
-        int startRegionX = (int) Math.floor(viewport.x / (double) REGION_SIZE);
-        int endRegionX = (int) Math.ceil((viewport.x + viewport.width) / (double) REGION_SIZE);
-        
-        for (int regionX = startRegionX; regionX <= endRegionX; regionX++) {
-            int screenX = (int) (regionX * REGION_SIZE * scale + viewOffset.x);
-            g2d.drawLine(screenX, 0, screenX, getHeight());
-        }
-        
-        // 绘制水平线
-        int startRegionZ = (int) Math.floor(viewport.y / (double) REGION_SIZE);
-        int endRegionZ = (int) Math.ceil((viewport.y + viewport.height) / (double) REGION_SIZE);
-        
-        for (int regionZ = startRegionZ; regionZ <= endRegionZ; regionZ++) {
-            int screenY = (int) (regionZ * REGION_SIZE * scale + viewOffset.y);
-            g2d.drawLine(0, screenY, getWidth(), screenY);
-        }
+        MapGrid.draw(g2d,gridMode,viewportBounds(),scale,this::worldToScreenCoordinates,getWidth(),getHeight());
     }
-    
+
     /**
      * 绘制选区
      */
@@ -677,22 +876,25 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
     // RegionLoadListener 实现
     @Override
     public void onRegionLoaded(Point regionCoord, RegionTile tile) {
-        SwingUtilities.invokeLater(this::repaint);
+        loadingSince.remove(regionCoord);
+        SwingUtilities.invokeLater(() -> { refreshHover(); repaint(); });
     }
     
     @Override
     public void onRegionUnloaded(Point regionCoord) {
-        SwingUtilities.invokeLater(this::repaint);
+        loadingSince.remove(regionCoord);
+        SwingUtilities.invokeLater(() -> { refreshHover(); repaint(); });
     }
     
     @Override
     public void onLoadingStarted(Point regionCoord) {
-        SwingUtilities.invokeLater(this::repaint);
+        SwingUtilities.invokeLater(() -> { refreshHover(); repaint(); });
     }
     
     @Override
     public void onLoadingFailed(Point regionCoord, Exception error) {
-        SwingUtilities.invokeLater(this::repaint);
+        loadingSince.remove(regionCoord);
+        SwingUtilities.invokeLater(() -> { refreshHover(); repaint(); });
         logManager.error("Region load failed: r." + regionCoord.x + "." + regionCoord.y + ".mca", "DynamicMapCanvas", error);
     }
     
@@ -707,10 +909,14 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
      * 开始选择区域
      */
     private void startSelection(Point point) {
+        resetPosCorner();
+        selectionHistory.remember(getSelectionBounds(),selectionShape);
         selectionStart = new Point(point);
         selectionEnd = new Point(point);
         selecting = true;
         selectionRect = new Rectangle();
+        updateSelection(point);
+        refreshHover();
         repaint();
     }
     
@@ -718,60 +924,21 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
      * 更新选择区域
      */
     private void updateSelection(Point point) {
-        if (selecting && selectionStart != null) {
-            selectionEnd = new Point(point);
-            
-            // 计算选择矩形
-            int x = Math.min(selectionStart.x, selectionEnd.x);
-            int y = Math.min(selectionStart.y, selectionEnd.y);
-            int width = Math.abs(selectionEnd.x - selectionStart.x);
-            int height = Math.abs(selectionEnd.y - selectionStart.y);
-            
-            selectionRect = new Rectangle(x, y, width, height);
-            repaint();
-        }
+        if (!selecting || selectionStart==null) return;
+        Point a=screenToWorldCoordinates(selectionStart),b=screenToWorldCoordinates(point);
+        if(a==null||b==null) return;
+        applyBounds(SelectionMath.drag(a,b,squareGesture),true,squareGesture);
+        // Preview uses the same inclusive world bounds as the committed rectangle.
+        selectionEnd=worldToScreenCoordinates(new Point(currentMaxX,currentMaxZ));
+        selectionRect=getSelectionScreenRect();
     }
-    
-    /**
-     * 完成选择区域
-     */
+
     private void finishSelection(Point point) {
-        if (selecting && selectionStart != null) {
-            selectionEnd = new Point(point);
-            
-            // 将屏幕坐标转换为世界坐标
-            Point worldStart = screenToWorldCoordinates(selectionStart);
-            Point worldEnd = screenToWorldCoordinates(selectionEnd);
-            
-            if (worldStart != null && worldEnd != null) {
-                // 保存世界坐标用于后续绘制
-                selectionWorldStart = new Point(worldStart);
-                selectionWorldEnd = new Point(worldEnd);
-                
-                // 计算世界坐标范围
-                currentMinX = Math.min(worldStart.x, worldEnd.x);
-                currentMaxX = Math.max(worldStart.x, worldEnd.x);
-                currentMinZ = Math.min(worldStart.y, worldEnd.y);
-                currentMaxZ = Math.max(worldStart.y, worldEnd.y);
-                hasValidSelection = true;
-                
-                // 调用回调
-                if (selectionCallback != null) {
-                    selectionCallback.onSelectionComplete(currentMinX, currentMinZ, currentMaxX, currentMaxZ);
-                }
-                
-                System.out.printf("Selected area: world (%d, %d) to (%d, %d) - press Enter to confirm\n",
-                    currentMinX, currentMinZ, currentMaxX, currentMaxZ);
-            }
-        }
-        
-        selecting = false;
-        repaint();
+        updateSelection(point);selecting=false;selectionStart=null;selectionEnd=null;
+        if(hasValidSelection&&selectionCallback!=null) selectionCallback.onSelectionComplete(currentMinX,currentMinZ,currentMaxX,currentMaxZ);
+        refreshHover();repaint();
     }
-    
-    /**
-     * 归一化选区坐标（保证 min <= max）
-     */
+
     private void normalizeSelection() {
         if (currentMinX > currentMaxX) { int t = currentMinX; currentMinX = currentMaxX; currentMaxX = t; }
         if (currentMinZ > currentMaxZ) { int t = currentMinZ; currentMinZ = currentMaxZ; currentMaxZ = t; }
@@ -783,15 +950,15 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
      * 计算选区在屏幕上的矩形
      */
     private Rectangle getSelectionScreenRect() {
-        Point screenStart = worldToScreenCoordinates(new Point(currentMinX, currentMinZ));
-        Point screenEnd = worldToScreenCoordinates(new Point(currentMaxX, currentMaxZ));
-        int x = Math.min(screenStart.x, screenEnd.x);
-        int y = Math.min(screenStart.y, screenEnd.y);
-        int width = Math.abs(screenEnd.x - screenStart.x);
-        int height = Math.abs(screenEnd.y - screenStart.y);
-        return new Rectangle(x, y, width, height);
+        if(!hasValidSelection) return new Rectangle();
+        double factor=scale;
+        int x=(int)Math.floor(((long)currentMinX)*factor+viewOffset.x);
+        int z=(int)Math.floor(((long)currentMinZ)*factor+viewOffset.y);
+        int right=(int)Math.ceil(((long)currentMaxX+1)*factor+viewOffset.x);
+        int bottom=(int)Math.ceil(((long)currentMaxZ+1)*factor+viewOffset.y);
+        return new Rectangle(x,z,Math.max(1,SelectionMath.clamp((long)right-x)),Math.max(1,SelectionMath.clamp((long)bottom-z)));
     }
-    
+
     /**
      * 检测鼠标是否命中选区的边或角
      * @return 对应的 handle，未命中返回 HANDLE_NONE
@@ -848,6 +1015,15 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
     }
     
     /**
+     * 中键拖动 LOD 中心（区块对齐与回写面板由 GUI 侧监听器负责）。
+     */
+    private void dragLodCenterTo(Point screenPoint) {
+        if (lodCenterListener == null) return;
+        Point world = screenToWorldCoordinates(screenPoint);
+        if (world != null) lodCenterListener.accept(world);
+    }
+
+    /**
      * 屏幕坐标转世界坐标
      */
     private Point screenToWorldCoordinates(Point screenPoint) {
@@ -888,7 +1064,10 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
     /**
      * 清除选区
      */
-    public void clearSelection() {
+    public void clearSelection() {overlays.resetSelectionTool();gestures.cancel();
+        resetPosCorner();
+        if(hasValidSelection) selectionHistory.remember(getSelectionBounds(),selectionShape);
+        selectionShape=new SelectionShape();
         hasValidSelection = false;
         selecting = false;
         selectionStart = null;
@@ -897,6 +1076,8 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
         selectionWorldEnd = null;
         selectionRect = new Rectangle();
         resizeHandle = HANDLE_NONE;
+        if(selectionChangeListener!=null) selectionChangeListener.accept(null);
+        refreshHover();
         repaint();
     }
     
@@ -910,5 +1091,57 @@ public class DynamicMapCanvas extends JPanel implements DynamicRegionManager.Reg
         if (viewportUpdateTimer != null) {
             viewportUpdateTimer.stop();
         }
+    }
+
+    private SelectionMath.Bounds viewportBounds() {
+        int minX=(int)Math.floor(-viewOffset.x/scale),minZ=(int)Math.floor(-viewOffset.y/scale);
+        int maxX=SelectionMath.clamp((long)Math.ceil((getWidth()-(double)viewOffset.x)/scale)-1);
+        int maxZ=SelectionMath.clamp((long)Math.ceil((getHeight()-(double)viewOffset.y)/scale)-1);
+        return SelectionMath.normalized(minX,minZ,maxX,maxZ);
+    }
+    private SelectionMath.Bounds visibleBounds() {
+        SelectionMath.Bounds b=viewportBounds();if(regionManager==null) return null;
+        Set<Point> regions=regionManager.getAvailableRegions();if(regions.isEmpty()) return null;
+        long minX=Long.MAX_VALUE,minZ=Long.MAX_VALUE,maxX=Long.MIN_VALUE,maxZ=Long.MIN_VALUE;
+        for(Point p:regions) {minX=Math.min(minX,(long)p.x*512);minZ=Math.min(minZ,(long)p.y*512);maxX=Math.max(maxX,(long)p.x*512+511);maxZ=Math.max(maxZ,(long)p.y*512+511);}
+        int x1=Math.max(b.minX,SelectionMath.clamp(minX)),z1=Math.max(b.minZ,SelectionMath.clamp(minZ)),x2=Math.min(b.maxX,SelectionMath.clamp(maxX)),z2=Math.min(b.maxZ,SelectionMath.clamp(maxZ));
+        return x1>x2||z1>z2?null:new SelectionMath.Bounds(x1,z1,x2,z2);
+    }
+    public int[] getHoverCoordinates() {
+        if(hoverPoint==null||regionManager==null) return null;
+        Point w=screenToWorldCoordinates(hoverPoint);
+        RegionTile tile=regionManager.getLoadedRegion(new Point(Math.floorDiv(w.x,512),Math.floorDiv(w.y,512)));
+        return new int[]{w.x,tile==null?RenderedMap.NO_HEIGHT:tile.getHeightAt(Math.floorMod(w.x,512),Math.floorMod(w.y,512)),w.y};
+    }
+    public SelectionYFit.Result fitSelectionY(SelectionMath.Bounds b) {return fitSelectionY(b,true);}
+    public SelectionYFit.Result fitSelectionY(SelectionMath.Bounds b,boolean opaque) {
+        SelectionYFit.Result result=new SelectionYFit.Result();if(regionManager==null||b==null) return result;
+        for(Map.Entry<Point,RegionTile> e:regionManager.getAllLoadedRegions().entrySet())
+            result.merge(SelectionYFit.scan(e.getValue().getImage(),SelectionMath.clamp((long)e.getKey().x*512),SelectionMath.clamp((long)e.getKey().y*512),1,b,opaque));
+        return result;
+    }
+    public java.util.Map<String,Long> visibleBlockCounts() {
+        java.util.Map<String,Long> counts=new java.util.TreeMap<>();if(regionManager==null) return counts;
+        SelectionMath.Bounds b=viewportBounds();
+        for(java.util.Map.Entry<Point,RegionTile> e:regionManager.getAllLoadedRegions().entrySet()) {
+            long x=(long)e.getKey().x*512,z=(long)e.getKey().y*512;
+            if(x>b.maxX||z>b.maxZ||x+511<b.minX||z+511<b.minZ) continue;
+            ViewLayers.count(counts,e.getValue().getImage(),SelectionMath.clamp((long)b.minX-x),SelectionMath.clamp((long)b.minZ-z),SelectionMath.clamp((long)b.maxX-x),SelectionMath.clamp((long)b.maxZ-z));
+        }return counts;
+    }
+    private void zoomAt(Point p,double factor) {
+        double next=Math.max(0.000000000001,Math.min(10.0,scale*factor)),ratio=next/scale;
+        viewOffset.x=(int)Math.floor(p.x-(p.x-(double)viewOffset.x)*ratio);viewOffset.y=(int)Math.floor(p.y-(p.y-(double)viewOffset.y)*ratio);scale=next;
+        refreshHover();repaint();updateViewportIfNeeded();
+    }
+    public double getZoomLevel() {return scale;}
+    public void zoomExtents(boolean maximum) {
+        if(maximum) {zoomAt(new Point(getWidth()/2,getHeight()/2),10.0/scale);return;}
+        if(regionManager==null) return;
+        java.util.Set<Point> points=regionManager.getAllLoadedRegions().keySet();if(points.isEmpty()) points=regionManager.getAvailableRegions();if(points.isEmpty()) return;
+        long x1=Long.MAX_VALUE,z1=Long.MAX_VALUE,x2=Long.MIN_VALUE,z2=Long.MIN_VALUE;
+        for(Point p:points) {x1=Math.min(x1,(long)p.x*512);z1=Math.min(z1,(long)p.y*512);x2=Math.max(x2,(long)p.x*512+512);z2=Math.max(z2,(long)p.y*512+512);}
+        scale=Math.max(0.000000000001,Math.min(10.0,Math.min(getWidth()/(double)(x2-x1),getHeight()/(double)(z2-z1))));
+        viewOffset.x=(int)(getWidth()/2.0-((x1+x2)/2.0)*scale);viewOffset.y=(int)(getHeight()/2.0-((z1+z2)/2.0)*scale);refreshHover();repaint();updateViewportIfNeeded();
     }
 }

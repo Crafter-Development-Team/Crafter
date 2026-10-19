@@ -21,21 +21,54 @@ public class BlockColors {
     // Atomically publish an immutable color source with its own cache.
     // In-flight renders retain their palette and cannot repopulate a newer cache.
     public static final class Palette {
+        private String fingerprint="builtin-only";
+        public String fingerprint() {return fingerprint;}
         private final Map<String, Color> extractedColors;
-        private final Map<String, Color> cache = new ConcurrentHashMap<>();
-
-        private Palette(Map<String, Color> colors) {
-            extractedColors = java.util.Collections.unmodifiableMap(new HashMap<>(colors));
+        private final MinecraftResourceExtractor resources;
+        private final Map<String, Appearance> surfaces = new ConcurrentHashMap<>();
+        private final Map<String, java.util.concurrent.atomic.LongAdder> uses = new ConcurrentHashMap<>();
+        private final Map<String,String> sources = new ConcurrentHashMap<>();
+        private Palette(Map<String, Color> colors) { this(colors,null); }
+        private Palette(Map<String, Color> colors,MinecraftResourceExtractor resources) {
+            extractedColors = java.util.Collections.unmodifiableMap(new HashMap<>(colors));this.resources=resources==null?null:resources.snapshot();
         }
-
-        public Color getBlockColor(String blockId) {
-            if (blockId == null || blockId.isEmpty()) {
-                return new Color(255, 0, 255, 128);
-            }
-            return cache.computeIfAbsent(blockId, id -> calculateBlockColor(id, extractedColors));
+        Color biomeColor(Color base,String biome,String block,int mode) {return resources==null?base:resources.biomeColors().apply(base,biome,block,mode);}
+        public Color getBlockColor(String blockId) { return appearance(blockId,java.util.Collections.emptyMap()).color; }
+        public Appearance appearance(String id,Map<String,String> props) {
+            if(id==null || id.isEmpty()) return new Appearance(new Color(128,128,128),"unknown");
+            String key=id+new java.util.TreeMap<>(props).toString();
+            Appearance a=surfaces.computeIfAbsent(key,k -> {
+                if(isAirBlock(id)) return new Appearance(new Color(0,0,0,0),"air");
+                JarModelColors.Surface s=resources==null?null:resources.surface(id,props);
+                if(s!=null) return new Appearance(s.color,s.source);
+                Color c=lookupJarColor(id,extractedColors);
+                if(c!=null) return new Appearance(c,"texture");
+                String simple=id.replace("minecraft:","");
+                c=BLOCK_COLORS.get(simple);
+                if(c==null && !simple.contains(":")) c=matchVariantBlock(simple);
+                return new Appearance(c==null?new Color(128,128,128):c,c==null?"unknown":"builtin");
+            });
+            sources.put(id,a.source);uses.computeIfAbsent(id,k->new java.util.concurrent.atomic.LongAdder()).increment();
+            if("unknown".equals(a.source) && uses.get(id).sum()==1) System.err.println("No texture/model: " + id + "; using neutral gray");
+            return a;
+        }
+        void recordAssociated(String id) {
+            sources.put(id,"block-entity-material");uses.computeIfAbsent(id,k->new java.util.concurrent.atomic.LongAdder()).increment();
+        }
+        public boolean hasResources() {return resources!=null || !extractedColors.isEmpty();}
+        public Map<String,Object> usageReport() {
+            Map<String,Object> result=new java.util.TreeMap<>();
+            for(String id:uses.keySet()) {Map<String,Object> row=new java.util.TreeMap<>();row.put("source",sources.get(id));row.put("lookups",uses.get(id).sum());result.put(id,row);}return result;
+        }
+        public void logSummary() {
+            Map<String,Integer> counts=new java.util.TreeMap<>();for(String source:sources.values()) counts.merge(source,1,Integer::sum);
+            System.out.println("Color coverage (unique IDs): " + counts);
         }
     }
-
+    public static final class Appearance {
+        public final Color color; public final String source;
+        Appearance(Color color,String source) {this.color=color;this.source=source;}
+    }
     private static volatile Palette palette = new Palette(java.util.Collections.emptyMap());
 
     public static Palette snapshot() {
@@ -272,116 +305,52 @@ public class BlockColors {
      * 设置资源提取器
      */
     public static void setResourceExtractor(MinecraftResourceExtractor extractor) {
-        palette = new Palette(extractor == null
-            ? java.util.Collections.emptyMap() : extractor.getAllExtractedColors());
+        palette = new Palette(java.util.Collections.emptyMap(),extractor);
     }
 
     /**
      * 从存档路径初始化颜色提取器（包括minecraft和mods）
      */
     public static boolean initializeColorsFromSavePath(String savePath) {
-        return initializeColorsFromSavePath(savePath, null);
+        return initializeColorsFromSavePath(savePath, (String) null);
     }
 
     public static boolean initializeColorsFromSavePath(String savePath, String preferredJarPath) {
-        MinecraftResourceExtractor extractor = new MinecraftResourceExtractor();
-        boolean success = false;
-
-        // 1. 尝试加载minecraft颜色
-        List<String> jarPaths = MinecraftResourceExtractor.findMinecraftJarsFromSavePath(savePath);
-        if (preferredJarPath != null) {
-            jarPaths.remove(preferredJarPath);
-            jarPaths.add(0, preferredJarPath);
-        }
-        if (!jarPaths.isEmpty()) {
-            for (String jarPath : jarPaths) {
-                MinecraftResourceExtractor candidate = new MinecraftResourceExtractor();
-                if (candidate.extractColorsFromMinecraftJar(jarPath)) {
-                    extractor = candidate;
-                    System.out.println("成功从Minecraft JAR加载颜色: " + jarPath);
-                    success = true;
-                    break; // 只需要一个成功的jar文件
-                }
-            }
-        }
-
-        // 2. 尝试加载mods颜色
-        String modsPath = MinecraftResourceExtractor.findModsDirectoryFromSavePath(savePath);
-        if (modsPath != null) {
-            if (extractor.extractColorsFromModsDirectory(modsPath)) {
-                System.out.println("成功从mods目录加载颜色: " + modsPath);
-                success = true;
-            }
-        } else {
-            System.out.println("未找到mods目录，跳过mod颜色加载");
-        }
-
-        // Also reset to defaults on failure; never retain a previous world's colors.
-        setResourceExtractor(success ? extractor : null);
-        if (success) {
-            System.out.println("颜色提取器初始化完成");
-        } else {
-            System.out.println("颜色提取器初始化失败，将使用默认颜色");
-        }
-
-        return success;
+        ResourceOptions options=ResourceOptions.launch();
+        if(preferredJarPath!=null && options.jars.isEmpty()) options.jars.add(preferredJarPath);
+        return initializeColorsFromSavePath(savePath,options);
     }
-
-    /**
-     * 计算方块颜色
-     */
-    private static Color calculateBlockColor(String blockId, Map<String, Color> extractedColors) {
-        // 如果blockId为null或空字符串，返回紫色标记错误
-        if (blockId == null || blockId.isEmpty()) {
-            return new Color(255, 0, 255, 128); // 半透明紫色
+    public static boolean initializeColorsFromSavePath(String savePath,ResourceOptions options) {
+        Palette loaded=loadPalette(savePath,options);setPalette(loaded);return loaded.resources!=null;
+    }
+    public static void setPalette(Palette loaded) {palette=java.util.Objects.requireNonNull(loaded);}
+    private static final Map<String,MinecraftResourceExtractor> preparedResources=
+        new java.util.LinkedHashMap<String,MinecraftResourceExtractor>(4,0.75f,true) {
+            @Override protected boolean removeEldestEntry(Map.Entry<String,MinecraftResourceExtractor> e) {return size()>3;}
+        };
+    public static Palette loadPalette(String savePath,ResourceOptions options) {
+        return loadPalette(savePath,options,(completed,total,message) -> {});
+    }
+    public static Palette loadPalette(String savePath,ResourceOptions options,MinecraftResourceExtractor.ProgressListener progress) {
+        progress.onProgress(0,0,"Discovering world resource archives...");
+        List<String> paths=options.archivesFor(savePath);
+        try {
+            // World scope keeps palettes isolated; ordered fingerprints include texture-only overlays.
+            StringBuilder key=new StringBuilder(new java.io.File(savePath==null?System.getProperty("user.dir"):savePath).getCanonicalPath());
+            for(String path:paths) key.append('\n').append(ResourceArchiveCache.index(path).fingerprint);
+            MinecraftResourceExtractor extractor;
+            synchronized(preparedResources) {extractor=preparedResources.get(key.toString());}
+            if(extractor==null) {
+                extractor=new MinecraftResourceExtractor();extractor.addArchives(paths,progress);
+                synchronized(preparedResources) {preparedResources.put(key.toString(),extractor);}
+            } else progress.onProgress(paths.size(),paths.size(),"Reusing resource colors (unchanged resource fingerprints)");
+            Palette loaded=new Palette(java.util.Collections.emptyMap(),paths.isEmpty()?null:extractor);
+            try {byte[] digest=java.security.MessageDigest.getInstance("SHA-256").digest(key.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));StringBuilder hex=new StringBuilder();for(byte b:digest) hex.append(String.format(java.util.Locale.ROOT,"%02x",b&255));loaded.fingerprint=hex.toString();}catch(java.security.NoSuchAlgorithmException e) {throw new IllegalStateException(e);}
+            return loaded;
+        } catch(java.io.IOException e) {
+            com.minecraft.selector.utils.LogManager.getInstance().error("Resource loading failed: "+e.getMessage(),"Resources",e);
+            throw new IllegalArgumentException("Cannot initialize resource stack",e);
         }
-
-        String normalized = blockId.startsWith("minecraft:") ? blockId.substring(10) : blockId;
-        if (isAirBlock(normalized)) return new Color(0, 0, 0, 0);
-
-        // 只要成功从JAR提取到了颜色，就完全使用JAR颜色（不再混用内置默认色板）
-        if (!extractedColors.isEmpty()) {
-            Color jarColor = lookupJarColor(blockId, extractedColors);
-            if (jarColor != null) {
-                return jarColor;
-            }
-            return randomColor(blockId);
-        }
-
-        // ===== 以下为JAR颜色不可用时的默认兜底 =====
-
-        // 从完整方块ID中提取基本名称
-        String processedId = blockId;
-        if (blockId.contains(":")) {
-            String[] parts = blockId.split(":", 2);
-            // 如果是minecraft命名空间，只使用名称部分
-            if ("minecraft".equals(parts[0])) {
-                processedId = parts[1];
-            } else {
-                // 对于mod方块，保留完整的命名空间
-                processedId = blockId;
-            }
-        }
-
-        // 尝试匹配完整ID
-        if (BLOCK_COLORS.containsKey(processedId)) {
-            return BLOCK_COLORS.get(processedId);
-        }
-
-        // 智能匹配变体方块
-        Color variantColor = matchVariantBlock(processedId);
-        if (variantColor != null) {
-            return variantColor;
-        }
-
-        // 尝试匹配部分ID（例如，如果blockId是"spruce_planks"，可以匹配"spruce"）
-        for (String key : BLOCK_COLORS.keySet()) {
-            if (processedId.contains(key)) {
-                return BLOCK_COLORS.get(key);
-            }
-        }
-
-        return randomColor(blockId);
     }
 
     /**
@@ -432,17 +401,6 @@ public class BlockColors {
     private static final String[] VARIANT_SUFFIXES = {
         "_stairs", "_slab", "_wall", "_fence_gate", "_fence", "_trapdoor",
         "_door", "_pressure_plate", "_button", "_hanging_sign", "_sign"};
-
-    /**
-     * 未知方块的固定哈希色（保证同一方块颜色稳定）
-     */
-    private static Color randomColor(String blockId) {
-        java.util.Random random = new java.util.Random(blockId.hashCode());
-        int r = random.nextInt(200) + 55; // 避免太暗的颜色
-        int g = random.nextInt(200) + 55;
-        int b = random.nextInt(200) + 55;
-        return new Color(r, g, b, 255);
-    }
 
     /**
      * 智能匹配变体方块
@@ -529,20 +487,21 @@ public class BlockColors {
      * 清除颜色缓存
      */
     public static void clearCache() {
-        palette.cache.clear();
+        palette.surfaces.clear();
     }
     
     /**
      * 获取缓存大小
      */
     public static int getCacheSize() {
-        return palette.cache.size();
+        return palette.surfaces.size();
     }
     
     /**
      * 检查是否为空气方块或透明方块
      */
     public static boolean isAirBlock(String blockId) {
+        if (blockId != null && blockId.startsWith("minecraft:")) blockId = blockId.substring(10);
         return "air".equals(blockId) || "cave_air".equals(blockId) || "void_air".equals(blockId) || "none".equals(blockId);
     }
 }

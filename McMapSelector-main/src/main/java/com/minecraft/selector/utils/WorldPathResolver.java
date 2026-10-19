@@ -1,6 +1,7 @@
 package com.minecraft.selector.utils;
 
 import java.io.File;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -16,10 +17,24 @@ import java.util.List;
  *       老版 Forge 模组维度在 DIM&lt;number&gt;/region/</li>
  * </ul>
  * 解析时新布局优先,旧布局回退,二者均不存在时返回主世界 region 路径(保持旧行为)。
+ * 回退与失败可通过 {@link RegionResolve} 观测。
  */
 public final class WorldPathResolver {
 
     private WorldPathResolver() {
+    }
+
+    /**
+     * Normalize a save/world path for File lookups.
+     * Collapses {@code .}/{@code ..}, and lets Java apply the host separator rules
+     * so Blender-passed Windows paths with {@code \} still resolve on Windows.
+     * Always prefer this (or {@code new File(path)}) over string concatenation.
+     */
+    public static File normalizeSaveDir(String savePath) {
+        if (savePath == null || savePath.isEmpty()) {
+            return new File(".");
+        }
+        return new File(savePath).getAbsoluteFile();
     }
 
     /** A dimension discovered in a save. */
@@ -43,13 +58,56 @@ public final class WorldPathResolver {
     }
 
     /**
+     * Result of resolving a dimension's region directory, including tried paths
+     * and whether a modern→legacy fallback was used.
+     */
+    public static final class RegionResolve {
+        private final File regionDir;
+        private final boolean found;
+        private final boolean usedLegacyFallback;
+        private final List<String> triedPaths;
+        private final String note;
+
+        RegionResolve(File regionDir, boolean found, boolean usedLegacyFallback,
+                      List<String> triedPaths, String note) {
+            this.regionDir = regionDir;
+            this.found = found;
+            this.usedLegacyFallback = usedLegacyFallback;
+            this.triedPaths = Collections.unmodifiableList(new ArrayList<String>(triedPaths));
+            this.note = note;
+        }
+
+        public File getRegionDir() { return regionDir; }
+        /** True when the returned directory exists on disk. */
+        public boolean isFound() { return found; }
+        /** True when 26.1+ path was missing and an existing legacy path was used. */
+        public boolean usedLegacyFallback() { return usedLegacyFallback; }
+        public List<String> getTriedPaths() { return triedPaths; }
+        /** Human-readable note (fallback or missing); may be null when modern path hit. */
+        public String getNote() { return note; }
+
+        /** User-facing message when region could not be found. */
+        public String missingMessage(String dimensionId) {
+            StringBuilder sb = new StringBuilder();
+            sb.append("找不到 region（含 26.1+ dimensions/.../region）");
+            if (dimensionId != null) sb.append(" [").append(dimensionId).append(']');
+            sb.append(". Tried: ");
+            for (int i = 0; i < triedPaths.size(); i++) {
+                if (i > 0) sb.append("; ");
+                sb.append(triedPaths.get(i));
+            }
+            return sb.toString();
+        }
+    }
+
+    /**
      * Discover every dimension that has a region directory in this save.
-     * Supports vanilla legacy folders, Forge DIM<number>, and modern
-     * dimensions/<namespace>/<path>/region layouts.
+     * Supports vanilla legacy folders, Forge DIM&lt;number&gt;, and modern
+     * dimensions/&lt;namespace&gt;/&lt;path&gt;/region layouts.
      */
     public static List<DimensionInfo> discoverDimensions(String savePath) {
         List<DimensionInfo> result = new ArrayList<>();
-        File saveDir = new File(savePath);
+        File saveDir = normalizeSaveDir(savePath);
 
         addIfRegionDir(result, "minecraft:overworld", "Overworld", new File(saveDir, "region"));
         addIfRegionDir(result, "minecraft:the_nether", "Nether", new File(saveDir, "DIM-1/region"));
@@ -81,12 +139,22 @@ public final class WorldPathResolver {
     private static void scanModernDimensions(File root, File current, List<DimensionInfo> result) {
         if (!current.isDirectory()) return;
         if ("region".equals(current.getName()) && current.getParentFile() != null) {
-            String relative = root.toURI().relativize(current.getParentFile().toURI()).getPath();
-            String[] parts = relative.replace('\\', '/').split("/");
-            if (parts.length >= 2) {
-                String namespace = parts[0];
-                StringBuilder path = new StringBuilder(parts[1]);
-                for (int i = 2; i < parts.length; i++) path.append('/').append(parts[i]);
+            // Path.relativize is reliable on Windows; URI.relativize can break when
+            // drive-letter case differs (C: vs c:) and then yields absolute /C:/... parts.
+            Path rootPath = root.toPath().toAbsolutePath().normalize();
+            Path dimPath = current.getParentFile().toPath().toAbsolutePath().normalize();
+            if (!dimPath.startsWith(rootPath)) return;
+            Path relative = rootPath.relativize(dimPath);
+            int n = relative.getNameCount();
+            if (n >= 2) {
+                String namespace = relative.getName(0).toString();
+                if (namespace.isEmpty()) return;
+                StringBuilder path = new StringBuilder(relative.getName(1).toString());
+                for (int i = 2; i < n; i++) {
+                    String part = relative.getName(i).toString();
+                    if (part.isEmpty()) continue;
+                    path.append('/').append(part);
+                }
                 String id = namespace + ":" + path;
                 String name = "minecraft:overworld".equals(id) ? "Overworld" :
                               "minecraft:the_nether".equals(id) ? "Nether" :
@@ -101,7 +169,8 @@ public final class WorldPathResolver {
 
     private static void addIfRegionDir(List<DimensionInfo> result, String id, String name, File dir) {
         if (!dir.isDirectory()) return;
-        File[] regions = dir.listFiles((d, fileName) -> fileName.endsWith(".mca") && new File(d, fileName).length() > 0);
+        // 0-byte .mca is normal (chunks not generated yet); presence of the filename counts.
+        File[] regions = dir.listFiles((d, fileName) -> fileName.endsWith(".mca"));
         if (regions == null || regions.length == 0) return;
         for (DimensionInfo existing : result) {
             if (existing.getId().equals(id) || existing.getRegionDir().equals(dir)) return;
@@ -137,7 +206,17 @@ public final class WorldPathResolver {
      * @return region 目录的 File;若新旧布局都不存在,返回主世界旧布局路径(可能不存在)
      */
     public static File getRegionDir(String savePath, String dimensionId) {
-        // 拆分命名空间与维度名
+        return resolveRegionDir(savePath, dimensionId).getRegionDir();
+    }
+
+    /**
+     * Resolve region dir with observability: tried paths, modern→legacy fallback note.
+     */
+    public static RegionResolve resolveRegionDir(String savePath, String dimensionId) {
+        if (dimensionId == null || dimensionId.isEmpty()) {
+            dimensionId = "minecraft:overworld";
+        }
+        File saveDir = normalizeSaveDir(savePath);
         String namespace;
         String dimName;
         int colon = dimensionId.indexOf(':');
@@ -149,28 +228,63 @@ public final class WorldPathResolver {
             dimName = dimensionId.substring(colon + 1);
         }
 
-        // 候选路径:新布局优先
-        File newLayout = new File(savePath,
+        List<String> tried = new ArrayList<>();
+        // Child uses '/', which File accepts on Windows and Unix (do not use '\\').
+        File newLayout = new File(saveDir,
                 "dimensions/" + namespace + "/" + dimName + "/region");
+        tried.add(newLayout.getAbsolutePath());
         if (newLayout.exists() && newLayout.isDirectory()) {
-            return newLayout;
+            return new RegionResolve(newLayout, true, false, tried, null);
         }
 
-        // 旧布局:原版维度各自约定
         File legacy;
-        if ("minecraft:overworld".equals(dimensionId)) {
-            legacy = new File(savePath, "region");
-        } else if ("minecraft:the_nether".equals(dimensionId)) {
-            legacy = new File(savePath, "DIM-1/region");
-        } else if ("minecraft:the_end".equals(dimensionId)) {
-            legacy = new File(savePath, "DIM1/region");
+        if ("minecraft:overworld".equals(dimensionId) || "overworld".equals(dimensionId)) {
+            legacy = new File(saveDir, "region");
+        } else if ("minecraft:the_nether".equals(dimensionId) || "the_nether".equals(dimensionId)) {
+            legacy = new File(saveDir, "DIM-1/region");
+        } else if ("minecraft:the_end".equals(dimensionId) || "the_end".equals(dimensionId)) {
+            legacy = new File(saveDir, "DIM1/region");
         } else {
-            // 模组/自定义维度:扫描 DIM<number>/region (老版 Forge 遗留布局)
             File found = findLegacyDimRegion(savePath);
-            legacy = (found != null) ? found : new File(savePath,
-                    "dimensions/" + namespace + "/" + dimName + "/region");
+            if (found != null) {
+                tried.add(found.getAbsolutePath());
+                legacy = found;
+            } else {
+                legacy = new File(saveDir,
+                        "dimensions/" + namespace + "/" + dimName + "/region");
+            }
         }
-        return legacy;
+        String legacyPath = legacy.getAbsolutePath();
+        if (!tried.contains(legacyPath)) tried.add(legacyPath);
+
+        if (legacy.exists() && legacy.isDirectory()) {
+            String note = "26.1+ dimensions 路径不存在，已回退到 legacy "
+                    + relativeHint(savePath, legacy) + "/";
+            return new RegionResolve(legacy, true, true, tried, note);
+        }
+        String note = "找不到 region（含 26.1+ dimensions/.../region）[" + dimensionId + "]. Tried: "
+                + joinTried(tried);
+        return new RegionResolve(legacy, false, false, tried, note);
+    }
+
+    private static String relativeHint(String savePath, File regionDir) {
+        String abs = regionDir.getAbsolutePath().replace('\\', '/');
+        String root = normalizeSaveDir(savePath).getAbsolutePath().replace('\\', '/');
+        if (abs.startsWith(root)) {
+            String rel = abs.substring(root.length());
+            if (rel.startsWith("/")) rel = rel.substring(1);
+            return rel.isEmpty() ? regionDir.getName() : rel;
+        }
+        return regionDir.getName();
+    }
+
+    private static String joinTried(List<String> tried) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < tried.size(); i++) {
+            if (i > 0) sb.append("; ");
+            sb.append(tried.get(i));
+        }
+        return sb.toString();
     }
 
     /**
@@ -187,23 +301,74 @@ public final class WorldPathResolver {
      * level.dat 仍需位于存档根目录;region 目录在新旧布局之一存在即可。
      */
     public static boolean isValidMinecraftSave(String savePath) {
-        File saveDir = new File(savePath);
-        File levelDat = new File(saveDir, "level.dat");
-        if (!levelDat.exists()) {
-            return false;
-        }
-        File regionDir = getOverworldRegionDir(savePath);
-        return regionDir.exists() && regionDir.isDirectory();
+        return explainInvalidSave(savePath) == null;
     }
 
     /**
-     * 在存档根目录下扫描 DIM<number>/region 形式的目录。
+     * @return null if valid; otherwise a short bilingual explanation for the user/CLI.
+     */
+    public static String explainInvalidSave(String savePath) {
+        if (savePath == null || savePath.isEmpty()) {
+            return "存档路径为空 / Save path is empty";
+        }
+        File saveDir = normalizeSaveDir(savePath);
+        if (!saveDir.exists()) {
+            return "存档路径不存在 / Save path does not exist: " + saveDir.getAbsolutePath();
+        }
+        if (!saveDir.isDirectory()) {
+            return "存档路径不是目录 / Not a directory: " + saveDir.getAbsolutePath();
+        }
+        File levelDat = new File(saveDir, "level.dat");
+        if (!levelDat.exists()) {
+            return "缺少 level.dat / Missing level.dat: " + levelDat.getAbsolutePath();
+        }
+        if (!levelDat.canRead()) {
+            return "无法读取 level.dat（权限）/ Cannot read level.dat (permission): " + levelDat.getAbsolutePath();
+        }
+        // 26.1+ may have no top-level region/; any dimension with .mca counts.
+        if (!discoverDimensions(savePath).isEmpty()) {
+            return null;
+        }
+        RegionResolve resolve = resolveRegionDir(savePath, "minecraft:overworld");
+        if (resolve.isFound()) {
+            // 有任意 .mca 文件名即有效（含 0 字节未生成占位）；仅当目录里完全没有 .mca 才报错。
+            if (hasMcaFiles(resolve.getRegionDir())) return null;
+            return "region 目录中没有 .mca 文件 / No .mca files in region: "
+                    + resolve.getRegionDir().getAbsolutePath();
+        }
+        return resolve.missingMessage("minecraft:overworld");
+    }
+
+    /**
+     * True if the directory contains at least one file whose name ends with .mca
+     * (including 0-byte placeholders for ungenerated chunks).
+     */
+    public static boolean hasMcaFiles(File regionDir) {
+        if (regionDir == null || !regionDir.isDirectory()) return false;
+        File[] files = regionDir.listFiles((d, name) -> name.endsWith(".mca"));
+        return files != null && files.length > 0;
+    }
+
+    /**
+     * Pick first non-empty .mca under a resolved region dir (for resource probing).
+     * 0-byte placeholders are skipped here because they have no chunk data to probe.
+     */
+    public static File findFirstMca(File regionDir) {
+        if (regionDir == null || !regionDir.isDirectory()) return null;
+        File[] files = regionDir.listFiles((d, name) -> name.endsWith(".mca") && new File(d, name).length() > 0);
+        if (files == null || files.length == 0) return null;
+        java.util.Arrays.sort(files);
+        return files[0];
+    }
+
+    /**
+     * 在存档根目录下扫描 DIM&lt;number&gt;/region 形式的目录。
      * 用于支持 pre-1.16 Forge 模组维度的遗留布局。
      *
      * @return 第一个匹配的 region 目录,没有则返回 null
      */
     private static File findLegacyDimRegion(String savePath) {
-        File saveDir = new File(savePath);
+        File saveDir = normalizeSaveDir(savePath);
         File[] children = saveDir.listFiles();
         if (children == null) {
             return null;

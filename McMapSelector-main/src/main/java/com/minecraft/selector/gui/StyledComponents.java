@@ -506,6 +506,15 @@ public class StyledComponents {
             }
         }
 
+        /** Apply a fitted import range once, retaining extended world heights. */
+        public void setSelectedRange(int lower,int upper) {
+            if(lower>upper) throw new IllegalArgumentException("Minimum Y must not exceed maximum Y");
+            minValue=Math.min(minValue,lower);maxValue=Math.max(maxValue,upper);
+            boolean changed=lowerValue!=lower||upperValue!=upper;
+            lowerValue=lower;upperValue=upper;repaint();
+            if(changed) fireChangeEvent();
+        }
+
         public void setRange(int min, int max) {
             this.minValue = min;
             this.maxValue = max;
@@ -514,7 +523,329 @@ public class StyledComponents {
             repaint();
         }
     }
-    
+
+    /**
+     * 竖向三滑块：世界 Y 向上增长。绿 = 下限（Bottom Y），橙 = 上限（Top Y），
+     * 紫 = 兴趣带上沿（Highlight Y）：Top Y 与它之间若存在方块，画布会用 50% 紫棋盘标出来。
+     * 拖动过程中只重绘，松手才发出 change 事件，由外部防抖决定何时整幅重渲。
+     */
+    public static class VerticalRangeSlider extends JPanel {
+        private int minValue;
+        private int maxValue;
+        private int lowerValue;
+        private int upperValue;
+        private int highlightValue;
+        private boolean draggingLower;
+        private boolean draggingUpper;
+        private boolean draggingHighlight;
+        private boolean syncing;
+        private boolean notifying;
+        private final int THUMB_SIZE = 13;
+        private final int TRACK_WIDTH = 6;
+        private final java.util.List<ChangeListener> listeners = new java.util.ArrayList<>();
+        private final java.util.List<ChangeListener> liveListeners = new java.util.ArrayList<>();
+
+        public VerticalRangeSlider(int min, int max, int lower, int upper) {
+            this.minValue = min;
+            this.maxValue = Math.max(min + 1, max);
+            this.lowerValue = Math.max(this.minValue, Math.min(Math.min(lower, upper), this.maxValue));
+            this.upperValue = Math.max(this.lowerValue, Math.min(Math.max(lower, upper), this.maxValue));
+            this.highlightValue = Math.min(this.maxValue, this.upperValue + 16);   // 默认贴着上界上方一点：既能看到紫 thumb，带里通常又是空的
+            setPreferredSize(new Dimension(104, 420));
+            setOpaque(false);
+            setToolTipText("Purple = highlight band top, orange = top Y, green = bottom Y");
+
+            addMouseListener(new MouseAdapter() {
+                @Override
+                public void mousePressed(MouseEvent e) {
+                    handleMousePressed(e);
+                }
+
+                @Override
+                public void mouseReleased(MouseEvent e) {
+                    boolean moved = draggingLower || draggingUpper || draggingHighlight;
+                    draggingLower = false;
+                    draggingUpper = false;
+                    draggingHighlight = false;
+                    setCursor(Cursor.getDefaultCursor());
+                    // 拖动中不通知外部：整幅重渲只在松手后触发一次
+                    if (moved) fireChangeEvent();
+                }
+            });
+
+            addMouseMotionListener(new MouseMotionAdapter() {
+                @Override
+                public void mouseDragged(MouseEvent e) {
+                    handleMouseDragged(e);
+                }
+
+                @Override
+                public void mouseMoved(MouseEvent e) {
+                    updateCursor(e);
+                }
+            });
+        }
+
+        public void addChangeListener(ChangeListener listener) {
+            listeners.add(listener);
+        }
+
+        /** 拖动过程中的每次取值变化都会回调（只用于廉价的即时反馈，重活留给 change）。 */
+        public void addLiveListener(ChangeListener listener) {
+            liveListeners.add(listener);
+        }
+
+        private void fireChangeEvent() {
+            if (syncing) return;
+            syncing = true;
+            try {
+                ChangeEvent event = new ChangeEvent(this);
+                for (ChangeListener listener : listeners) listener.stateChanged(event);
+            } finally {
+                syncing = false;
+            }
+        }
+
+        private void fireLiveEvent() {
+            if (notifying) return;
+            notifying = true;
+            try {
+                ChangeEvent event = new ChangeEvent(this);
+                for (ChangeListener listener : liveListeners) listener.stateChanged(event);
+            } finally {
+                notifying = false;
+            }
+        }
+
+        // ── 几何 ──
+        private double span() { return Math.max(1, (double) maxValue - minValue); }
+        private int trackTop() { return THUMB_SIZE / 2; }
+        private int trackHeight() { return Math.max(1, getHeight() - THUMB_SIZE); }
+        private int trackX() { return Math.max(0, (getWidth() - TRACK_WIDTH) / 2); }
+
+        private int valueToY(int value) {
+            double ratio = (maxValue - (double) value) / span();
+            return trackTop() + (int) Math.round(ratio * trackHeight());
+        }
+
+        private int yToValue(int y) {
+            double ratio = Math.max(0, Math.min(1, (y - trackTop()) / (double) trackHeight()));
+            return (int) Math.round(maxValue - ratio * span());
+        }
+
+        // ── 交互 ──
+        private void handleMousePressed(MouseEvent e) {
+            int y = e.getY();
+            int lowerY = valueToY(lowerValue);
+            int upperY = valueToY(upperValue);
+            int highlightY = valueToY(highlightValue);
+            int hit = THUMB_SIZE / 2 + 3;
+            int dl = Math.abs(y - lowerY), du = Math.abs(y - upperY), dh = Math.abs(y - highlightY);
+            if (dl <= hit && dl <= du && dl <= dh) {
+                draggingLower = true;
+            } else if (du <= hit && du <= dh) {
+                draggingUpper = true;
+            } else if (dh <= hit) {
+                draggingHighlight = true;
+            } else if (dl <= du && dl <= dh) {
+                draggingLower = true;
+                updateLower(y);
+            } else if (du <= dh) {
+                draggingUpper = true;
+                updateUpper(y);
+            } else {
+                draggingHighlight = true;
+                updateHighlight(y);
+            }
+        }
+
+        private void handleMouseDragged(MouseEvent e) {
+            if (draggingLower) updateLower(e.getY());
+            else if (draggingUpper) updateUpper(e.getY());
+            else if (draggingHighlight) updateHighlight(e.getY());
+        }
+
+        private void updateLower(int y) {
+            int value = Math.max(minValue, Math.min(yToValue(y), upperValue));
+            if (value != lowerValue) {
+                lowerValue = value;
+                repaint();
+                fireLiveEvent();
+            }
+        }
+
+        private void updateUpper(int y) {
+            int value = Math.min(highlightValue, Math.max(yToValue(y), lowerValue));
+            if (value != upperValue) {
+                upperValue = value;
+                repaint();
+                fireLiveEvent();
+            }
+        }
+
+        private void updateHighlight(int y) {
+            int value = Math.min(maxValue, Math.max(yToValue(y), upperValue));
+            if (value != highlightValue) {
+                highlightValue = value;
+                repaint();
+                fireLiveEvent();
+            }
+        }
+
+        private void updateCursor(MouseEvent e) {
+            int y = e.getY();
+            int hit = THUMB_SIZE / 2 + 3;
+            boolean onThumb = Math.abs(y - valueToY(lowerValue)) <= hit
+                || Math.abs(y - valueToY(upperValue)) <= hit
+                || Math.abs(y - valueToY(highlightValue)) <= hit;
+            setCursor(onThumb ? Cursor.getPredefinedCursor(Cursor.HAND_CURSOR) : Cursor.getDefaultCursor());
+        }
+
+        // ── 取值 ──
+        public int getLowerValue() { return lowerValue; }
+        public int getUpperValue() { return upperValue; }
+        public int getHighlightValue() { return highlightValue; }
+
+        public void setHighlightValue(int value) {
+            int next = Math.max(upperValue, Math.min(value, maxValue));
+            if (next != highlightValue) {
+                highlightValue = next;
+                repaint();
+                fireChangeEvent();
+            }
+        }
+
+        public void setLowerValue(int value) {
+            int next = Math.max(minValue, Math.min(value, upperValue));
+            if (next != lowerValue) {
+                lowerValue = next;
+                repaint();
+                fireChangeEvent();
+            }
+        }
+
+        public void setUpperValue(int value) {
+            int next = Math.min(highlightValue, Math.max(value, lowerValue));
+            if (next != upperValue) {
+                upperValue = next;
+                repaint();
+                fireChangeEvent();
+            }
+        }
+
+        /** 同时设置两端，只发一次 change（启动灌初值时用）。 */
+        public void setValues(int lower, int upper) {
+            setValues(lower, upper, upper);
+        }
+
+        public void setValues(int lower, int upper, int highlight) {
+            int lo = Math.max(minValue, Math.min(Math.min(lower, upper), maxValue));
+            int hi = Math.max(lo, Math.min(Math.max(lower, upper), maxValue));
+            int hl = Math.max(hi, Math.min(Math.max(highlight, hi), maxValue));
+            if (lo == lowerValue && hi == upperValue && hl == highlightValue) return;
+            lowerValue = lo;
+            upperValue = hi;
+            highlightValue = hl;
+            repaint();
+            fireChangeEvent();
+        }
+
+        /** Apply selection/preset bounds atomically using the cloud height-axis control. */
+        public void setSelectedRange(int lower,int upper) {
+            if(lower>upper) throw new IllegalArgumentException("Minimum Y must not exceed maximum Y");
+            minValue=Math.min(minValue,lower);maxValue=Math.max(maxValue,upper);
+            boolean changed=lowerValue!=lower||upperValue!=upper;
+            lowerValue=lower;upperValue=upper;highlightValue=Math.max(highlightValue,upper);repaint();
+            if(changed) fireChangeEvent();
+        }
+
+        /** 扩大/移动坐标轴模型范围（不是取值）。 */
+        public void setRange(int min, int max) {
+            if (max <= min) return;
+            minValue = min;
+            maxValue = max;
+            lowerValue = Math.max(min, Math.min(lowerValue, max));
+            upperValue = Math.max(lowerValue, Math.min(upperValue, max));
+            highlightValue = Math.max(upperValue, Math.min(highlightValue, max));
+            repaint();
+        }
+
+        @Override
+        protected void paintComponent(Graphics g) {
+            Graphics2D g2d = (Graphics2D) g.create();
+            g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+
+            Container parent = getParent();
+            g2d.setColor(parent != null ? parent.getBackground() : Color.WHITE);
+            g2d.fillRect(0, 0, getWidth(), getHeight());
+
+            int x = trackX();
+            int top = trackTop();
+            int height = trackHeight();
+            int lowerY = valueToY(lowerValue);
+            int upperY = valueToY(upperValue);
+            int highlightY = valueToY(highlightValue);
+
+            g2d.setColor(Color.LIGHT_GRAY);
+            g2d.fillRoundRect(x, top, TRACK_WIDTH, height, TRACK_WIDTH, TRACK_WIDTH);
+
+            // 选中区间（下限→上限）
+            g2d.setColor(UIThemeManager.ThemeColors.PRIMARY_BLUE);
+            g2d.fillRoundRect(x, Math.min(lowerY, upperY), TRACK_WIDTH,
+                              Math.max(1, Math.abs(lowerY - upperY)), TRACK_WIDTH, TRACK_WIDTH);
+
+            // 兴趣带（上限→高亮上沿）：地图上会用紫色棋盘标出这段里的方块
+            if (highlightEnabled && highlightY < upperY) {
+                g2d.setColor(HIGHLIGHT_COLOR);
+                g2d.fillRoundRect(x, highlightY, TRACK_WIDTH,
+                                  Math.max(1, upperY - highlightY), TRACK_WIDTH, TRACK_WIDTH);
+            }
+
+            // 每 64 一格刻度
+            g2d.setColor(new Color(255, 255, 255, 140));
+            for (int value = minValue; value <= maxValue; value += 64) {
+                int tickY = valueToY(value);
+                g2d.drawLine(x, tickY, x + TRACK_WIDTH, tickY);
+            }
+
+            drawThumb(g2d, x, lowerY, UIThemeManager.ThemeColors.MINECRAFT_GREEN);
+            drawThumb(g2d, x, upperY, UIThemeManager.ThemeColors.WARNING_ORANGE);
+            drawThumb(g2d, x, highlightY, highlightEnabled ? HIGHLIGHT_COLOR : Color.GRAY);
+
+            g2d.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 11));
+            FontMetrics fm = g2d.getFontMetrics();
+            g2d.setColor(Color.DARK_GRAY);
+            drawValue(g2d, fm, x, highlightY, highlightValue);
+            drawValue(g2d, fm, x, upperY, upperValue);
+            drawValue(g2d, fm, x, lowerY, lowerValue);
+
+            g2d.dispose();
+        }
+
+        /** 兴趣带高亮色（与画布上的紫棋盘同一色系） */
+        static final Color HIGHLIGHT_COLOR = new Color(0x80, 0x30, 0xC0);
+        /** 关掉"兴趣带"开关时紫 thumb 画成灰的 */
+        public volatile boolean highlightEnabled = true;
+
+        private void drawThumb(Graphics2D g2d, int trackX, int y, Color color) {
+            int px = trackX + TRACK_WIDTH / 2 - THUMB_SIZE / 2;
+            int py = y - THUMB_SIZE / 2;
+            g2d.setColor(color);
+            g2d.fillOval(px, py, THUMB_SIZE, THUMB_SIZE);
+            g2d.setColor(Color.WHITE);
+            g2d.drawOval(px, py, THUMB_SIZE, THUMB_SIZE);
+        }
+
+        private void drawValue(Graphics2D g2d, FontMetrics fm, int trackX, int y, int value) {
+            String text = String.valueOf(value);
+            int tx = trackX - 6 - fm.stringWidth(text);
+            if (tx < 2) tx = trackX + TRACK_WIDTH + 6;
+            int ty = Math.max(fm.getAscent(),
+                              Math.min(getHeight() - fm.getDescent(), y + fm.getAscent() / 2 - 1));
+            g2d.drawString(text, tx, ty);
+        }
+    }
+
     /**
      * 创建带动画效果的按钮
      */

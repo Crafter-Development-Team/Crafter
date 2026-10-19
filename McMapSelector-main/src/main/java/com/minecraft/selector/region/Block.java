@@ -25,7 +25,41 @@ public class Block {
     /**
      * 从NBT调色板数据创建方块
      */
+    /**
+     * 从任意调色板条目创建方块：兼容 26.3+ 默认状态简写（裸字符串、混合列表里的 {"": id}）
+     * 与 {id, properties} 新字段名，以及旧版 {Name, Properties}。
+     */
+    public static Block fromPaletteTag(NBTReader.NBTTag entry) {
+        if (entry instanceof NBTReader.NBTString) {
+            return fromPaletteId(((NBTReader.NBTString) entry).getValue(), null);
+        }
+        if (entry instanceof NBTReader.NBTCompound) {
+            NBTReader.NBTCompound c = (NBTReader.NBTCompound) entry;
+            if (c.get("Name") instanceof NBTReader.NBTString) return fromPalette(c);
+            if (c.get("id") instanceof NBTReader.NBTString) {
+                NBTReader.NBTTag props = c.get("properties");
+                return fromPaletteId(c.getString("id"),
+                        props instanceof NBTReader.NBTCompound ? (NBTReader.NBTCompound) props : null);
+            }
+            if (c.get("") instanceof NBTReader.NBTString) return fromPaletteId(c.getString(""), null);
+        }
+        return new Block("air");
+    }
+
+    private static Block fromPaletteId(String name, NBTReader.NBTCompound props) {
+        if (name.startsWith("minecraft:")) name = name.substring("minecraft:".length());
+        Map<String, String> properties = new HashMap<>();
+        if (props != null) {
+            for (String key : props.keySet()) {
+                NBTReader.NBTTag tag = props.get(key);
+                if (tag instanceof NBTReader.NBTString) properties.put(key, ((NBTReader.NBTString) tag).getValue());
+            }
+        }
+        return new Block(name, properties);
+    }
+
     public static Block fromPalette(NBTReader.NBTCompound paletteEntry) {
+        if (!(paletteEntry.get("Name") instanceof NBTReader.NBTString)) return fromPaletteTag(paletteEntry);
         String name = paletteEntry.getString("Name");
         
         // 移除minecraft:前缀

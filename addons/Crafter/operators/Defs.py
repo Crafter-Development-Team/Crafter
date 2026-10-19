@@ -10,6 +10,7 @@ import tempfile
 import textwrap
 import re
 import fnmatch
+import copy
 
 # 只在Windows上导入wintypes
 if platform.system() == "Windows":
@@ -206,12 +207,12 @@ def find_overlay_frames(nodes):
     return frames
 
 
-def overlay_layout_shift(nodes):
+def overlay_layout_shift(nodes, frames=None):
     '''
     overlay 图层在输出节点前占用的布局宽度: 层数 x overlay_mix_step;
     有 overlay 时其他节点额外再左移 overlay_extra_shift(给 Parser 让出与贴图列的间隙)。
     '''
-    count = len(find_overlay_frames(nodes))
+    count = len(find_overlay_frames(nodes) if frames is None else frames)
     if count <= 0:
         return 0.0
     return count * overlay_mix_step + overlay_extra_shift
@@ -324,22 +325,49 @@ def build_overlay_frames(material, overlays, dir_importer):
                 float(color[0]), float(color[1]), float(color[2]))
 
 
+def open_zip_icon(zip_file, member):
+    '''仅容忍图标目录项与本地文件头的大小写差异，仍由 zipfile 解压并校验 CRC。'''
+    try:
+        return zip_file.open(member)
+    except zipfile.BadZipFile:
+        # ZipFile.open(ZipInfo) 仍会比较 orig_filename；仅换成目录项的名字不足以修复。
+        # 读取本地文件头上的真实名字，在副本上归一化，避免修改 ZIP 或共享 ZipInfo。
+        with open(zip_file.filename, "rb") as archive:
+            archive.seek(member.header_offset)
+            header = archive.read(30)
+            if len(header) != 30 or header[:4] != b"PK\x03\x04":
+                raise
+            flags = int.from_bytes(header[6:8], "little")
+            name_length = int.from_bytes(header[26:28], "little")
+            raw_name = archive.read(name_length)
+        encoding = "utf-8" if flags & 0x800 else (getattr(zip_file, "metadata_encoding", None) or "cp437")
+        local_name = raw_name.decode(encoding)
+        if (len(raw_name) != name_length or local_name == member.orig_filename
+                or local_name.casefold() != member.orig_filename.casefold()):
+            raise
+        normalized = copy.copy(member)
+        normalized.orig_filename = local_name
+        return zip_file.open(normalized)
+
+
 def load_icon_from_zip(zip_path, icons, name_icons, index):
-    dir_temp = tempfile.mkdtemp()
-    dir_icon = os.path.join(dir_temp, "pack.png")
     with zipfile.ZipFile(zip_path, "r") as zip_file:
-        if "pack.png" in zip_file.namelist():
-            zip_file.extract("pack.png", dir_temp)
-            have = True
-        elif"pack.jpg" in zip_file.namelist():
-            zip_file.extract("pack.jpg", dir_temp)
-            have = True
-            dir_icon = os.path.join(dir_temp, "pack.jpg")
-        else:
-            have = False
-    icons.load(name_icons + "_icon_" + str(index), dir_icon, 'IMAGE')
-    dirs_temp.append(dir_temp)
-    return have
+        members = zip_file.infolist()
+        for name in ("pack.png", "pack.jpg"):
+            member = next((item for item in members if item.filename.casefold() == name), None)
+            if member is None:
+                continue
+            # 固定输出名，兼容 Linux/macOS；不使用压缩包里的路径来创建文件。
+            with open_zip_icon(zip_file, member) as source:
+                data = source.read()
+            dir_temp = tempfile.mkdtemp()
+            dirs_temp.append(dir_temp)
+            dir_icon = os.path.join(dir_temp, name)
+            with open(dir_icon, "wb") as target:
+                target.write(data)
+            icons.load(name_icons + "_icon_" + str(index), dir_icon, 'IMAGE')
+            return True
+    return False
 
 def get_dir_saves(context):
     addon_prefs = context.preferences.addons[__addon_name__].preferences
@@ -448,7 +476,7 @@ def dir_version_2_dir_jar(dir_version):
 def reloadwindow():
     bpy.ops.wm.redraw_timer(type="DRAW_WIN_SWAP")
 
-def view_2_active_object(context):
+def view_2_active_object(context, *, redraw=True):
     for window in context.window_manager.windows:
         for area in window.screen.areas:
             if area.type == 'VIEW_3D':
@@ -461,7 +489,8 @@ def view_2_active_object(context):
                         except:
                             pass
                         break
-    reloadwindow()
+    if redraw:
+        reloadwindow()
 
 def draw_multiline_label( text, parent,context):
     # 获取当前面板宽度和UI缩放比例
@@ -821,10 +850,10 @@ def add_node_moving_texture(node_tex, nodes, links, list_info_moving, parent=Non
     dir_mcmeta = os.path.join(bpy.path.abspath(dir_image), fuq_bl_dot_number(node_tex.image.name) + ".mcmeta")
 
     if len(list_info_moving) > 0:
-        if list_info_moving[0] == None:
-            row_base = 1
-        else:
-            row_base = list_info_moving[0][1][0]
+        # list_info_moving[0][1] 是动画信息 [row, frametime, ...]；为 None 的条目（"复用某个
+        # 节点的输出"那种）拿不到 row，退回 1，别当成可下标的对象
+        info_base = None if list_info_moving[0] is None else list_info_moving[0][1]
+        row_base = info_base[0] if info_base is not None else 1
     else:
         row_base = None
 
@@ -1377,7 +1406,40 @@ def link_CI_output(group_CI, node_output_EEVEE, node_output_Cycles, links):
         if "Thickness" in node_output_Cycles.inputs:
             links.new(group_CI.outputs["Cycles-Thickness"], node_output_Cycles.inputs["Thickness"])
 
-def add_node_parser(group_CI, nodes, links, parent=None):
+def compute_default_pbr_value(addon_prefs):
+    '''Encode the default PBR texture value for the selected parser.'''
+    roughness = addon_prefs.Default_Roughness
+    emission_strength = addon_prefs.Default_Emission_Strength
+    if addon_prefs.PBR_Parser == "old_PBR":
+        return [1 - roughness, addon_prefs.Default_Metallic, emission_strength, 1]
+    IOR = addon_prefs.Default_IOR
+    f0 = ((IOR - 1) / (IOR + 1)) ** 2
+    return [1 - roughness, min(229 / 255, f0), 0, emission_strength * 254 / 255]
+
+
+def apply_default_pbr_to_parser_node(node_parser, addon_prefs):
+    '''Set the fallback value; a connected PBR texture still takes precedence.'''
+    node_parser.inputs["PBR"].default_value = compute_default_pbr_value(addon_prefs)
+
+
+def ensure_pbr_parser_group(addon_prefs):
+    '''Rewire the shared parser group without visiting any material nodes.'''
+    group = bpy.data.node_groups["C-PBR_Parser"]
+    for node in group.nodes:
+        if node.type == "GROUP_OUTPUT":
+            node_output = node
+        elif node.type == "GROUP_INPUT":
+            node_input = node
+        elif node.type == "GROUP":
+            node_parser = node
+    node_parser.node_tree = bpy.data.node_groups["C-" + addon_prefs.PBR_Parser]
+    for output in node_parser.outputs:
+        group.links.new(output, node_output.inputs[output.name])
+    for input in node_parser.inputs:
+        group.links.new(input, node_input.outputs[input.name])
+
+
+def add_node_parser(group_CI, nodes, links, parent=None, addon_prefs=None):
     '''
     gout_CI: 材质组节点
     nodes: 目标材质节点组
@@ -1391,6 +1453,11 @@ def add_node_parser(group_CI, nodes, links, parent=None):
         node_C_PBR_Parser.parent = parent
     node_C_PBR_Parser.location = (group_CI.location.x - parser_offset_x, group_CI.location.y - 160)
     node_C_PBR_Parser.node_tree = bpy.data.node_groups["C-PBR_Parser"]
+    # Load Material passes its preferences once for base and overlay parsers, so
+    # imports need no second material walk to initialize unconnected PBR inputs.
+    if addon_prefs is None:
+        addon_prefs = bpy.context.preferences.addons[__addon_name__].preferences
+    apply_default_pbr_to_parser_node(node_C_PBR_Parser, addon_prefs)
     for output in node_C_PBR_Parser.outputs:
         if output.name in group_CI.inputs:
             links.new(output, group_CI.inputs[output.name])
@@ -1412,13 +1479,38 @@ def add_node_pbr(location_base_tex, y_subtract, dir, nodes, links, list_info_mov
     else:
         return None
 
-def load_normal_and_PBR(node_tex_base, nodes, links, parent=None):
+def reuse_moving_info_entry(node_tex):
+    '''
+    取贴图节点"已有的动态纹理"信息条目，格式与 add_node_moving_texture 的返回值一致：
+        [动态纹理_尾节点, [row, frametime, frames, list_frames, interpolate]]
+    row 从尾节点的 "row" 输入读回（它就等于原始 info[0]，见 add_node_moving_texture 结尾）；
+    动画参数填占位值：这个条目只会被取 [1][0] 当 row_base，不参与新贴图的动画参数比对。
+    node_tex: 贴图节点；不是由 Crafter-动态纹理_尾 驱动的返回 None
+    '''
+    info = node_moving_tex_info(node_tex)
+    node_from = info[1] if info[0] else None
+    if node_from is None or getattr(node_from, "node_tree", None) is None:
+        return None
+    if not node_from.node_tree.name.startswith("Crafter-动态纹理_尾"):
+        return None
+    try:
+        row = float(node_from.inputs["row"].default_value)
+    except Exception:
+        return None
+    return [node_from, [row, 1, 1, [[0, 1]], False]]
+
+
+def load_normal_and_PBR(node_tex_base, nodes, links, parent=None, want_normal=True, want_pbr=True, keep_moving_texture=False):
     '''
     以基础色节点添加法向贴图节点和PBR贴图节点、连接并添加动态纹理节点
     node_tex_base: 基础色节点
     nodes: 目标材质节点组
     links:目标材质连接组
     parent: 新建节点(含动态纹理帧)要挂到的父帧（overlay 帧），None 表示不挂
+    want_normal / want_pbr: 去同目录找哪几类贴图（False = 这类不建节点，返回 None）
+    keep_moving_texture: 基础色已经由动态纹理驱动时复用既有那份、不再新建一份。
+                        补缺加载会带着已有的基础色再走一遍，不能给它叠第二份动态纹理帧。
+    return: (法向节点, PBR节点)，没建的、或同目录没找到的为 None
     '''
     node_tex_normal = None
     node_tex_PBR = None
@@ -1438,23 +1530,30 @@ def load_normal_and_PBR(node_tex_base, nodes, links, parent=None):
             dir_a = None
         
         list_info_moving = []
-        info_moving_tex = add_node_moving_texture(node_tex_base, nodes, links, list_info_moving, parent=parent)
-        list_info_moving.append(info_moving_tex)
+        if keep_moving_texture:
+            # 基础色已经由动态纹理驱动 → 直接把既有那份的信息当首项，不再给它建第二份。
+            # 新贴图是静态图时会照常拿到"UV缩放"节点（row_base 取自既有帧），动画不会跑偏。
+            entry_existing = reuse_moving_info_entry(node_tex_base)
+            if entry_existing is not None:
+                list_info_moving.append(entry_existing)
+        if not list_info_moving:
+            info_moving_tex = add_node_moving_texture(node_tex_base, nodes, links, list_info_moving, parent=parent)
+            list_info_moving.append(info_moving_tex)
 
-        node_tex_normal = None
-        node_tex_PBR = None
         location_base_tex = node_tex_base.location
 
-        node_tex_normal = add_node_pbr(location_base_tex, 300, dir_n, nodes, links, list_info_moving, parent=parent)
-        # 有 _a 用 _a，否则用 _s：缺哪个都不能把已经建好的那张覆盖成 None
-        if dir_s is not None:
-            node_pbr_s = add_node_pbr(location_base_tex, 600, dir_s, nodes, links, list_info_moving, parent=parent)
-            if node_pbr_s is not None:
-                node_tex_PBR = node_pbr_s
-        if dir_a is not None:
-            node_pbr_a = add_node_pbr(location_base_tex, 600, dir_a, nodes, links, list_info_moving, parent=parent)
-            if node_pbr_a is not None:
-                node_tex_PBR = node_pbr_a
+        if want_normal:
+            node_tex_normal = add_node_pbr(location_base_tex, 300, dir_n, nodes, links, list_info_moving, parent=parent)
+        if want_pbr:
+            # 有 _a 用 _a，否则用 _s：缺哪个都不能把已经建好的那张覆盖成 None
+            if dir_s is not None:
+                node_pbr_s = add_node_pbr(location_base_tex, 600, dir_s, nodes, links, list_info_moving, parent=parent)
+                if node_pbr_s is not None:
+                    node_tex_PBR = node_pbr_s
+            if dir_a is not None:
+                node_pbr_a = add_node_pbr(location_base_tex, 600, dir_a, nodes, links, list_info_moving, parent=parent)
+                if node_pbr_a is not None:
+                    node_tex_PBR = node_pbr_a
 
     return node_tex_normal, node_tex_PBR
 
@@ -1675,6 +1774,69 @@ def apply_tint(group_CI, nodes, links, tint):
             socket.default_value = (1.0, 1.0, 1.0, 1.0)
     if tint_interface_enable in group_CI.inputs:
         group_CI.inputs[tint_interface_enable].default_value = 1.0 if kind else 0.0
+
+    # 固定色(红石线/茎/睡莲)而 CI 组没有 tint_color 接口：通用 CI- 组(或
+    # fixed_tint_CI_group 换成的无群系色组)在基础色连好后用 link_fixed_tint 乘上固定色。
+    # 其它自带颜色的组(如 CI-spruce_leaves)保持原样。
+    if "Crafter_fixed_tint" in group_CI.keys():
+        del group_CI["Crafter_fixed_tint"]
+    if kind == "fixed" and tint_interface_color not in group_CI.inputs and group_CI.node_tree is not None \
+            and (group_CI.node_tree.name == "CI-" or group_CI.get("Crafter_fixed_tint_swapped")):
+        color = tint.get("color", (1.0, 1.0, 1.0))
+        group_CI["Crafter_fixed_tint"] = (color[0], color[1], color[2], 1.0)
+        link_fixed_tint(group_CI=group_CI, nodes=nodes, links=links)
+
+def fixed_tint_CI_group(group_CI, tint):
+    '''
+    固定色材质被分类到群系色组(如睡莲/茎 -> CI-grass_plant_move)时，换成去掉群系前缀的同类组
+    (CI-plant_move)，颜色改由 link_fixed_tint 乘固定色；否则会染成草色。
+    须在 find_CI_group 之后、连接输出之前调用。
+    '''
+    if tint is None or tint.get("kind") != "fixed" or group_CI.node_tree is None:
+        return
+    if tint_interface_color in group_CI.inputs:
+        return
+    name = group_CI.node_tree.name
+    for kind in TINT_BIOME_KINDS:
+        prefix = "CI-" + kind + "_"
+        if name.startswith(prefix) and kind in group_CI.inputs:
+            candidate = "CI-" + name[len(prefix):]
+            if candidate in bpy.data.node_groups:
+                group_CI.node_tree = bpy.data.node_groups[candidate]
+                group_CI["Crafter_fixed_tint_swapped"] = True
+            return
+
+def link_fixed_tint(group_CI, nodes, links):
+    '''
+    apply_tint 标记了固定色的通用 CI- 组：在 Base Color 前插一个 Multiply。
+    幂等：已插过则只更新颜色；基础色还没连上时什么都不做(连好后再调用一次)。
+    '''
+    if "Crafter_fixed_tint" not in group_CI.keys() or "Base Color" not in group_CI.inputs:
+        return
+    rgba = tuple(group_CI["Crafter_fixed_tint"])
+    socket = group_CI.inputs["Base Color"]
+    if not socket.links:
+        return
+    def by_id(sockets, identifier):
+        return next(sock for sock in sockets if sock.identifier == identifier)
+    src = socket.links[0].from_node
+    if src.get("Crafter_fixed_tint_mix"):
+        by_id(src.inputs, "B_Color").default_value = rgba
+        return
+    # 清掉上一轮留下、已经断开的 Multiply
+    for node in [n for n in nodes if n.get("Crafter_fixed_tint_mix") and n.parent == group_CI.parent
+                 and not by_id(n.outputs, "Result_Color").links]:
+        nodes.remove(node)
+    mix = nodes.new(type="ShaderNodeMix")
+    mix.data_type = 'RGBA'
+    mix.blend_type = 'MULTIPLY'
+    mix["Crafter_fixed_tint_mix"] = True
+    mix.parent = group_CI.parent
+    mix.location = (group_CI.location.x, group_CI.location.y + 220)
+    mix.inputs["Factor"].default_value = 1.0
+    links.new(socket.links[0].from_socket, by_id(mix.inputs, "A_Color"))
+    by_id(mix.inputs, "B_Color").default_value = rgba
+    links.new(by_id(mix.outputs, "Result_Color"), socket)
 
 def reload_Undivided_Vsersions(context: bpy.types.Context,dir_versions):#刷新无版本隔离列表
 

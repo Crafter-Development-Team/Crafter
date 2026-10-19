@@ -141,6 +141,11 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             row_partition_size = col_2_aschunk.row()
             row_partition_size.enabled = addon_prefs.notexportFullModel
             row_partition_size.prop(addon_prefs, "partitionSize")
+            try:
+                manual_info = calculate_auto_chunk_settings()
+                col_2_aschunk.label(text=i18n("threads") + " " + str(manual_info["modelThreads"]))
+            except Exception:
+                col_2_aschunk.label(text="Auto chunk calculation unavailable", icon="ERROR")
 
         box_lod = layout.box()
         box_lod.prop(addon_prefs, "Max_LOD_Level")
@@ -498,7 +503,12 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             auto_chunk_info = None
             effective_partition_size = addon_prefs.partitionSize
             effective_max_tasks = addon_prefs.maxTasksPerBatch
-            effective_model_threads = 1
+            manual_chunk_info = calculate_auto_chunk_settings()
+            effective_model_threads = manual_chunk_info["modelThreads"]
+            log_step(
+                f'手动分块: {effective_partition_size}x{effective_partition_size} chunks, '
+                f'批次 {effective_max_tasks} tasks, 模型线程 {effective_model_threads} (CPU/内存预算), 可用内存 '
+                f'{manual_chunk_info["availableMemoryBytes"] / (1024 ** 3):.1f} GB')
 
         # 自动模式下默认分块输出（每个分组独立去重导出）；勾选"不分块"
         # 时合并为单个完整模型导出。手动模式行为由 notexportFullModel 决定。
@@ -564,12 +574,16 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
 
         # 根据平台选择配置目录和可执行文件
         current_platform = platform.system()
+        # Windows ships WorldImporter.exe; macOS/Linux use the extensionless binary.
         if current_platform == "Darwin":  # macOS
             dir_config = os.path.join(dir_importer, "config_macos")
             dir_exe_importer = os.path.join(dir_importer, "WorldImporter")
-        else:  # Windows和其他平台
+        elif current_platform == "Windows":
             dir_config = os.path.join(dir_importer, "config")
             dir_exe_importer = os.path.join(dir_importer, "WorldImporter.exe")
+        else:  # Linux and other Unix: ELF next to config/
+            dir_config = os.path.join(dir_importer, "config")
+            dir_exe_importer = os.path.join(dir_importer, "WorldImporter")
         log_step(f"平台: {current_platform} | exe: {dir_exe_importer}")
 
         # 输出关键配置摘要
@@ -604,7 +618,7 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
                 except:
                     pass
         # 旧的 tint/overlay/doubleSided 元数据一并清理，避免和本次导出的 objs 不匹配
-        for _old_meta in ("tint.json", "overlay.json", double_sided_json_name):
+        for _old_meta in ("tint.json", "overlay.json", "doubleSided.json"):
             try:
                 _old_meta_path = os.path.join(dir_importer, _old_meta)
                 if os.path.exists(_old_meta_path):
@@ -727,6 +741,19 @@ def _classify_importer_line(line):
     return LOG_LEVEL_INFO
 
 
+def biome_texture_bounds(worldconfig):
+    """Match WI LoadConfig's effective inclusive X/Z bounds before mapping PNGs."""
+    def effective(key):
+        value = worldconfig[key]
+        if worldconfig.get("useChunkPrecision", False):
+            # WI alignTo16 rounds away from zero, including the max endpoint.
+            value = ((value + 15) // 16 if value > 0 else value // 16) * 16
+        return value
+
+    return (effective("minX"), -effective("maxZ") - 1,
+            effective("maxX") + 1, -effective("minZ"))
+
+
 def finish_import(ctx, prefs, imported_time, worldconfig, prepared_time,
                   save, version, dot_minecraftPath, worldPath, undivided, is_custom,
                   _ctx_win=None, _ctx_area=None):
@@ -760,6 +787,18 @@ def finish_import(ctx, prefs, imported_time, worldconfig, prepared_time,
                                 continue
         return fn(**kw)
 
+    def _run_load_material(from_import=True):
+        """Allow older installed operators that lack the from_import property."""
+        try:
+            return _run_ops(bpy.ops.crafter.load_material, from_import=from_import)
+        except TypeError as ex:
+            message = str(ex).lower()
+            if "from_import" not in message or not (
+                    "unrecognized" in message or "unexpected keyword" in message):
+                raise
+            warn_log("crafter.load_material does not recognize from_import (stale operator); retrying without it")
+            return _run_ops(bpy.ops.crafter.load_material)
+
     have_obj = False
     real_name_dic = {}
     material_should_delete = []
@@ -782,7 +821,9 @@ def finish_import(ctx, prefs, imported_time, worldconfig, prepared_time,
         debug_log(f"Importing OBJ: {file}")
         pre_set = set(bpy.data.objects)
         try:
-            _run_ops(bpy.ops.wm.obj_import, filepath=os.path.join(dir_importer, file))
+            # WorldImporter's clean GreedyMesh output needs no costly post-import validation.
+            _run_ops(bpy.ops.wm.obj_import, filepath=os.path.join(dir_importer, file),
+                     validate_meshes=False)
             _run_ops(bpy.ops.object.transform_apply, location=False, rotation=True, scale=True)
             have_obj = True
         except Exception as ex:
@@ -807,7 +848,6 @@ def finish_import(ctx, prefs, imported_time, worldconfig, prepared_time,
             add_to_crafter_mcmts_collection(object=obj, context=ctx)
             if prefs.Add_Crafter_time_On_Import:
                 add_Crafter_time(obj=obj)
-            view_2_active_object(ctx)
     log_stage_end("导入 OBJ", f"{len(real_name_dic)} 个唯一材质")
 
     for name in set(material_should_delete):
@@ -888,6 +928,7 @@ def finish_import(ctx, prefs, imported_time, worldconfig, prepared_time,
         node_group = node_group_src.copy()
         node_group.name = "Crafter-biomeTex_" + imported_time
         node_group.use_fake_user = True
+        min_x, min_y, max_x, max_y = biome_texture_bounds(worldconfig)
         loaded_imgs = 0
         for node in node_group.nodes:
             if node.type == "TEX_IMAGE":
@@ -899,10 +940,10 @@ def finish_import(ctx, prefs, imported_time, worldconfig, prepared_time,
                 except Exception as ex:
                     debug_log(f"  Image load: {ex}")
             elif node.type == "GROUP":
-                node.inputs["min X"].default_value = worldconfig["minX"]
-                node.inputs["min Y"].default_value = -worldconfig["maxZ"] -1
-                node.inputs["max X"].default_value = 1 + worldconfig["maxX"]
-                node.inputs["max Y"].default_value = -worldconfig["minZ"]
+                node.inputs["min X"].default_value = min_x
+                node.inputs["min Y"].default_value = min_y
+                node.inputs["max X"].default_value = max_x
+                node.inputs["max Y"].default_value = max_y
         log_step(f"节点组 {node_group.name} 就绪，加载 {loaded_imgs} 张群系图")
         debug_log("biomeTex node group ready")
     except Exception as ex:
@@ -939,6 +980,10 @@ def finish_import(ctx, prefs, imported_time, worldconfig, prepared_time,
         for nd in todel: nodes.remove(nd)
         if ntb and pri:
             links.new(ntb.outputs["Alpha"], pri.inputs["Alpha"])
+        if out_ev and node_group:
+            nbn = nodes.new("ShaderNodeGroup")
+            nbn.location = (out_ev.location.x - 400, out_ev.location.y - 550)
+            nbn.node_tree = node_group
         if ntb:
             load_normal_and_PBR(node_tex_base=ntb, nodes=nodes, links=links)
             nodes.active = ntb
@@ -975,7 +1020,7 @@ def finish_import(ctx, prefs, imported_time, worldconfig, prepared_time,
     if prefs.Auto_Load_Material:
         log_stage_begin("自动加载材质")
         ms = time.perf_counter()
-        _run_ops(bpy.ops.crafter.load_material)
+        _run_load_material(from_import=True)
         mu = time.perf_counter() - ms
         log_stage_end("自动加载材质", f"耗时 {mu:.2f}s")
         debug_log(f"Auto material: {mu:.2f}s")
@@ -988,7 +1033,8 @@ def finish_import(ctx, prefs, imported_time, worldconfig, prepared_time,
 
     for o in (set(bpy.data.objects) - before_objects):
         if o.type == "MESH": o.select_set(True)
-    view_2_active_object(ctx)
+    # Frame once after import; let Blender redraw normally to avoid a costly forced swap.
+    view_2_active_object(ctx, redraw=False)
     push_log(rt, "INFO")
     debug_log("finish_import done")
 
@@ -1153,10 +1199,15 @@ class VIEW3D_OT_UseCrafterHistoryWorlds(bpy.types.Operator):
                     if not os.path.exists(os.path.join(root, "saves", save)):
                         del json_history_worlds[root][0][save]
                         continue
-                    #加入新找到的save
-                    for save in os.listdir(os.path.join(root, "saves")):
-                        if os.path.isdir(os.path.join(root, "saves", save)):
-                            json_history_worlds[root][0].setdefault(save, {"settings": []})
+                    save_entry = json_history_worlds[root][0][save]
+                    if isinstance(save_entry, dict):
+                        save_entry.setdefault("settings", [])
+                #加入新找到的save
+                dir_saves = os.path.join(root, "saves")
+                if os.path.exists(dir_saves):
+                    for discovered_save in os.listdir(dir_saves):
+                        if os.path.isdir(os.path.join(dir_saves, discovered_save)):
+                            json_history_worlds[root][0].setdefault(discovered_save, {"settings": []})
             else:
                 dir_versions = dir_root_2_dir_versions(dir_root=root)
                 #添加版本
@@ -1710,7 +1761,14 @@ class VIEW3D_OT_CrafterReloadHistoryWorldsList(bpy.types.Operator):#刷新 历�
                     if len(addon_prefs.History_World_Saves_List) > 0:
                         if addon_prefs.History_World_Saves_List_index < 0 or addon_prefs.History_World_Saves_List_index >= len(addon_prefs.History_World_Saves_List):
                             addon_prefs.History_World_Saves_List_index = 0
-                        for settings in json_history_worlds[addon_prefs.History_World_Roots_List[addon_prefs.History_World_Roots_List_index].name][0][addon_prefs.History_World_Saves_List[addon_prefs.History_World_Saves_List_index].name].get("settings", []):
+                        save_entry = json_history_worlds[addon_prefs.History_World_Roots_List[addon_prefs.History_World_Roots_List_index].name][0][addon_prefs.History_World_Saves_List[addon_prefs.History_World_Saves_List_index].name]
+                        settings_list = save_entry.get("settings", []) if isinstance(save_entry, dict) else save_entry
+                        if not isinstance(settings_list, list):
+                            settings_list = []
+                        for settings in settings_list:
+                            if not (isinstance(settings, list) and len(settings) == 2
+                                    and all(isinstance(corner, list) and len(corner) == 3 for corner in settings)):
+                                continue
                             history_world_setting = addon_prefs.History_World_Settings_List.add()
                             history_world_setting.name = f"{settings[0][0]} {settings[0][1]} {settings[0][2]} {settings[1][0]} {settings[1][1]} {settings[1][2]}" 
             else:

@@ -38,6 +38,7 @@ if __name__ == '__main__':
     if os.path.exists(dir_file):
         shutil.rmtree(dir_file)
         print("removed",dir_file)
+    # Pack naming: AddonName-<version>-YYYYMMDD.zip
     release_addon(target_init_file=get_init_file_path(args.addon),
                   release_dir=DEFAULT_RELEASE_DIR,
                   addon_name=args.addon,

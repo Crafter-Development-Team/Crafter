@@ -1,6 +1,9 @@
 package com.minecraft.selector.gui;
 
 import javax.swing.*;
+import com.minecraft.selector.core.RenderedMap;
+import com.minecraft.selector.core.SelectionYFit;
+import java.util.function.Consumer;
 import java.awt.*;
 import java.awt.event.*;
 import java.awt.image.BufferedImage;
@@ -10,11 +13,114 @@ import javax.swing.Timer;
  * 地图画布组件
  * 用于显示和交互Minecraft地图
  */
-public class MapCanvas extends JPanel {
+public class MapCanvas extends JPanel implements Scrollable, SelectionCanvas {
 
     // 缩放限制常量
     private static final double MIN_SCALE = 0.1;
     private static final double MAX_SCALE = 10.0;
+
+
+    private SelectionShape selectionShape=new SelectionShape();
+    private final SelectionGestures gestures=new SelectionGestures();
+    private final MinimapInset minimap=new MinimapInset();
+    private SelectionCanvas thisCanvas(){return this;}
+    public SelectionShape getSelectionShape(){return selectionShape.copy();}
+    public void setSelectionShape(SelectionShape shape,boolean remember){if(remember)selectionHistory.remember(getSelectionBounds(),selectionShape);SelectionShape copy=shape.copy();applyBounds(copy.bounds(),false);selectionShape=copy;repaint();}
+    private final SelectionHistory selectionHistory = new SelectionHistory();
+    private SelectionMath.Snap snapMode = SelectionMath.Snap.NONE;
+    private SelectionMath.Bounds resizeOriginal;
+    private Point resizeGrabWorld;
+    private boolean squareGesture;
+    private int gridMode;
+    private Consumer<SelectionMath.Bounds> selectionChangeListener;
+    private Consumer<String> commandListener;
+    private Consumer<Point> lodCenterListener;
+    /** 中键拖动 LOD 中心进行中（按下时置位，松开清除）。 */
+    private boolean lodDragging;
+
+    public void setSelectionChangeListener(Consumer<SelectionMath.Bounds> listener) {selectionChangeListener=listener;}
+    public void setCommandListener(Consumer<String> listener) {commandListener=listener;}
+    public void setLodCenterListener(Consumer<Point> listener) {lodCenterListener=listener;}
+    private void command(String name) {if(commandListener!=null) commandListener.accept(name);else if("grid".equals(name)) setGridMode((gridMode+1)%3);}
+    public SelectionMath.Bounds getSelectionBounds() {return hasValidSelection?SelectionMath.normalized(currentMinX,currentMinZ,currentMaxX,currentMaxZ):null;}
+    public void restoreSelectionBounds(SelectionMath.Bounds b) {if(java.util.Objects.equals(getSelectionBounds(),b)&&selectionShape.isEmpty()) return;selectionHistory.remember(getSelectionBounds(),selectionShape);applyBounds(b,false);}
+    public void setSelectionBounds(SelectionMath.Bounds bounds) {
+        if(java.util.Objects.equals(getSelectionBounds(),bounds)&&selectionShape.isEmpty()) return;
+        selectionHistory.remember(getSelectionBounds(),selectionShape);applyBounds(bounds,true);
+    }
+    private void applyBounds(SelectionMath.Bounds bounds,boolean applySnap) {applyBounds(bounds,applySnap,false);}
+    private void applyBounds(SelectionMath.Bounds bounds,boolean applySnap,boolean square) {
+        selectionShape=new SelectionShape();
+        corner1=null;corner2=null;
+        if(bounds==null) {hasValidSelection=false;selectionWorldStart=null;selectionWorldEnd=null;selectionRect=null;}
+        else {
+            if(applySnap) bounds=SelectionMath.constrain(bounds,snapMode,square);
+            currentMinX=bounds.minX;currentMinZ=bounds.minZ;currentMaxX=bounds.maxX;currentMaxZ=bounds.maxZ;
+            hasValidSelection=true;selectionWorldStart=new Point(currentMinX,currentMinZ);selectionWorldEnd=new Point(currentMaxX,currentMaxZ);
+        }
+        if(selectionChangeListener!=null) selectionChangeListener.accept(getSelectionBounds());
+        refreshHover();repaint();
+    }
+    public void setSquareGesture(boolean square) {
+        squareGesture=square;
+        if(hoverPoint!=null) {
+            if(resizeHandle!=HANDLE_NONE) resizeTo(screenToWorldCoordinates(hoverPoint),square);
+            else if(selecting) updateSelection(hoverPoint);
+        }
+    }
+    public void resetSelection() {overlays.resetSelectionTool();gestures.cancel();resetPosCorner();selecting=false;resizeHandle=HANDLE_NONE;applyBounds(null,false);selectionHistory.clear();}
+    public void nudgeSelection(int direction,boolean shrink,int step) {
+        SelectionMath.Bounds b=getSelectionBounds();if(b==null) return;
+        SelectionMath.Bounds next=SelectionMath.nudge(b,direction,shrink,step);
+        if(!next.equals(b)) {selectionHistory.remember(b,selectionShape);applyBounds(next,false);}
+    }
+    public void undoSelection() {gestures.cancel();if(selectionHistory.canUndo()) {selecting=false;resizeHandle=HANDLE_NONE;SelectionShape previous=selectionHistory.shape();applyBounds(selectionHistory.undo(),false);selectionShape=previous;repaint();}}
+    public void setSnapMode(SelectionMath.Snap snap) {snapMode=snap;SelectionMath.Bounds b=getSelectionBounds();if(b!=null) setSelectionBounds(SelectionMath.snap(b,snap));}
+    public void setGridMode(int mode) {gridMode=Math.floorMod(mode,3);repaint();}
+    public void selectVisible() {SelectionMath.Bounds b=visibleBounds();if(b!=null) setSelectionBounds(b);}
+    private void resizeTo(Point world,boolean square) {
+        if(world==null||resizeOriginal==null||resizeGrabWorld==null) return;
+        boolean west=resizeHandle==3||resizeHandle==5||resizeHandle==7,north=resizeHandle==1||resizeHandle==5||resizeHandle==6;
+        Point target=new Point(SelectionMath.clamp((long)(west?resizeOriginal.minX:resizeOriginal.maxX)+world.x-resizeGrabWorld.x),
+            SelectionMath.clamp((long)(north?resizeOriginal.minZ:resizeOriginal.maxZ)+world.y-resizeGrabWorld.y));
+        applyBounds(SelectionMath.resize(resizeOriginal,resizeHandle,target,square),true,square);
+    }
+
+    private ViewOverlays overlays=new ViewOverlays();
+    private Point pos1,corner1,corner2;
+    public void setOverlays(ViewOverlays value) {overlays=value;overlays.resetSelectionTool();repaint();}
+    public void resetPosCorner() {pos1=null;corner1=null;corner2=null;}
+    private void posClick(Point world) {
+        if(world==null) return;
+        if(pos1==null) {pos1=world;repaint();}
+        else {Point first=pos1;setSelectionBounds(SelectionMath.normalized(first.x,first.y,world.x,world.y));corner1=first;corner2=world;pos1=null;}
+    }
+    private Point hoverPoint;
+    private Consumer<String> hoverListener;
+
+    public void setHoverListener(Consumer<String> listener) { hoverListener = listener; }
+
+    public String getHoverText(Point point) {
+        if (image == null || point == null) return "X: —  Y: —  Z: —";
+        Point pixel = screenToImageCoordinates(point);
+        if (pixel.x < 0 || pixel.y < 0 || pixel.x >= image.getWidth() || pixel.y >= image.getHeight())
+            return "X: —  Y: —  Z: —";
+        int x = worldMinX + (int) Math.floor(pixel.x / pixelsPerBlock);
+        int z = worldMinZ + (int) Math.floor(pixel.y / pixelsPerBlock);
+        int y = RenderedMap.heightAt(image, pixel.x, pixel.y);
+        // 逐列方块状态 / 生物群系元数据已移除（每块 +4 MB），悬停只显示坐标与表面高度。
+        return String.format("X: %d  Y: %s  Z: %d", x,
+            y == RenderedMap.NO_HEIGHT ? "—" : Integer.toString(y), z);
+    }
+
+    private void refreshHover() {
+        // image == null 时 worldToScreenCoordinates 返回 null，tooltip 里的距离比较会 NPE。
+        // 世界加载过程中 resetSelection() 就会走到这里，异常会打断整个加载（表现为"没地图"）。
+        boolean drawable = image != null;
+        String text = getHoverText(hoverPoint)+(hoverPoint==null||!drawable?"":overlays.tooltip(hoverPoint,this::worldToScreenCoordinates));
+        setToolTipText(hoverPoint == null ? null : text);
+        if (hoverListener != null) hoverListener.accept(text);
+    }
 
     private BufferedImage image;
     private double scale = 1.0;
@@ -81,15 +187,54 @@ public class MapCanvas extends JPanel {
     
     public MapCanvas() {
         setPreferredSize(new Dimension(800, 600));
-        setBackground(Color.WHITE);
+        setBackground(CheckerBackground.DARK);
         
         setupMouseListeners();
     }
+
+    // 画布始终铺满视口：空地由自己画棋盘，不留滚动面板的底色边
+    @Override
+    public Dimension getPreferredScrollableViewportSize() { return getPreferredSize(); }
+
+    @Override
+    public int getScrollableUnitIncrement(Rectangle visibleRect, int orientation, int direction) { return 16; }
+
+    @Override
+    public int getScrollableBlockIncrement(Rectangle visibleRect, int orientation, int direction) {
+        return orientation == SwingConstants.HORIZONTAL ? visibleRect.width : visibleRect.height;
+    }
+
+    @Override
+    public boolean getScrollableTracksViewportWidth() { return true; }
+
+    @Override
+    public boolean getScrollableTracksViewportHeight() { return true; }
     
     private void setupMouseListeners() {
         MouseAdapter mouseHandler = new MouseAdapter() {
+            @Override public void mouseClicked(MouseEvent e) {
+                if(SwingUtilities.isLeftMouseButton(e)&&e.getClickCount()==2&&!overlays.posMode&&!minimap.contains(e.getPoint())) zoomAt(e.getPoint(),1.2);
+            }
+
             @Override
             public void mousePressed(MouseEvent e) {
+                requestFocusInWindow();
+                squareGesture=e.isShiftDown();
+                hoverPoint=e.getPoint();
+                if(overlays.minimap&&SwingUtilities.isLeftMouseButton(e)&&minimap.contains(e.getPoint())) {Point target=minimap.worldAt(e.getPoint());if(target!=null)jumpToWorldCoordinate(target);return;}
+                // Special-shape gestures stay implemented, but are not dispatched by the GUI.
+                overlays.resetSelectionTool();
+                gestures.cancel();
+                // 中键：拖动 LOD 中心（LOD 叠加层可见时）。旧的"设为地表高度"已移除。
+                if(SwingUtilities.isMiddleMouseButton(e)) {
+                    if(overlays.importLodVisible) {
+                        lodDragging=true;
+                        setCursor(Cursor.getPredefinedCursor(Cursor.MOVE_CURSOR));
+                        dragLodCenterTo(e.getPoint());
+                    }
+                    return;
+                }
+                if(overlays.posMode&&SwingUtilities.isLeftMouseButton(e)) {posClick(screenToWorldCoordinates(e.getPoint()));return;}
                 if (SwingUtilities.isRightMouseButton(e)) {
                     // 右键开始选择区域
                     startSelection(e.getPoint());
@@ -98,6 +243,9 @@ public class MapCanvas extends JPanel {
                     if (hasValidSelection) {
                         int handle = hitTestResizeHandle(e.getPoint());
                         if (handle != HANDLE_NONE) {
+                            selectionHistory.remember(getSelectionBounds(),selectionShape);
+                            resizeOriginal=getSelectionBounds();
+                            resizeGrabWorld=screenToWorldCoordinates(e.getPoint());
                             resizeHandle = handle;
                             return; // 进入调整模式，不启动地图拖拽
                         }
@@ -109,21 +257,16 @@ public class MapCanvas extends JPanel {
 
             @Override
             public void mouseDragged(MouseEvent e) {
+                hoverPoint = e.getPoint();
+                squareGesture=e.isShiftDown();
+                if(gestures.update(e,screenToWorldCoordinates(e.getPoint()),thisCanvas(),snapMode))return;
+                if(lodDragging) { dragLodCenterTo(e.getPoint()); return; }
                 if (resizeHandle != HANDLE_NONE && hasValidSelection) {
                     // 拖拽调整选区边界
                     Point world = screenToWorldCoordinates(e.getPoint());
                     if (world != null) {
-                        switch (resizeHandle) {
-                            case HANDLE_N: currentMinZ = world.y; break;
-                            case HANDLE_S: currentMaxZ = world.y; break;
-                            case HANDLE_W: currentMinX = world.x; break;
-                            case HANDLE_E: currentMaxX = world.x; break;
-                            case HANDLE_NW: currentMinX = world.x; currentMinZ = world.y; break;
-                            case HANDLE_NE: currentMaxX = world.x; currentMinZ = world.y; break;
-                            case HANDLE_SW: currentMinX = world.x; currentMaxZ = world.y; break;
-                            case HANDLE_SE: currentMaxX = world.x; currentMaxZ = world.y; break;
-                            default: break;
-                        }
+                        resizeTo(world,e.isShiftDown());
+                        refreshHover();
                         repaint();
                     }
                     return;
@@ -139,17 +282,22 @@ public class MapCanvas extends JPanel {
 
             @Override
             public void mouseReleased(MouseEvent e) {
+                squareGesture=e.isShiftDown();
+                if(gestures.release(e,screenToWorldCoordinates(e.getPoint()),thisCanvas(),snapMode)){if(hasValidSelection&&selectionCallback!=null)selectionCallback.onSelectionComplete(currentMinX,currentMinZ,currentMaxX,currentMaxZ);refreshHover();return;}
+                if(lodDragging) { dragLodCenterTo(e.getPoint()); lodDragging=false; setCursor(Cursor.getDefaultCursor()); return; }
                 if (SwingUtilities.isRightMouseButton(e) && selecting) {
                     // 完成右键选择
                     finishSelection(e.getPoint());
                 } else if (SwingUtilities.isLeftMouseButton(e)) {
                     if (resizeHandle != HANDLE_NONE) {
                         // 结束选区调整：归一化坐标并通知回调
+                        resizeTo(screenToWorldCoordinates(e.getPoint()),e.isShiftDown());
                         normalizeSelection();
                         resizeHandle = HANDLE_NONE;
                         if (selectionCallback != null) {
                             selectionCallback.onSelectionComplete(currentMinX, currentMinZ, currentMaxX, currentMaxZ);
                         }
+                        refreshHover();
                         repaint();
                         return;
                     }
@@ -160,6 +308,9 @@ public class MapCanvas extends JPanel {
                 }
             }
             
+            @Override
+            public void mouseExited(MouseEvent e) { updateMouseCoordinates(null); }
+
             @Override
             public void mouseMoved(MouseEvent e) {
                 // 更新鼠标坐标显示
@@ -188,22 +339,7 @@ public class MapCanvas extends JPanel {
         addMouseMotionListener(mouseHandler);
         addMouseWheelListener(mouseHandler);
 
-        // 添加键盘监听器
-        addKeyListener(new KeyAdapter() {
-            @Override
-            public void keyPressed(KeyEvent e) {
-                if (e.getKeyCode() == KeyEvent.VK_ENTER && hasValidSelection) {
-                    // 按下Enter键确认选择
-                    if (selectionCallback != null) {
-                        selectionCallback.onSelectionConfirmed(currentMinX, currentMinZ, currentMaxX, currentMaxZ);
-                    }
-                } else if (e.getKeyCode() == KeyEvent.VK_ESCAPE) {
-                    // 按下Escape键清除选择
-                    clearSelection();
-                    hasValidSelection = false;
-                }
-            }
-        });
+        SelectionBindings.install(this,this,this::command);
 
         // 设置焦点以接收键盘事件
         setFocusable(true);
@@ -239,6 +375,7 @@ public class MapCanvas extends JPanel {
                 imageOffset.x, imageOffset.y, scale);
         }
 
+        refreshHover();
         repaint();
     }
 
@@ -259,6 +396,7 @@ public class MapCanvas extends JPanel {
             this.image = newImage;
             setWorldCoordinateMapping(newWorldMinX, newWorldMinZ, 1.0);
             centerImage();
+            refreshHover();
             repaint();
             return;
         }
@@ -330,6 +468,7 @@ public class MapCanvas extends JPanel {
                 newImage.getWidth(), newImage.getHeight());
         }
 
+        refreshHover();
         repaint();
     }
 
@@ -349,6 +488,7 @@ public class MapCanvas extends JPanel {
             // 重置视图
             resetView();
         }
+        refreshHover();
         repaint();
     }
     
@@ -357,6 +497,7 @@ public class MapCanvas extends JPanel {
      */
     public void setScale(double scale) {
         this.scale = Math.max(0.1, Math.min(10.0, scale));
+        refreshHover();
         repaint();
     }
     
@@ -374,6 +515,7 @@ public class MapCanvas extends JPanel {
         scale = 1.0;
         centerImage();
         selectionRect = null;
+        refreshHover();
         repaint();
     }
 
@@ -406,6 +548,7 @@ public class MapCanvas extends JPanel {
             
             imageOffset.translate(dx, dy);
             lastMousePos = new Point(point);
+            refreshHover();
             repaint();
         }
     }
@@ -416,19 +559,10 @@ public class MapCanvas extends JPanel {
      * 更新鼠标坐标显示
      */
     private void updateMouseCoordinates(Point point) {
-        if (image != null) {
-            // 将屏幕坐标转换为图像坐标
-            Point imagePoint = screenToImageCoordinates(point);
-            
-            // 这里可以触发坐标更新事件
-            // 暂时打印到控制台
-            if (imagePoint.x >= 0 && imagePoint.x < image.getWidth() && 
-                imagePoint.y >= 0 && imagePoint.y < image.getHeight()) {
-                // System.out.println("Image coords: " + imagePoint);
-            }
-        }
+        hoverPoint = point;
+        refreshHover();
     }
-    
+
     /**
      * 处理鼠标滚轮事件
      */
@@ -471,6 +605,7 @@ public class MapCanvas extends JPanel {
                 zoomEndTimer.setRepeats(false);
                 zoomEndTimer.start();
 
+                refreshHover();
                 repaint();
             }
         }
@@ -484,8 +619,8 @@ public class MapCanvas extends JPanel {
             return new Point(0, 0);
         }
         
-        int imageX = (int) ((screenPoint.x - imageOffset.x) / scale);
-        int imageY = (int) ((screenPoint.y - imageOffset.y) / scale);
+        int imageX = (int) Math.floor((screenPoint.x - imageOffset.x) / scale);
+        int imageY = (int) Math.floor((screenPoint.y - imageOffset.y) / scale);
         
         return new Point(imageX, imageY);
     }
@@ -514,20 +649,32 @@ public class MapCanvas extends JPanel {
         g2d.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_SPEED);
         g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_OFF);
         
+        // 空地先铺棋盘底：图案固定在屏幕坐标上，拖动/缩放地图时不动
+        CheckerBackground.paint(g2d, getWidth(), getHeight());
+        
         if (image != null) {
             // 绘制图像
             int scaledWidth = (int) (image.getWidth() * scale);
             int scaledHeight = (int) (image.getHeight() * scale);
             
             g2d.drawImage(image, imageOffset.x, imageOffset.y, scaledWidth, scaledHeight, null);
+            if(overlays.night||overlays.contours||overlays.gaps)
+                g2d.drawImage(ViewLayers.overlay(image,overlays.night,overlays.contours,overlays.gaps),imageOffset.x,imageOffset.y,scaledWidth,scaledHeight,null);
+
+            // 兴趣带高亮：按屏幕坐标叠紫棋盘（图案不随地图移动）。
+            // 缩放用"图像实际绘制尺寸"推算，保证与 drawImage 的取整完全一致，不留缝。
+            if (image instanceof RenderedMap) {
+                drawHighlight(g2d, (RenderedMap) image,
+                    (double) scaledWidth / image.getWidth(), (double) scaledHeight / image.getHeight());
+            }
             
+            MapGrid.draw(g2d,gridMode,visibleBounds(),scale*pixelsPerBlock,this::worldToScreenCoordinates,getWidth(),getHeight());
+
             // 绘制选择框 - 根据当前缩放和偏移调整
             if (selecting && selectionStart != null && selectionEnd != null) {
                 // 正在选择时，直接使用屏幕坐标
-                int x = Math.min(selectionStart.x, selectionEnd.x);
-                int y = Math.min(selectionStart.y, selectionEnd.y);
-                int width = Math.abs(selectionEnd.x - selectionStart.x);
-                int height = Math.abs(selectionEnd.y - selectionStart.y);
+                Rectangle r=getSelectionScreenRect();
+                int x=r.x,y=r.y,width=r.width,height=r.height;
 
                 g2d.setColor(Color.RED);
                 g2d.setStroke(new BasicStroke(2));
@@ -538,10 +685,8 @@ public class MapCanvas extends JPanel {
                 Point scaledEnd = worldToScreenCoordinates(selectionWorldEnd);
 
                 if (scaledStart != null && scaledEnd != null) {
-                    int x = Math.min(scaledStart.x, scaledEnd.x);
-                    int y = Math.min(scaledStart.y, scaledEnd.y);
-                    int width = Math.abs(scaledEnd.x - scaledStart.x);
-                    int height = Math.abs(scaledEnd.y - scaledStart.y);
+                    Rectangle r=getSelectionScreenRect();
+                    int x=r.x,y=r.y,width=r.width,height=r.height;
 
                     g2d.setColor(Color.RED);
                     g2d.setStroke(new BasicStroke(2));
@@ -564,7 +709,7 @@ public class MapCanvas extends JPanel {
             }
         } else {
             // 没有图像时显示提示
-            g2d.setColor(Color.GRAY);
+            g2d.setColor(new Color(0xCCCCCC));
             String message = "No map image loaded";
             FontMetrics fm = g2d.getFontMetrics();
             int x = (getWidth() - fm.stringWidth(message)) / 2;
@@ -572,9 +717,41 @@ public class MapCanvas extends JPanel {
             g2d.drawString(message, x, y);
         }
         
+        if(image!=null) {
+            overlays.drawOre(g2d,this::worldToScreenCoordinates,scale*pixelsPerBlock);
+            SelectionGestures.draw(g2d,selectionShape,this::worldToScreenCoordinates,scale*pixelsPerBlock);
+            overlays.drawInView(g2d,getVisibleRect(),scale*pixelsPerBlock,this::worldToScreenCoordinates,getSelectionBounds(),pos1,corner1,corner2);
+            if(overlays.minimap) {SelectionMath.Bounds extent=new SelectionMath.Bounds(worldMinX,worldMinZ,SelectionMath.clamp((long)worldMinX+(long)Math.ceil(image.getWidth()/pixelsPerBlock)-1),SelectionMath.clamp((long)worldMinZ+(long)Math.ceil(image.getHeight()/pixelsPerBlock)-1));
+                Rectangle view=getVisibleRect();Point a=screenToWorldUnclamped(new Point(view.x,view.y)),b=screenToWorldUnclamped(new Point(view.x+view.width-1,view.y+view.height-1));
+                minimap.draw(g2d,view,java.util.Collections.singletonList(new MinimapInset.Tile(extent,image)),SelectionMath.normalized(a.x,a.y,b.x,b.y));
+            }else minimap.clear();
+        }else minimap.clear();
         g2d.dispose();
     }
     
+    /**
+     * 把"兴趣带里有方块"的像素按屏幕坐标叠成紫棋盘：图案锚在屏幕原点，所以拖动/缩放时它不动。
+     * 逐行把连续的高亮像素并成一段再 fillRect；边界用 floor 与 drawImage 的最近邻缩放对齐。
+     */
+    private void drawHighlight(Graphics2D g2d, RenderedMap map, double scaleX, double scaleY) {
+        int mapWidth = map.getWidth(), mapHeight = map.getHeight();
+        g2d.setPaint(CheckerBackground.highlightPaint());
+        for (int z = 0; z < mapHeight; z++) {
+            int rowTop = imageOffset.y + (int) Math.floor(z * scaleY);
+            int rowBottom = imageOffset.y + (int) Math.floor((z + 1) * scaleY);
+            int rowHeight = Math.max(1, rowBottom - rowTop);
+            int x = 0;
+            while (x < mapWidth) {
+                if (!map.isHighlighted(x, z)) { x++; continue; }
+                int start = x;
+                while (x < mapWidth && map.isHighlighted(x, z)) x++;
+                int left = imageOffset.x + (int) Math.floor(start * scaleX);
+                int right = imageOffset.x + (int) Math.floor(x * scaleX);
+                g2d.fillRect(left, rowTop, Math.max(1, right - left), rowHeight);
+            }
+        }
+    }
+
     /**
      * 设置选择回调
      */
@@ -594,6 +771,7 @@ public class MapCanvas extends JPanel {
         this.pixelsPerBlock = pixelsPerBlock;
         System.out.printf("Set world coordinate mapping: origin(%d, %d), px/block=%.2f\n",
             worldMinX, worldMinZ, pixelsPerBlock);
+        refreshHover();
     }
 
     /**
@@ -618,6 +796,7 @@ public class MapCanvas extends JPanel {
 
         // 确保偏移量在合理范围内
         clampImageOffset();
+        refreshHover();
         repaint();
     }
 
@@ -672,6 +851,7 @@ public class MapCanvas extends JPanel {
             clampImageOffset();
         }
 
+        refreshHover();
         repaint();
     }
 
@@ -776,8 +956,8 @@ public class MapCanvas extends JPanel {
         Rectangle visibleRect = getVisibleRect();
 
         // 转换为世界坐标
-        Point topLeft = screenToWorldCoordinates(new Point(visibleRect.x, visibleRect.y));
-        Point bottomRight = screenToWorldCoordinates(new Point(
+        Point topLeft = screenToWorldUnclamped(new Point(visibleRect.x, visibleRect.y));
+        Point bottomRight = screenToWorldUnclamped(new Point(
             visibleRect.x + visibleRect.width,
             visibleRect.y + visibleRect.height
         ));
@@ -798,10 +978,14 @@ public class MapCanvas extends JPanel {
      * 开始选择区域
      */
     private void startSelection(Point point) {
+        resetPosCorner();
+        selectionHistory.remember(getSelectionBounds(),selectionShape);
         selectionStart = new Point(point);
         selectionEnd = new Point(point);
         selecting = true;
         selectionRect = new Rectangle();
+        updateSelection(point);
+        refreshHover();
         repaint();
     }
 
@@ -809,63 +993,21 @@ public class MapCanvas extends JPanel {
      * 更新选择区域
      */
     private void updateSelection(Point point) {
-        if (selecting && selectionStart != null) {
-            selectionEnd = new Point(point);
-
-            // 计算选择矩形
-            int x = Math.min(selectionStart.x, selectionEnd.x);
-            int y = Math.min(selectionStart.y, selectionEnd.y);
-            int width = Math.abs(selectionEnd.x - selectionStart.x);
-            int height = Math.abs(selectionEnd.y - selectionStart.y);
-
-            selectionRect = new Rectangle(x, y, width, height);
-            repaint();
-        }
+        if (!selecting || selectionStart==null) return;
+        Point a=screenToWorldCoordinates(selectionStart),b=screenToWorldCoordinates(point);
+        if(a==null||b==null) return;
+        applyBounds(SelectionMath.drag(a,b,squareGesture),true,squareGesture);
+        // Preview uses the same inclusive world bounds as the committed rectangle.
+        selectionEnd=worldToScreenCoordinates(new Point(currentMaxX,currentMaxZ));
+        selectionRect=getSelectionScreenRect();
     }
 
-    /**
-     * 完成选择区域
-     */
     private void finishSelection(Point point) {
-        if (selecting && selectionStart != null && image != null) {
-            selectionEnd = new Point(point);
-
-            // 将屏幕坐标转换为世界坐标
-            Point worldStart = screenToWorldCoordinates(selectionStart);
-            Point worldEnd = screenToWorldCoordinates(selectionEnd);
-
-            if (worldStart != null && worldEnd != null) {
-                // 保存世界坐标用于后续绘制
-                selectionWorldStart = new Point(worldStart);
-                selectionWorldEnd = new Point(worldEnd);
-
-                // 计算世界坐标范围
-                currentMinX = Math.min(worldStart.x, worldEnd.x);
-                currentMaxX = Math.max(worldStart.x, worldEnd.x);
-                currentMinZ = Math.min(worldStart.y, worldEnd.y);
-                currentMaxZ = Math.max(worldStart.y, worldEnd.y);
-                hasValidSelection = true;
-
-                // 调用回调（仅用于UI更新，不触发渲染）
-                if (selectionCallback != null) {
-                    selectionCallback.onSelectionComplete(currentMinX, currentMinZ, currentMaxX, currentMaxZ);
-                }
-
-                System.out.printf("Selected area: world (%d, %d) to (%d, %d) - press Enter to confirm\n",
-                    currentMinX, currentMinZ, currentMaxX, currentMaxZ);
-            }
-        }
-
-        // 清除选择状态，但保持世界坐标用于绘制
-        selecting = false;
-        selectionStart = null;
-        selectionEnd = null;
-        repaint();
+        updateSelection(point);selecting=false;selectionStart=null;selectionEnd=null;
+        if(hasValidSelection&&selectionCallback!=null) selectionCallback.onSelectionComplete(currentMinX,currentMinZ,currentMaxX,currentMaxZ);
+        refreshHover();repaint();
     }
 
-    /**
-     * 归一化选区坐标（保证 min <= max）
-     */
     private void normalizeSelection() {
         if (currentMinX > currentMaxX) { int t = currentMinX; currentMinX = currentMaxX; currentMaxX = t; }
         if (currentMinZ > currentMaxZ) { int t = currentMinZ; currentMinZ = currentMaxZ; currentMaxZ = t; }
@@ -877,17 +1019,13 @@ public class MapCanvas extends JPanel {
      * 计算选区在屏幕上的矩形
      */
     private Rectangle getSelectionScreenRect() {
-        if (selectionWorldStart == null || selectionWorldEnd == null || image == null) {
-            return new Rectangle();
-        }
-        Point screenStart = worldToScreenCoordinates(selectionWorldStart);
-        Point screenEnd = worldToScreenCoordinates(selectionWorldEnd);
-        if (screenStart == null || screenEnd == null) return new Rectangle();
-        int x = Math.min(screenStart.x, screenEnd.x);
-        int y = Math.min(screenStart.y, screenEnd.y);
-        int width = Math.abs(screenEnd.x - screenStart.x);
-        int height = Math.abs(screenEnd.y - screenStart.y);
-        return new Rectangle(x, y, width, height);
+        if(!hasValidSelection||image==null) return new Rectangle();
+        double factor=scale*pixelsPerBlock;
+        int x=(int)Math.floor(((long)currentMinX-worldMinX)*factor+imageOffset.x);
+        int z=(int)Math.floor(((long)currentMinZ-worldMinZ)*factor+imageOffset.y);
+        int right=(int)Math.ceil(((long)currentMaxX+1-worldMinX)*factor+imageOffset.x);
+        int bottom=(int)Math.ceil(((long)currentMaxZ+1-worldMinZ)*factor+imageOffset.y);
+        return new Rectangle(x,z,Math.max(1,SelectionMath.clamp((long)right-x)),Math.max(1,SelectionMath.clamp((long)bottom-z)));
     }
 
     /**
@@ -958,21 +1096,41 @@ public class MapCanvas extends JPanel {
     /**
      * 清除选择矩形
      */
-    public void clearSelection() {
+    public void clearSelection() {overlays.resetSelectionTool();gestures.cancel();
+        resetPosCorner();
+        if(hasValidSelection) selectionHistory.remember(getSelectionBounds(),selectionShape);
         selectionStart = null;
         selectionEnd = null;
         selectionRect = null;
         selectionWorldStart = null;
         selectionWorldEnd = null;
+        selectionShape=new SelectionShape();
         selecting = false;
         hasValidSelection = false;
         resizeHandle = HANDLE_NONE;
+        if(selectionChangeListener!=null) selectionChangeListener.accept(null);
+        refreshHover();
         repaint();
+    }
+
+    /**
+     * 中键拖动 LOD 中心。用 unclamped 版本：屏幕坐标被 clamp 到图像内的话，
+     * 拖到图外圆心会贴边不动。区块对齐与回写面板由 GUI 侧的监听器负责。
+     */
+    private void dragLodCenterTo(Point screenPoint) {
+        if (image == null || lodCenterListener == null) return;
+        Point world = screenToWorldUnclamped(screenPoint);
+        if (world != null) lodCenterListener.accept(world);
     }
 
     /**
      * 将屏幕坐标转换为世界坐标
      */
+    private Point screenToWorldUnclamped(Point p) {
+        return new Point(SelectionMath.clamp((long)worldMinX+(long)Math.floor((p.x-imageOffset.x)/scale/pixelsPerBlock)),
+            SelectionMath.clamp((long)worldMinZ+(long)Math.floor((p.y-imageOffset.y)/scale/pixelsPerBlock)));
+    }
+
     private Point screenToWorldCoordinates(Point screenPoint) {
         if (image == null) return null;
 
@@ -998,8 +1156,8 @@ public class MapCanvas extends JPanel {
         if (image == null) return null;
 
         // 1. 世界坐标 -> 图像像素坐标
-        double imageX = (worldPoint.x - worldMinX) * pixelsPerBlock;
-        double imageY = (worldPoint.y - worldMinZ) * pixelsPerBlock;
+        double imageX = ((long)worldPoint.x - worldMinX) * pixelsPerBlock;
+        double imageY = ((long)worldPoint.y - worldMinZ) * pixelsPerBlock;
 
         // 2. 图像像素坐标 -> 屏幕坐标（考虑缩放和偏移）
         int screenX = (int) (imageX * scale + imageOffset.x);
@@ -1028,6 +1186,7 @@ public class MapCanvas extends JPanel {
             imageOffset.y += dy;
 
             lastMousePos = new Point(point);
+            refreshHover();
             repaint();
         }
     }
@@ -1054,22 +1213,11 @@ public class MapCanvas extends JPanel {
      * 跳转到指定的世界坐标
      */
     public boolean jumpToWorldCoordinate(Point worldCoord) {
-        if (image == null) return false;
-
-        // 将世界坐标转换为图像坐标
-        Point imageCoord = worldToImageCoordinates(worldCoord);
-
-        if (imageCoord != null) {
-            // 设置视图中心为目标坐标
-            setViewCenter(imageCoord);
-            System.out.printf("Jump to world (%d,%d) -> image (%d,%d)\n",
-                worldCoord.x, worldCoord.y, imageCoord.x, imageCoord.y);
-            return true;
-        } else {
-            System.out.printf("Cannot jump to world (%d,%d) - conversion failed\n",
-                worldCoord.x, worldCoord.y);
-            return false;
-        }
+        if(image==null) return false;
+        imageOffset.x=(int)(getWidth()/2.0-((long)worldCoord.x-worldMinX)*pixelsPerBlock*scale);
+        imageOffset.y=(int)(getHeight()/2.0-((long)worldCoord.y-worldMinZ)*pixelsPerBlock*scale);
+        refreshHover();repaint();forceViewportUpdate();
+        return worldToImageCoordinates(worldCoord)!=null;
     }
 
     /**
@@ -1096,5 +1244,44 @@ public class MapCanvas extends JPanel {
         }
 
         return null;
+    }
+
+    private SelectionMath.Bounds visibleBounds() {
+        if(image==null||getWidth()<=0||getHeight()<=0) return null;
+        double factor=scale*pixelsPerBlock;
+        long x1=(long)worldMinX+(long)Math.floor(-imageOffset.x/factor),z1=(long)worldMinZ+(long)Math.floor(-imageOffset.y/factor);
+        long x2=(long)worldMinX+(long)Math.ceil((getWidth()-(double)imageOffset.x)/factor)-1;
+        long z2=(long)worldMinZ+(long)Math.ceil((getHeight()-(double)imageOffset.y)/factor)-1;
+        x1=Math.max(worldMinX,x1);z1=Math.max(worldMinZ,z1);
+        x2=Math.min((long)worldMinX+(long)Math.ceil(image.getWidth()/pixelsPerBlock)-1,x2);
+        z2=Math.min((long)worldMinZ+(long)Math.ceil(image.getHeight()/pixelsPerBlock)-1,z2);
+        if(x1>x2||z1>z2) return null;
+        return new SelectionMath.Bounds(SelectionMath.clamp(x1),SelectionMath.clamp(z1),SelectionMath.clamp(x2),SelectionMath.clamp(z2));
+    }
+    public int[] getHoverCoordinates() {
+        if(hoverPoint==null||image==null) return null;
+        Point p=screenToImageCoordinates(hoverPoint);
+        if(p.x<0||p.y<0||p.x>=image.getWidth()||p.y>=image.getHeight()) return null;
+        return new int[]{worldMinX+(int)Math.floor(p.x/pixelsPerBlock),RenderedMap.heightAt(image,p.x,p.y),worldMinZ+(int)Math.floor(p.y/pixelsPerBlock)};
+    }
+    public SelectionYFit.Result fitSelectionY(SelectionMath.Bounds b) {return fitSelectionY(b,true);}
+    public SelectionYFit.Result fitSelectionY(SelectionMath.Bounds b,boolean opaque) {return b==null?new SelectionYFit.Result():SelectionYFit.scan(image,worldMinX,worldMinZ,pixelsPerBlock,b,opaque);}
+    public java.util.Map<String,Long> visibleBlockCounts() {
+        java.util.Map<String,Long> counts=new java.util.TreeMap<>();if(image!=null) {
+            Point a=screenToImageCoordinates(new Point(0,0)),b=screenToImageCoordinates(new Point(getWidth()-1,getHeight()-1));ViewLayers.count(counts,image,a.x,a.y,b.x,b.y);
+        }return counts;
+    }
+    private void zoomAt(Point p,double factor) {
+        if(image==null) return;double next=Math.max(0.000000000001,Math.min(MAX_SCALE,scale*factor)),ratio=next/scale;
+        imageOffset.x=(int)Math.floor(p.x-(p.x-(double)imageOffset.x)*ratio);imageOffset.y=(int)Math.floor(p.y-(p.y-(double)imageOffset.y)*ratio);scale=next;refreshHover();repaint();
+    }
+    public void zoomExtents(boolean maximum) {
+        if(image==null) return;
+        if(maximum) zoomAt(new Point(getWidth()/2,getHeight()/2),MAX_SCALE/scale);
+        else {
+            Rectangle b=image instanceof RenderedMap?((RenderedMap)image).loadedPixelBounds():new Rectangle(0,0,image.getWidth(),image.getHeight());
+            scale=Math.max(0.000000000001,Math.min(MAX_SCALE,Math.min(getWidth()/(double)b.width,getHeight()/(double)b.height)));
+            imageOffset.x=(int)Math.floor(getWidth()/2.0-b.getCenterX()*scale);imageOffset.y=(int)Math.floor(getHeight()/2.0-b.getCenterY()*scale);refreshHover();repaint();
+        }
     }
 }

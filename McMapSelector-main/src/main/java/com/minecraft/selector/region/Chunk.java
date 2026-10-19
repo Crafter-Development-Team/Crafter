@@ -12,6 +12,7 @@ public class Chunk {
     private int x;
     private int z;
     private List<Section> sections;
+    private final Map<String,NBTReader.NBTCompound> blockEntities = new HashMap<>();
     
     public Chunk(NBTReader.NBTCompound nbtData) {
         this.nbtData = nbtData;
@@ -29,6 +30,15 @@ public class Chunk {
         this.z = chunkData.getInt("zPos");
         this.sections = new ArrayList<>();
         
+        String entityKey=chunkData.contains("block_entities")?"block_entities":"TileEntities";
+        if(chunkData.contains(entityKey)) {
+            NBTReader.NBTList entities=chunkData.getList(entityKey);
+            for(int i=0;i<entities.size();i++) if(entities.get(i) instanceof NBTReader.NBTCompound) {
+                NBTReader.NBTCompound e=(NBTReader.NBTCompound)entities.get(i);
+                if(e.contains("x") && e.contains("y") && e.contains("z"))
+                    blockEntities.put((e.getInt("x")&15)+","+e.getInt("y")+","+(e.getInt("z")&15),e);
+            }
+        }
         // 解析区段数据（1.18+ 用小写 sections，1.17- 用大写 Sections）
         NBTReader.NBTList sectionsList = null;
         if (chunkData.contains("sections")) {
@@ -44,6 +54,26 @@ public class Chunk {
         }
     }
     
+    public String getBiome(int x,int y,int z) {
+        Section section=getSection(y>>4);
+        String modern=section==null?null:section.getBiome(x,y&15,z);
+        if(modern!=null) return modern;
+        NBTReader.NBTCompound d=nbtData.contains("Level")?nbtData.getCompound("Level"):nbtData;
+        NBTReader.NBTTag tag=d.get("Biomes");int index=z*16+x;
+        if(tag instanceof NBTReader.NBTByteArray) {byte[] a=((NBTReader.NBTByteArray)tag).getValue();return index<a.length?"legacy:"+(a[index]&255):null;}
+        if(tag instanceof NBTReader.NBTIntArray) {int[] a=((NBTReader.NBTIntArray)tag).getValue();
+            if(a.length>256) index=Math.max(0,Math.min(a.length/16-1,y>>2))*16+(z>>2)*4+(x>>2);
+            return index<a.length?"legacy:"+a[index]:null;}
+        return null;
+    }
+
+    public NBTReader.NBTCompound getBlockEntity(int x,int y,int z) {
+        return blockEntities.get(x+","+y+","+z);
+    }
+
+    /** 整列扫描时用来跳过逐方块的 block entity 查询（大多数区块一个都没有）。 */
+    public boolean hasBlockEntities() {return !blockEntities.isEmpty();}
+
     /**
      * 从区域文件创建区块
      */
@@ -121,13 +151,34 @@ public class Chunk {
      * 区段类，表示16x16x16的方块区域
      */
     public static class Section {
+        private String[] biomes;
+        private long[] biomeData;
+        public String getBiome(int x,int y,int z) {
+            if(biomes==null||biomes.length==0) return null;
+            if(biomes.length==1) return biomes[0];
+            int bits=Math.max(1,32-Integer.numberOfLeadingZeros(biomes.length-1)),per=64/bits;
+            int i=(y>>2)*16+(z>>2)*4+(x>>2),word=i/per;
+            if(biomeData==null||word>=biomeData.length) return null;
+            int id=(int)((biomeData[word]>>>((i%per)*bits))&((1L<<bits)-1));
+            return id<biomes.length?biomes[id]:null;
+        }
         private int y;
         private List<Block> palette;
         private long[] blockStates;
         private int bitsPerBlock;
         
         public Section(NBTReader.NBTCompound sectionData) {
-            this.y = ((NBTReader.NBTByte) sectionData.get("Y")).getValue();
+            if(sectionData.get("biomes") instanceof NBTReader.NBTCompound) {
+                NBTReader.NBTCompound b=sectionData.getCompound("biomes");
+                if(b.get("palette") instanceof NBTReader.NBTList) {
+                    NBTReader.NBTList a=b.getList("palette");biomes=new String[a.size()];
+                    for(int i=0;i<a.size();i++) biomes[i]=String.valueOf(a.get(i).getValue());
+                }
+                if(b.get("data") instanceof NBTReader.NBTLongArray) biomeData=((NBTReader.NBTLongArray)b.get("data")).getValue();
+            }
+            Object sectionY = sectionData.get("Y").getValue();
+            if (!(sectionY instanceof Number)) throw new IllegalArgumentException("Section Y must be numeric");
+            this.y = ((Number) sectionY).intValue();
             
             if (sectionData.contains("block_states")) {
                 NBTReader.NBTCompound blockStates = sectionData.getCompound("block_states");
@@ -137,8 +188,7 @@ public class Chunk {
                 if (blockStates.contains("palette")) {
                     NBTReader.NBTList paletteList = blockStates.getList("palette");
                     for (int i = 0; i < paletteList.size(); i++) {
-                        NBTReader.NBTCompound paletteEntry = (NBTReader.NBTCompound) paletteList.get(i);
-                        this.palette.add(Block.fromPalette(paletteEntry));
+                        this.palette.add(Block.fromPaletteTag(paletteList.get(i)));
                     }
                 }
                 

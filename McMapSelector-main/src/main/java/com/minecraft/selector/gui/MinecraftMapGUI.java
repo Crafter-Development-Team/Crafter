@@ -1,11 +1,23 @@
 package com.minecraft.selector.gui;
 
 import com.minecraft.selector.core.MapRenderer;
+import com.minecraft.selector.core.PreviewOptions;
+import com.minecraft.selector.core.ImportLod;
+import com.minecraft.selector.core.SelectionPreset;
+import com.minecraft.selector.utils.RecentWorlds;
+import com.minecraft.selector.core.SelectionYFit;
+import com.minecraft.selector.core.WorldAnchors;
+import com.minecraft.selector.core.CoordinatesPayload;
+import java.awt.datatransfer.StringSelection;
+import com.minecraft.selector.core.RenderedMap;
 import com.minecraft.selector.core.MinecraftResourceExtractor;
 import com.minecraft.selector.core.BlockColors;
+import com.minecraft.selector.core.ColumnCache;
+import com.minecraft.selector.core.ResourceOptions;
 import com.minecraft.selector.nbt.NBTReader;
 import com.minecraft.selector.utils.FileUtils;
 import com.minecraft.selector.utils.LogManager;
+import com.minecraft.selector.utils.UserFeedback;
 import com.minecraft.selector.utils.WorldPathResolver;
 import com.minecraft.selector.core.DynamicRegionManager;
 
@@ -25,6 +37,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.List;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.concurrent.*;
 import javax.swing.SwingWorker;
 
@@ -40,11 +53,56 @@ public class MinecraftMapGUI extends JFrame {
     private JLabel regionLabel;
     private JLabel coordDisplayLabel;
     private JLabel fileInfoLabel;
+    /** 右下角常驻的 Y 带状态：实时路径走的是哪条一眼可见 */
+    private JLabel ybandLabel;
+    private final JLabel selectionStatsLabel=new JLabel("No selection");
+    private WorldAnchors worldAnchors=WorldAnchors.empty();
+    private SelectionMath.Snap selectionSnap=SelectionMath.Snap.NONE;
+    private int gridMode;
+    private JMenuItem gridMenuItem;
+    private boolean confirmationOpen;
+    private volatile PreviewOptions preview=PreviewOptions.DEFAULT;
+    /**
+     * 预览质量下拉框的默认项。必须是 "1 (full)"：>1 的采样会让
+     * {@code resurfaceFromCache} 放弃层缓存重合成，拖 Y 滑块退回整区重扫。
+     */
+    static final String DEFAULT_PREVIEW_QUALITY="1 (full)";
+    private final ViewOverlays overlays=new ViewOverlays();
+    private final RecentWorlds recentWorlds=new RecentWorlds();
+    private boolean multiBoxExport,includeWaypointsExport;
+    private SwingWorker<com.minecraft.selector.core.OverlayScan.Result,Void> p2ScanWorker;
+    private volatile long p2ScanRevision;
+    private javax.swing.Timer hudTimer;
+    public void setSelectionExportOptions(boolean multi,boolean markers){multiBoxExport=multi;includeWaypointsExport=markers;}
+    private final TransferHandler fileDropHandler=new TransferHandler(){
+        public boolean canImport(TransferSupport support){return support.isDataFlavorSupported(java.awt.datatransfer.DataFlavor.javaFileListFlavor);}
+        public boolean importData(TransferSupport support){if(!canImport(support))return false;try{Object value=support.getTransferable().getTransferData(java.awt.datatransfer.DataFlavor.javaFileListFlavor);java.util.List<?> files=(java.util.List<?>)value;if(files.size()!=1)throw new IOException("Drop one world, preset or pack at a time");handleDroppedFile((File)files.get(0));return true;}catch(Exception e){showFileError(e);return false;}}
+    };
+    private JMenu recentMenu;
+    private SelectionPreset pendingPreset;
+    private final Map<String,JCheckBoxMenuItem> previewItems=new HashMap<>();
+    private JMenuItem biomeMenu;
+    private javax.swing.Timer selectionCoverageTimer;
+    private SwingWorker<SelectionYFit.Result,Void> selectionCoverageWorker;
+    public void setInitialSelectionSeed(SelectionMath.Bounds seed) {if(seed!=null) pendingPreset=new SelectionPreset(seed,null,null,null);}
 
-    private JTextField minYEntry;
-    private JTextField maxYEntry;
-    private StyledComponents.DualRangeSlider heightRangeSlider;
+
+
+    private StyledComponents.VerticalRangeSlider heightRangeSlider;
     private JComboBox<String> lodDropdown;
+    private ImportLodPanel importLodPanel;
+    private JCheckBoxMenuItem importLodOverlayItem;
+    public void setInitialImportLod(ImportLod seed) {importLodPanel.setSettings(seed);}
+    private ImportLod resolvedImportLod(SelectionMath.Bounds bounds) {
+        return overlays.importLod.resolved(bounds,worldAnchors,overlays.dimension);
+    }
+    private void importLodChanged(ImportLod value) {
+        if(overlays.importLod.maxLevel==0&&value.maxLevel>0) overlays.importLodVisible=true;
+        overlays.importLod=value;
+        if(importLodOverlayItem!=null) importLodOverlayItem.setSelected(overlays.importLodVisible);
+        if(importLodPanel!=null) importLodPanel.showResolvedCenter(resolvedImportLod(activeCanvas().getSelectionBounds()));
+        repaintCanvases();
+    }
     private JTextField xCoordEntry;
     private JTextField zCoordEntry;
     // 地图范围选择输入框已删除
@@ -57,6 +115,49 @@ public class MinecraftMapGUI extends JFrame {
     private WorldPathResolver.DimensionInfo currentDimension;
     private boolean updatingDimensionDropdown = false;
     private JCheckBox autoLoadCheckbox;
+    private final MapRenderer.SurfaceMode surfaceMode = MapRenderer.SurfaceMode.TOP;
+    private volatile long viewGeneration;
+    private volatile long colorGeneration;
+
+    private void resetSurfaceView() {
+        // Height choices made during preparation apply when the first viewport is created:
+        // the debounce must not invalidate the world loading worker.
+        if(loadingPanel.getPhase()==LoadingPhasePanel.Phase.PREPARING) return;
+        cancelP2Scan();++viewGeneration;++liveGeneration;++cacheBuildGeneration;
+        final ViewRecipe previousView = lastView;
+        lastView=null;
+        synchronized(cacheBuildLock) {cacheBuildInFlight=false;}
+        coordDisplayLabel.setText("X: —  Y: —  Z: —");
+        dynamicMapManager.clear();
+        mapCanvas.setImage(null);
+        mapImage = null;
+        sourceTop = null;
+        sourceBottom = null;
+        previewCut = false;
+        displayedTop = null;
+        displayedBottom = null;
+        if (isDynamicMode && dynamicRegionManager != null) {
+            if (dynamicRegionManager.getSurfaceMode() != surfaceMode || dynamicRegionManager.getSampleInterval() != getLodLevel() || !dynamicRegionManager.getPreviewOptions().cacheKey().equals(preview.cacheKey())) {
+                // LOD 或预览模式变化，需要重建管理器并丢弃旧瓦片。
+                dynamicRegionManager.shutdown();
+                dynamicRegionManager = createDynamicRegionManager();
+                dynamicMapCanvas.setRegionManager(dynamicRegionManager);
+            } else {
+                // 只是 Y 带变了：让已加载瓦片用层缓存重合成，不重载、不闪 loading
+                dynamicRegionManager.setBand(heightRangeSlider.getUpperValue(), heightRangeSlider.getLowerValue());
+                dynamicMapCanvas.repaint();
+            }
+        } else if (previousView != null && previousView.paths.length > 1) {
+            renderMultipleMcaFiles(Arrays.asList(previousView.paths), previousView.minRegionX, previousView.minRegionZ, 1);
+        } else if (previousView != null && previousView.paths.length == 1) {
+            renderMap(previousView.paths[0]);
+        } else if (lastMcaPath != null) {
+            renderMap(lastMcaPath);
+        } else if (savePath != null) {
+            renderAroundPlayer();
+        }
+    }
+
     private DynamicMapManager dynamicMapManager;
     // private JButton renderButton; // 已删除
 
@@ -67,7 +168,6 @@ public class MinecraftMapGUI extends JFrame {
     private JButton jumpButton;
     private JButton confirmSelectionButton;
     private JButton reRenderButton;
-    private JButton view3DButton;
     private MapCanvas mapCanvas;
     private JProgressBar progressBar;
     private JLabel progressLabel;
@@ -77,14 +177,508 @@ public class MinecraftMapGUI extends JFrame {
     private double[] playerPos;
     private Rectangle selectedRegion;
     private BufferedImage mapImage;
-    private MapRenderer.BlockInfo[][] lastRenderedBlockData; // 保存最后渲染的方块数据
 
     private double customScale = 1.0;
     private Point currentRegion;
     private String currentOutputFile;
     private String currentJsonFile;
     private MinecraftResourceExtractor resourceExtractor;
+    private final ResourceOptions colorResources=ResourceOptions.launch();
+    private String lastMcaPath;
+    private String singleResourcePath;
+    private LoadingPhasePanel loadingPanel;
+    private javax.swing.Timer heightDebounce;
     private String programDir;
+
+    // ── Y 带实时重合成用的层缓存（键 = mca 绝对路径）──
+    // 上限必须 ≥ 一个视口同时需要的 region 数（最大 7x7 = 49），否则边建边被淘汰，
+    // 缓存永远凑不齐、每次换带都退回整区重扫。公式见 ColumnCache.cacheLimit。
+    private static final int COLUMN_CACHE_LIMIT =
+        com.minecraft.selector.core.ColumnCache.cacheLimit(Runtime.getRuntime().maxMemory());
+    private final java.util.LinkedHashMap<String, ColumnCacheEntry> columnCaches =
+        new java.util.LinkedHashMap<String, ColumnCacheEntry>(16, 0.75f, true) {
+            @Override
+            protected boolean removeEldestEntry(java.util.Map.Entry<String, ColumnCacheEntry> eldest) {
+                return size() > COLUMN_CACHE_LIMIT;
+            }
+        };
+    private volatile ViewRecipe lastView;
+    private volatile long liveGeneration;
+    /** 当前这张图是用哪个 Y 带出的（兜底裁剪与实时重合成都要对齐它） */
+    private volatile Integer displayedTop, displayedBottom;
+    /** mapImage 这张精确出图对应的 Y 带；临时裁剪只以它为底，绝不修改它本身 */
+    private volatile Integer sourceTop, sourceBottom;
+    /** 显示的是"高度图临时裁剪"出来的图（等缓存就绪会自动转精确） */
+    private volatile boolean displayApproximate;
+    private volatile boolean previewCut;
+    private volatile boolean pendingExactRefresh;
+    private final Object cacheBuildLock = new Object();
+    private ViewRecipe cacheBuildRecipe;
+    private ViewRecipe cacheBuildFailed;
+    private boolean cacheBuildInFlight;
+    private long cacheBuildGeneration;
+    private String liveNote = "";
+    private boolean liveActive;
+    private final java.util.concurrent.atomic.AtomicBoolean liveRunning = new java.util.concurrent.atomic.AtomicBoolean();
+    private volatile boolean livePending;
+    private final java.util.concurrent.atomic.AtomicBoolean dynamicBandRunning = new java.util.concurrent.atomic.AtomicBoolean();
+    private volatile boolean dynamicBandPending;
+
+    private static final class ColumnCacheEntry {
+        final ColumnCache cache;
+        final BlockColors.Palette palette;
+        ColumnCacheEntry(ColumnCache cache, BlockColors.Palette palette) {
+            this.cache = cache;
+            this.palette = palette;
+        }
+    }
+
+    /** 当前这张图是怎么拼出来的：同样的 region/偏移就能在内存里重拼一次。 */
+    private static final class ViewRecipe {
+        final String[] paths;
+        final int[] regionX, regionZ;
+        final int minRegionX, minRegionZ, totalWidth, totalHeight;
+        final MapRenderer.SurfaceMode mode;
+        final PreviewOptions preview;
+        final int sampleInterval;
+        final BlockColors.Palette palette;
+
+        ViewRecipe(java.util.List<String> paths, java.util.List<int[]> coords, int minRegionX, int minRegionZ,
+                   int totalWidth, int totalHeight, MapRenderer.SurfaceMode mode, BlockColors.Palette palette,PreviewOptions preview,int sampleInterval) {
+            this.sampleInterval=sampleInterval;
+            this.preview=preview;
+            this.paths = paths.toArray(new String[0]);
+            this.regionX = new int[coords.size()];
+            this.regionZ = new int[coords.size()];
+            for (int i = 0; i < coords.size(); i++) { this.regionX[i] = coords.get(i)[0]; this.regionZ[i] = coords.get(i)[1]; }
+            this.minRegionX = minRegionX;
+            this.minRegionZ = minRegionZ;
+            this.totalWidth = totalWidth;
+            this.totalHeight = totalHeight;
+            this.mode = mode;
+            this.palette = palette;
+        }
+    }
+
+    private static java.util.List<int[]> coordsOf(java.util.List<String> paths, Map<String, int[]> coords) {
+        java.util.List<int[]> ordered = new ArrayList<>();
+        for (String path : paths) {
+            int[] coord = coords.get(path);
+            if (coord != null) ordered.add(coord);
+        }
+        return ordered;
+    }
+
+    /**
+     * 用层缓存在内存里重合成当前视图（换 Y 带时走这里）。
+     * 返回 true 表示已接管这次变化，不需要再全量重扫。
+     */
+    private boolean resurfaceFromCache(boolean allowBuild) {
+        final ViewRecipe recipe = lastView;
+        if (recipe != null && recipe.sampleInterval > 1) {
+            noteLiveDecline("coarse preview sampling - re-render on band change");
+            return false;
+        }
+        if (recipe == null) {
+            noteLiveDecline("no view recipe yet");
+            return false;
+        }
+        final BlockColors.Palette current = BlockColors.snapshot();
+        final ColumnCache[] caches = new ColumnCache[recipe.paths.length];
+        boolean missing = false, stale = false;
+        synchronized (columnCaches) {
+            for (int i = 0; i < recipe.paths.length; i++) {
+                ColumnCacheEntry entry = columnCaches.get(recipe.paths[i]);
+                if (entry == null) { missing = true; continue; }
+                // 颜色资源换过就不能用了（缓存里的颜色是旧调色板烘的），重建
+                if (entry.palette != current || !entry.cache.getPreviewOptions().cacheKey().equals(preview.cacheKey())) { stale = true; continue; }
+                caches[i] = entry.cache;
+            }
+        }
+        if (missing || stale) {
+            if (allowBuild) ensureColumnCaches(recipe, stale);
+            noteLiveDecline(stale ? "cache stale (palette changed), rebuilding" : "cache not ready yet");
+            return false;
+        }
+        noteLiveActive();
+
+        final int top = heightRangeSlider.getUpperValue(), bottom = heightRangeSlider.getLowerValue();
+        final Integer highlight = highlightBandTop();
+        final long generation = ++liveGeneration;
+        final long requestView = viewGeneration;
+        final MapRenderer.SurfaceMode mode = surfaceMode;
+        // 拖动时事件很密：只保留一个在算的任务，期间来的请求合并成"算完再补一次"
+        if (!liveRunning.compareAndSet(false, true)) {
+            livePending = true;
+            return true;
+        }
+        backgroundExecutor.submit(() -> {
+            try {
+                long started = System.currentTimeMillis();
+                RenderedMap combined = composeFromCaches(recipe, caches, top, bottom, highlight);
+                long millis = System.currentTimeMillis() - started;
+                SwingUtilities.invokeLater(() -> {
+                    if (generation != liveGeneration || mode != surfaceMode || requestView != viewGeneration || recipe != lastView) return;
+                    mapImage = combined;
+                    sourceTop = top;
+                    sourceBottom = bottom;
+                    previewCut = false;
+                    displayedTop = top;
+                    displayedBottom = bottom;
+                    displayApproximate = false;
+                    mapCanvas.setImage(combined);
+                    updateSelectionStats();
+                    recordBandFrame(millis, caches.length);
+                    progressLabel.setText(String.format("Y band %d..%d (from column cache)", bottom, top));
+                });
+            } catch (Exception error) {
+                logManager.error("Live resurface failed: " + error.getMessage(), "MinecraftMapGUI", error);
+            } finally {
+                liveRunning.set(false);
+                if (livePending) {
+                    livePending = false;
+                    SwingUtilities.invokeLater(() -> resurfaceFromCache(false));
+                }
+            }
+        });
+        return true;
+    }
+
+    /**
+     * 按 recipe 的 region 与偏移，把缓存里的层栈重新合成大图。
+     *
+     * <p>逐块 {@code toImage()} 是纯 CPU 合成，块与块之间完全独立，所以在
+     * renderingExecutor 上并行做；旧实现串行循环，块多时就是"一块一块顺序出图"。
+     * 拼贴和 copyHeightsFrom 仍在调用线程做，保证 combined 只在单线程被写。
+     */
+    private RenderedMap composeFromCaches(ViewRecipe recipe, ColumnCache[] caches, int top, int bottom, Integer highlight) {
+        RenderedMap combined = new RenderedMap(recipe.totalWidth, recipe.totalHeight);
+        // 并行合成各块（保留 null 占位以便按下标取回）
+        java.util.List<java.util.concurrent.Future<BufferedImage>> futures = new java.util.ArrayList<>(caches.length);
+        for (ColumnCache cache : caches) {
+            if (cache == null) { futures.add(null); continue; }
+            futures.add(renderingExecutor.submit(() -> cache.toImage(top, bottom, highlight)));
+        }
+        Graphics2D g2d = combined.createGraphics();
+        try {
+            g2d.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+            g2d.setColor(new Color(32, 32, 32));
+            g2d.fillRect(0, 0, recipe.totalWidth, recipe.totalHeight);
+            for (int i = 0; i < caches.length; i++) {
+                if (futures.get(i) == null) continue;
+                BufferedImage image;
+                try {
+                    image = futures.get(i).get();
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    for (java.util.concurrent.Future<BufferedImage> pending : futures)
+                        if (pending != null) pending.cancel(true);
+                    return combined;
+                } catch (java.util.concurrent.ExecutionException failed) {
+                    logManager.error("Band compose failed for one region: " + failed.getCause(), "MinecraftMapGUI");
+                    continue;
+                }
+                if (image == null) continue;
+                int offsetX = (recipe.regionX[i] - recipe.minRegionX) * 512;
+                int offsetY = (recipe.regionZ[i] - recipe.minRegionZ) * 512;
+                g2d.drawImage(image, offsetX, offsetY, null);
+                combined.copyHeightsFrom(image, offsetX, offsetY);
+                combined.copyHighlightsFrom(image, offsetX, offsetY);
+            }
+        } finally {
+            g2d.dispose();
+        }
+        return combined;
+    }
+
+    /**
+     * 把当前视图用到的 region 扫一遍层缓存（等于一次整列扫描）。渲染一结束就在后台预热，
+     * 这样用户开始拖 Y 带时缓存已经在手上，拖动才是真的实时。
+     *
+     * <p>force=true 用于调色板换过之后重建；洞穴视图这类扫不出缓存的 region 会记住失败，
+     * 不会在每次拖动时反复重扫。
+     */
+    private void ensureColumnCaches(final ViewRecipe recipe, boolean force) {
+        if(recipe.sampleInterval>1) return;
+        synchronized (cacheBuildLock) {
+            if (cacheBuildInFlight && cacheBuildRecipe == recipe && !force) return;
+            if (!force && cacheBuildFailed == recipe) return;
+            cacheBuildRecipe = recipe;
+            cacheBuildInFlight = true;
+            cacheBuildGeneration++;
+        }
+        final long generation = cacheBuildGeneration;
+        SwingUtilities.invokeLater(() -> progressLabel.setText("Building Y-band cache..."));
+        ybandState("building cache (" + recipe.paths.length + " regions)");
+        ybandLog("Y-band cache: building " + recipe.paths.length + " region(s), limit " + COLUMN_CACHE_LIMIT + ", heap " + (Runtime.getRuntime().maxMemory() >> 20) + "MB");
+        backgroundExecutor.submit(() -> {
+            long start = System.currentTimeMillis();
+            try {
+                for (String path : recipe.paths) {
+                    if (generation != cacheBuildGeneration) return;   // 视图换了，放弃
+                    final BlockColors.Palette buildPalette = BlockColors.snapshot();
+                    synchronized (columnCaches) {
+                        ColumnCacheEntry cached = columnCaches.get(path);
+                        if (cached != null && cached.palette == buildPalette && cached.cache.getPreviewOptions().cacheKey().equals(recipe.preview.cacheKey())) continue;
+                    }
+                    MapRenderer renderer = new MapRenderer(
+                        Math.min(Runtime.getRuntime().availableProcessors(), 4), null, recipe.mode,
+                        null, null, buildPalette,recipe.preview);
+                    ColumnCache cache;
+                    try {
+                        cache = renderer.scanRegion(path, 32);
+                    } finally {
+                        renderer.shutdown();
+                    }
+                    if (cache == null) {
+                        // 洞穴视图：判定依赖扫描窗口，不缓存
+                        synchronized (cacheBuildLock) {
+                            if (generation == cacheBuildGeneration) cacheBuildFailed = recipe;
+                        }
+                        ybandState("unavailable (cave view)");
+                        logManager.info("Y-band cache: skipped (cave mode) " + path, "MinecraftMapGUI");
+                        SwingUtilities.invokeLater(() -> progressLabel.setText("Y-band live unavailable (cave view)"));
+                        return;
+                    }
+                    SwingUtilities.invokeLater(() -> {
+                        synchronized (columnCaches) {
+                            columnCaches.put(path, new ColumnCacheEntry(cache, buildPalette));
+                        }
+                    });
+                }
+                long millis = System.currentTimeMillis() - start;
+                logManager.info("Y-band cache: ready in " + millis + " ms", "MinecraftMapGUI");
+                SwingUtilities.invokeLater(() -> {
+                    ybandState("ready - drag the handles");
+                    progressLabel.setText(String.format("Y-band cache ready in %.1fs - drag the handles", millis / 1000.0));
+                    // 之前用临时裁剪顶着的、或松手时还没出精确图的，在这里补一次精确结果
+                    if ((pendingExactRefresh || displayApproximate) && lastView == recipe) {
+                        pendingExactRefresh = false;
+                        if (!resurfaceFromCache(false) && heightDebounce != null) heightDebounce.restart();
+                    }
+                });
+            } catch (Exception error) {
+                logManager.error("Y-band cache build failed: " + error.getMessage(), "MinecraftMapGUI", error);
+                ybandState("cache build failed");
+                SwingUtilities.invokeLater(() -> progressLabel.setText("Y-band cache failed"));
+            } finally {
+                synchronized (cacheBuildLock) {
+                    if (generation == cacheBuildGeneration) cacheBuildInFlight = false;
+                }
+            }
+        });
+    }
+
+    /**
+     * 平移自动加载出来的合成图：拿 DynamicMapManager 的已加载区域与稳定原点组一个配方，
+     * 让实时 Y 带重合成在这条路径上也能接管（几何与它拼图时一致：(x-minX)*512）。
+     */
+    private void adoptAutoLoadedView(BufferedImage combinedImage, Point worldOrigin, int top, int bottom) {
+        if (dynamicMapManager == null || combinedImage == null || worldOrigin == null) {
+            lastView = null;
+            return;
+        }
+        java.util.Set<Point> loaded = dynamicMapManager.getLoadedRegionCoords();
+        if (loaded.isEmpty()) {
+            lastView = null;
+            return;
+        }
+        File dir = getCurrentRegionDir();
+        java.util.List<String> paths = new ArrayList<>();
+        java.util.List<int[]> coords = new ArrayList<>();
+        for (Point region : loaded) {
+            paths.add(new File(dir, String.format("r.%d.%d.mca", region.x, region.y)).getAbsolutePath());
+            coords.add(new int[]{region.x, region.y});
+        }
+        ViewRecipe recipe = new ViewRecipe(paths, coords, worldOrigin.x / 512, worldOrigin.y / 512,
+            combinedImage.getWidth(), combinedImage.getHeight(), surfaceMode, BlockColors.snapshot(),preview,getLodLevel());
+        lastView = recipe;
+        mapImage = combinedImage;
+        sourceTop = top;
+        sourceBottom = bottom;
+        previewCut = false;
+        displayedTop = top;
+        displayedBottom = bottom;
+        displayApproximate = false;
+        ensureColumnCaches(recipe, false);
+    }
+
+    /** 渲染那一次顺手拿到的层缓存直接入库：用户第一次拖 Y 带就已经是实时的。 */
+    private void stashColumnCache(String path, ColumnCache cache, BlockColors.Palette palette) {
+        synchronized (columnCaches) {
+            columnCaches.put(path, new ColumnCacheEntry(cache, palette));
+        }
+    }
+
+    /**
+     * 动态视口模式换 Y 带：让已加载的瓦片用层缓存内存重合成（不重建管理器、不重载全部瓦片）。
+     * 拖动时事件很密，所以同时只跑一次，期间来的请求合并成"跑完再补一次"。
+     */
+    private void dynamicBandUpdate() {
+        final DynamicRegionManager manager = dynamicRegionManager;
+        if (!isDynamicMode || manager == null) return;
+        if (!dynamicBandRunning.compareAndSet(false, true)) {
+            dynamicBandPending = true;
+            return;
+        }
+        final int top = heightRangeSlider.getUpperValue(), bottom = heightRangeSlider.getLowerValue();
+        ybandState(String.format("dynamic band %d..%d", bottom, top));
+        backgroundExecutor.submit(() -> {
+            try {
+                manager.setBand(top, bottom, highlightBandTop());
+            } catch (Exception error) {
+                logManager.error("Dynamic band update failed: " + error.getMessage(), "MinecraftMapGUI", error);
+            } finally {
+                dynamicBandRunning.set(false);
+                if (dynamicBandPending) {
+                    dynamicBandPending = false;
+                    SwingUtilities.invokeLater(this::dynamicBandUpdate);
+                }
+            }
+        });
+    }
+
+    // ── Y 带性能记账：每帧都记，慢帧当场写日志，松手时汇总一行 ──
+    private static final long SLOW_FRAME_MILLIS = 200;
+    private final java.util.concurrent.atomic.AtomicInteger bandFrames = new java.util.concurrent.atomic.AtomicInteger();
+    private final java.util.concurrent.atomic.AtomicLong bandFrameTotal = new java.util.concurrent.atomic.AtomicLong();
+    private final java.util.concurrent.atomic.AtomicLong bandFrameWorst = new java.util.concurrent.atomic.AtomicLong();
+
+    /**
+     * Y 带相关日志：既进日志窗口，也追加到 %TEMP%\crafter-yband.log，
+     * 这样用户直接把文件发过来就能看性能/分支走向。
+     */
+    private void ybandLog(String message) {
+        logManager.info(message, "MinecraftMapGUI");
+        com.minecraft.selector.core.YbandLog.write(message);
+    }
+
+    /** 在 EDT 上调用：记一帧静态重合成的耗时。 */
+    private void recordBandFrame(long millis, int regions) {
+        bandFrames.incrementAndGet();
+        bandFrameTotal.addAndGet(millis);
+        bandFrameWorst.accumulateAndGet(millis, Math::max);
+        if (ybandLabel != null) ybandLabel.setText(String.format("Y-band: live %d ms (%d region)", millis, regions));
+        if (millis >= SLOW_FRAME_MILLIS) {
+            ybandLog(String.format("Y 带慢帧: 静态重合成 %d ms, %d 个 region", millis, regions));
+        }
+    }
+
+    /** 松手时在 EDT 上汇总一次（静态 + 动态两条路）。 */
+    private void logBandSummary() {
+        int frames = bandFrames.getAndSet(0);
+        if (frames > 0) {
+            ybandLog(String.format("Y 带性能(静态): %d 帧, 平均 %d ms, 最大 %d ms",
+                frames, bandFrameTotal.getAndSet(0) / frames, bandFrameWorst.getAndSet(0)));
+        }
+        DynamicRegionManager manager = dynamicRegionManager;
+        if (manager != null) {
+            String stats = manager.takeBandStats();
+            if (stats != null) ybandLog("Y 带性能(动态视口): " + stats);
+        }
+    }
+
+    private javax.swing.JCheckBox highlightCheckbox;
+
+    /** 兴趣带上沿：开关关掉、或没高过上界时返回 null（= 不高亮）。 */
+    private Integer highlightBandTop() {
+        if (highlightCheckbox == null || !highlightCheckbox.isSelected()) return null;
+        int highlight = heightRangeSlider.getHighlightValue();
+        int top = heightRangeSlider.getUpperValue();
+        return highlight > top ? highlight : null;
+    }
+
+    /** 地图渲染的 loading 延迟阈值：短于它就完全不显示遮罩 */
+    private static final int LOADING_INDICATOR_DELAY_MS = 400;
+    private javax.swing.Timer pendingLoadingTimer;
+
+    /** 右下角常驻状态：实时 Y 带走的是哪条路，一眼可见。 */
+    private void ybandState(String state) {
+        if (ybandLabel == null) return;
+        if (SwingUtilities.isEventDispatchThread()) ybandLabel.setText("Y-band: " + state);
+        else SwingUtilities.invokeLater(() -> ybandLabel.setText("Y-band: " + state));
+    }
+
+    /** 实时路径被拒的原因（去重后写日志，避免拖动时刷屏）。 */
+    private void noteLiveDecline(String reason) {
+        liveActive = false;
+        if (reason.equals(liveNote)) return;
+        liveNote = reason;
+        ybandState("waiting - " + reason);
+        ybandLog("Y-band live: " + reason);
+    }
+
+    private void noteLiveActive() {
+        ybandState("live (memory resurface)");
+        if (liveActive) return;
+        liveActive = true;
+        liveNote = "active";
+        ybandLog("Y-band live: active (memory resurface)");
+    }
+
+    /**
+     * 缓存还没就绪时的兜底：拿"上一次精确出图"当底，按当前下界做一次**临时**剔除
+     * （高度 &lt; 下界的列在副本上抹透明，底图 mapImage 保持不动，所以拖回去还能还原）。
+     * 只处理上界不变的情形；上界一动必须靠层缓存。返回 true 表示显示图已对应当前这条带。
+     */
+    private boolean previewFromSource() {
+        if(lastView!=null && lastView.sampleInterval>1) return false;
+        RenderedMap source = mapImage instanceof RenderedMap ? (RenderedMap) mapImage : null;
+        if (source == null || sourceTop == null || sourceBottom == null) return false;
+        final int top = heightRangeSlider.getUpperValue(), bottom = heightRangeSlider.getLowerValue();
+        if (sourceTop.intValue() != top) return false;          // 上界变了：高度图不够，得靠层缓存
+        if (bottom <= sourceBottom.intValue()) {
+            // 下界没有比底图那条带更高：底图本身就是最好结果（更低的部分本来就没画过）
+            if (previewCut) {
+                previewCut = false;
+                displayApproximate = false;
+                displayedTop = sourceTop;
+                displayedBottom = sourceBottom;
+                mapCanvas.setImage(source);
+            }
+            return bottom == sourceBottom.intValue();
+        }
+        int width = source.getWidth(), height = source.getHeight();
+        RenderedMap cut = new RenderedMap(width, height);
+        cut.copyHeightsFrom(source, 0, 0);
+        cut.copyHighlightsFrom(source, 0, 0);
+        int[] pixels = source.getRGB(0, 0, width, height, null, 0, width);
+        for (int z = 0; z < height; z++) {
+            for (int x = 0; x < width; x++) {
+                int columnHeight = source.getHeightAt(x, z);
+                if (columnHeight != RenderedMap.NO_HEIGHT && columnHeight < bottom) {
+                    pixels[z * width + x] = 0;
+                    cut.putHeightAt(x, z, RenderedMap.NO_HEIGHT);
+                }
+            }
+        }
+        cut.setRGB(0, 0, width, height, pixels, 0, width);
+        previewCut = true;
+        displayApproximate = true;
+        displayedTop = top;
+        displayedBottom = bottom;
+        mapCanvas.setImage(cut);
+        updateSelectionStats();
+        ybandState("temporary cut (waiting for cache)");
+        progressLabel.setText(String.format("Y band %d..%d (temporary cut)", bottom, top));
+        return true;
+    }
+
+    /**
+     * 该视图的层缓存正在建时，让"松手"先别全量重渲，等缓存建好自动补精确结果。
+     * 没在建就别干等（2~8 秒什么都不动更难受），让调用方走原来的防抖全量渲染。
+     */
+    private boolean requestExactWhenReady() {
+        ViewRecipe recipe = lastView;
+        if (recipe == null || recipe.sampleInterval>1) return false;
+        synchronized (cacheBuildLock) {
+            if (cacheBuildFailed == recipe) return false;                 // 这个视图没有缓存可用（如洞穴视图）
+            if (!cacheBuildInFlight || cacheBuildRecipe != recipe) return false;
+        }
+        pendingExactRefresh = true;
+        progressLabel.setText("Y band applied (temporary); exact result when the cache is ready");
+        return true;
+    }
     
     // 日志相关
     private LogWindow logWindow;
@@ -143,6 +737,7 @@ public class MinecraftMapGUI extends JFrame {
         // 设置Blender模式
         this.outputFilePath = outputFile;
         this.jarFilePath = jarPath;
+        if(jarPath!=null && colorResources.jars.isEmpty()) colorResources.jars.add(jarPath);
         this.isBlenderMode = (outputFile != null);
         this.blenderMinY = minY;
         this.blenderMaxY = maxY;
@@ -151,32 +746,26 @@ public class MinecraftMapGUI extends JFrame {
         initializeThreadPools();
 
         initializeGUI();
+        if(isBlenderMode) showLoadingState("Parsing world and discovering resources...");
 
         // 尝试加载已保存的颜色文件
         // World loading initializes its own colors before rendering. Avoid a
         // competing startup extraction (and unscoped colors from another world).
-        if (!isBlenderMode || worldPath == null) {
+        if (worldPath == null) {
             loadSavedColors();
         }
 
         // 如果是Blender模式，显示模式信息
-        if (isBlenderMode) {
+        if (worldPath != null || isBlenderMode) {
             SwingUtilities.invokeLater(() -> {
-                progressLabel.setText("Blender integration mode started");
+                progressLabel.setText(isBlenderMode?"Blender integration mode started":"Opening world preview…");
 
-                // 设置Blender模式的高度范围
-                if (heightRangeSlider != null) {
-                    heightRangeSlider.setLowerValue(blenderMinY);
-                    heightRangeSlider.setUpperValue(blenderMaxY);
-                    minYEntry.setText(String.valueOf(blenderMinY));
-                    maxYEntry.setText(String.valueOf(blenderMaxY));
-                }
-
+                // 高度轴的初值已在 createComponents 里按 blenderMinY/MaxY 构造，这里不再单独设置
                 if (worldPath != null) {
                     if (new File(worldPath).exists()) {
                         loadWorldFromPath(worldPath);
                     } else {
-                        progressLabel.setText("Blender mode: world path does not exist - " + worldPath);
+                        showErrorState("World path does not exist - " + worldPath);
                         System.err.println("Blender mode: world path does not exist: " + worldPath);
                     }
                 }
@@ -188,31 +777,9 @@ public class MinecraftMapGUI extends JFrame {
      * 加载已保存的颜色文件
      */
     private void loadSavedColors() {
-        // 如果提供了JAR路径，优先从JAR文件提取颜色
-        if (jarFilePath != null && new File(jarFilePath).exists()) {
-            System.out.println("Extracting colors from provided JAR path: " + jarFilePath);
-            extractColorsFromJar(jarFilePath);
-            return;
-        }
-
-        // 优先尝试加载JSON格式
-        String jsonColorFile = new File(programDir, "block_colors.json").getAbsolutePath();
-        if (new File(jsonColorFile).exists()) {
-            if (resourceExtractor.loadExtractedColorsFromJson(jsonColorFile)) {
-                BlockColors.setResourceExtractor(resourceExtractor);
-                System.out.println("Loaded saved block colors (JSON)");
-                return;
-            }
-        }
-
-        // 如果JSON不存在，尝试加载Properties格式
-        String propsColorFile = new File(programDir, "extracted_colors.properties").getAbsolutePath();
-        if (new File(propsColorFile).exists()) {
-            if (resourceExtractor.loadExtractedColors(propsColorFile)) {
-                BlockColors.setResourceExtractor(resourceExtractor);
-                System.out.println("Loaded saved block colors (Properties)");
-            }
-        }
+        // Unscoped historical exports lack model coverage and resource fingerprints.
+        // Actual assets are initialized on the worker before world/MCA rendering.
+        BlockColors.setResourceExtractor(null);
     }
 
     /**
@@ -243,6 +810,7 @@ public class MinecraftMapGUI extends JFrame {
      * 清理线程池资源
      */
     private void shutdownThreadPools() {
+        if(heightDebounce!=null) heightDebounce.stop();
         // Window close runs on Swing EDT; waiting here can freeze it for 10s.
         if (renderingExecutor != null) renderingExecutor.shutdownNow();
         if (backgroundExecutor != null) backgroundExecutor.shutdownNow();
@@ -266,7 +834,7 @@ public class MinecraftMapGUI extends JFrame {
         addWindowListener(new java.awt.event.WindowAdapter() {
             @Override
             public void windowClosing(java.awt.event.WindowEvent e) {
-                shutdownThreadPools();
+                cancelP2Scan();if(hudTimer!=null)hudTimer.stop();shutdownThreadPools();
                 System.exit(0);
             }
         });
@@ -294,42 +862,64 @@ public class MinecraftMapGUI extends JFrame {
     
     private void createComponents() {
         // 控制面板组件 - 使用样式化标签
-        saveInfoLabel = StyledComponents.createInfoLabel("No save selected");
-        playerPosLabel = StyledComponents.createInfoLabel("Player position: unknown");
-        regionLabel = StyledComponents.createInfoLabel("Selection: none");
-        coordDisplayLabel = StyledComponents.createInfoLabel("X: 0, Z: 0");
-        fileInfoLabel = StyledComponents.createInfoLabel("");
+        saveInfoLabel = new JLabel("No save selected");
+        playerPosLabel = new JLabel("Player position: unknown");
+        regionLabel = new JLabel("Selection: none");
+        coordDisplayLabel = new JLabel("X: —  Y: —  Z: —");
+        fileInfoLabel = new JLabel("");
+        ybandLabel = new JLabel("Y-band: idle");
+        ybandLabel.setForeground(new Color(0x888888));
 
 
         // 输入框 - 使用样式化输入框
-        minYEntry = StyledComponents.createStyledTextField("-64", 6);
-        maxYEntry = StyledComponents.createStyledTextField("320", 6);
-        xCoordEntry = StyledComponents.createStyledTextField("", 8);
-        zCoordEntry = StyledComponents.createStyledTextField("", 8);
+        xCoordEntry = new JTextField("", 8);
+        zCoordEntry = new JTextField("", 8);
 
-        // 创建高度范围双滑块
-        heightRangeSlider = new StyledComponents.DualRangeSlider(-64, 365, -64, 365);
+        // 右侧竖向双滑块：上 thumb = 最高 Y、下 thumb = 最低 Y。
+        // 同一对值既决定回传 Blender 的导入范围，也决定预览的 Y 带。
+        int axisMin = Math.min(blenderMinY, -64) - 64;
+        int axisMax = Math.max(blenderMaxY, 320) + 64;
+        heightRangeSlider = new StyledComponents.VerticalRangeSlider(axisMin, axisMax, blenderMinY, blenderMaxY);
+        // 拖动中：动态视口模式换带 = 已加载瓦片就地重合成；静态画布走层缓存/临时裁剪
+        heightRangeSlider.addLiveListener(e -> {
+            updateSelectionStats();
+            if (isDynamicMode) { dynamicBandUpdate(); return; }
+            if (!resurfaceFromCache(true)) previewFromSource();
+        });        // 值落定：绝不轻易全量重渲 —— 缓存能接管就它管；临时裁剪已对应当前带就等缓存转精确；
+        // 缓存正在建也等它；只有在"这个视图没有缓存可用"时才回到防抖全量渲染
         heightRangeSlider.addChangeListener(e -> {
-            // 当滑块值改变时，同步更新文本框
-            minYEntry.setText(String.valueOf(heightRangeSlider.getLowerValue()));
-            maxYEntry.setText(String.valueOf(heightRangeSlider.getUpperValue()));
+            updateSelectionStats();
+            logBandSummary();   // 松手：把这一轮的帧耗时汇总一行
+            if (isDynamicMode) { dynamicBandUpdate(); return; }
+            if (resurfaceFromCache(false)) return;
+            if (previewFromSource()) {
+                if (displayApproximate) requestExactWhenReady();
+                return;
+            }
+            if (requestExactWhenReady()) return;
+            if (heightDebounce != null) heightDebounce.restart();
         });
 
         // 地图范围选择输入框已删除
         
         // LOD下拉菜单 - 使用样式化下拉框
         String[] lodOptions = {
-            "Auto (by file count)",
+            "Auto",
             "1 (full)",
             "2 (1/2)",
             "4 (1/4)",
             "8 (1/8)"
         };
-        lodDropdown = StyledComponents.createStyledComboBox(lodOptions);
-        lodDropdown.setSelectedIndex(0);
+        lodDropdown = new JComboBox<>(lodOptions);
+        // 默认全采样（DEFAULT_PREVIEW_QUALITY = "1 (full)"）：采样 >1 会禁用列缓存的
+        // "换带即时重合成"（resurfaceFromCache 在 sampleInterval > 1 时直接放弃），
+        // 拖 Y 滑块就得整区重扫（实测 0.05~2s）。想更快出图可手动选 Auto/2/4/8。
+        lodDropdown.setSelectedItem(DEFAULT_PREVIEW_QUALITY);
+        lodDropdown.setToolTipText("Preview sampling; >1 gives approximate pixels and hover heights and disables instant Y-band re-composition. Auto: dynamic maps use 2; static maps use 1 / 2 / 4 / 8 by rendered file count.");
+        lodDropdown.addActionListener(e -> resetSurfaceView());
 
         // MCA文件范围下拉框
-        mcaRangeDropdown = StyledComponents.createStyledComboBox(new String[]{"1x1 (1 file)", "3x3 (9 files)", "5x5 (25 files)", "7x7 (49 files)"});
+        mcaRangeDropdown = new JComboBox<>(new String[]{"1x1 (1 file)", "3x3 (9 files)", "5x5 (25 files)", "7x7 (49 files)"});
         mcaRangeDropdown.setSelectedItem("1x1 (1 file)");
 
         // Dimension selector is populated after a save is loaded.
@@ -341,7 +931,7 @@ public class MinecraftMapGUI extends JFrame {
         });
 
         // 自动加载复选框 - 使用样式化复选框
-        autoLoadCheckbox = StyledComponents.createStyledCheckBox("Enable auto-load", true);
+        autoLoadCheckbox = new JCheckBox("Enable auto-load", true);
 
         // 按钮 - 使用新的图标和样式
         // renderButton 已删除
@@ -352,56 +942,20 @@ public class MinecraftMapGUI extends JFrame {
         confirmSelectionButton.setEnabled(false);
         reRenderButton = createStyledButton("Re-render", IconManager.getRefreshIcon(IconManager.SMALL_ICON_SIZE));
         reRenderButton.setEnabled(false);
-        view3DButton = createStyledButton("3D View", null);
-        view3DButton.setEnabled(false);
         
         // 地图画布
         mapCanvas = new MapCanvas();
+        mapCanvas.setHoverListener(coordDisplayLabel::setText);
 
         // 初始化动态地图管理器
         dynamicMapManager = new DynamicMapManager();
 
         // 设置选择回调
         mapCanvas.setSelectionCallback(new MapCanvas.SelectionCallback() {
-            @Override
-            public void onSelectionComplete(int minX, int minZ, int maxX, int maxZ) {
-                // 选择完成时只更新UI显示，启用确认按钮
-                SwingUtilities.invokeLater(() -> {
-                    confirmSelectionButton.setEnabled(true);
-                    progressLabel.setText(String.format("Selected area: (%d,%d) to (%d,%d) - click Confirm",
-                        minX, minZ, maxX, maxZ));
-                });
-            }
-
-            @Override
-            public void onSelectionConfirmed(int minX, int minZ, int maxX, int maxZ) {
-                // 按Enter确认时返回坐标并更新输入框
-                SwingUtilities.invokeLater(() -> {
-                    int centerX = (minX + maxX) / 2;
-                    int centerZ = (minZ + maxZ) / 2;
-                    int sizeX = maxX - minX;
-                    int sizeZ = maxZ - minZ;
-                    int size = Math.max(sizeX, sizeZ);
-
-                    // 地图范围选择输入框已删除，不再更新输入框
-
-                    progressLabel.setText(String.format("Confirmed area: (%d,%d) to (%d,%d)",
-                        minX, minZ, maxX, maxZ));
-
-                    // 在控制台输出坐标
-                    System.out.printf("=== Confirmed Selection ===\n");
-                    System.out.printf("Top-left corner: (%d, %d)\n", minX, minZ);
-                    System.out.printf("Bottom-right corner: (%d, %d)\n", maxX, maxZ);
-                    System.out.printf("Center: (%d, %d)\n", centerX, centerZ);
-                    System.out.printf("Area size: %dx%d\n", sizeX, sizeZ);
-
-                    // 如果是Blender模式，输出坐标到文件并关闭程序
-                    if (isBlenderMode && outputFilePath != null) {
-                        outputCoordinatesToFile(minX, minZ, maxX, maxZ);
-                    }
-                });
-            }
+            @Override public void onSelectionComplete(int minX,int minZ,int maxX,int maxZ) {updateSelectionStats();}
+            @Override public void onSelectionConfirmed(int minX,int minZ,int maxX,int maxZ) {handleSelectionConfirmation(new SelectionMath.Bounds(minX,minZ,maxX,maxZ));}
         });
+        configureCanvas(mapCanvas);
 
         // 设置视野管理回调
         mapCanvas.setViewportCallback(new MapCanvas.ViewportCallback() {
@@ -428,8 +982,10 @@ public class MinecraftMapGUI extends JFrame {
         });
         
         // 进度条 - 使用样式化进度条
-        progressBar = StyledComponents.createStyledProgressBar();
-        progressLabel = StyledComponents.createInfoLabel("Ready");
+        loadingPanel = new LoadingPhasePanel();
+        progressBar = loadingPanel.getMapProgress();
+        progressLabel = new JLabel("Ready");
+        progressBar.setStringPainted(true);
 
         // 状态指示器
         statusIndicator = new LoadingAnimationPanel.StatusIndicator();
@@ -440,40 +996,7 @@ public class MinecraftMapGUI extends JFrame {
      * 创建样式化按钮
      */
     private JButton createStyledButton(String text, Icon icon) {
-        JButton button = new JButton(text, icon);
-
-        // 设置按钮样式 - 更紧凑的设计
-        button.setFocusPainted(false);
-        button.setFont(button.getFont().deriveFont(Font.BOLD, 11f));  // 稍微减小字体
-        button.setIconTextGap(6);  // 减少图标和文字间距
-        button.setMargin(new Insets(4, 8, 4, 8));  // 减少按钮内边距
-
-        // 设置按钮颜色
-        button.setBackground(UIThemeManager.ThemeColors.PRIMARY_BLUE);
-        button.setForeground(Color.WHITE);
-
-        // 设置按钮的最大尺寸，防止超出面板边界
-        button.setMaximumSize(new Dimension(280, 32));  // 限制宽度和高度
-        button.setPreferredSize(new Dimension(280, 32));
-
-        // 添加悬停效果
-        button.addMouseListener(new MouseAdapter() {
-            @Override
-            public void mouseEntered(MouseEvent e) {
-                if (button.isEnabled()) {
-                    button.setBackground(UIThemeManager.ThemeColors.PRIMARY_BLUE.brighter());
-                }
-            }
-
-            @Override
-            public void mouseExited(MouseEvent e) {
-                if (button.isEnabled()) {
-                    button.setBackground(UIThemeManager.ThemeColors.PRIMARY_BLUE);
-                }
-            }
-        });
-
-        return button;
+        return new JButton(text);
     }
 
     /**
@@ -511,85 +1034,208 @@ public class MinecraftMapGUI extends JFrame {
     /**
      * 显示加载状态
      */
-    private void showLoadingState(String message) {
-        SwingUtilities.invokeLater(() -> {
+    private static void onEdt(Runnable action) {
+        if(SwingUtilities.isEventDispatchThread()) action.run();else SwingUtilities.invokeLater(action);
+    }
+    private void showLoadingState(String message) {showLoadingState(viewGeneration,message);}
+    private void showLoadingState(long request,String message) {
+        onEdt(() -> {
+            if(request!=viewGeneration) return;
             statusIndicator.setStatus(LoadingAnimationPanel.StatusIndicator.StatusType.WORKING);
-            progressLabel.setText(message);
+            loadingPanel.beginPreparation(request,message);loadingPanel.appendLog("Preparation: "+message);progressLabel.setText(message);
+            logManager.info(message,"MinecraftMapGUI");
+        });
+    }
+    private MinecraftResourceExtractor.ProgressListener resourceProgress(long request) {
+        return (completed,total,message) -> onEdt(() -> {
+            if(request==viewGeneration) {
+                loadingPanel.preparationProgress(request,completed,total,message);
+                loadingPanel.appendLog("Resources: "+message);
+            }
+        });
+    }
+    private void showMapLoading(long request,String message) {
+        onEdt(() -> {
+            if(request!=viewGeneration) return;
+            statusIndicator.setStatus(LoadingAnimationPanel.StatusIndicator.StatusType.WORKING);
+            loadingPanel.beginMap(request,message);progressLabel.setText(message);
         });
     }
 
     /**
-     * 隐藏加载状态
+     * 延迟版：只有超过 {@link #LOADING_INDICATOR_DELAY_MS} 还没做完才真的显示 loading。
+     * 拖动 Y 带时偶尔落回全量渲染，这种短活不该闪一下遮罩（很短就结束的直接不显示）。
      */
+    private void showMapLoadingDelayed(long request,String message) {
+        onEdt(() -> {
+            if(request!=viewGeneration) return;
+            cancelPendingLoading();
+            pendingLoadingTimer = new javax.swing.Timer(LOADING_INDICATOR_DELAY_MS, e -> {
+                pendingLoadingTimer = null;
+                showMapLoading(request, message);
+            });
+            pendingLoadingTimer.setRepeats(false);
+            pendingLoadingTimer.start();
+        });
+    }
+
+    private void cancelPendingLoading() {
+        if (pendingLoadingTimer != null) {
+            pendingLoadingTimer.stop();
+            pendingLoadingTimer = null;
+        }
+    }
+
     private void hideLoadingState() {
-        SwingUtilities.invokeLater(() -> {
+        final long request=viewGeneration;
+        onEdt(() -> {
+            cancelPendingLoading();
+            if(request!=viewGeneration) return;
+            applyPendingPreset();
+            loadingPanel.finish(request);
             statusIndicator.setStatus(LoadingAnimationPanel.StatusIndicator.StatusType.IDLE);
         });
     }
-
-    /**
-     * 显示成功状态
-     */
     private void showSuccessState(String message) {
-        SwingUtilities.invokeLater(() -> {
+        final long request=viewGeneration;
+        onEdt(() -> {
+            cancelPendingLoading();
+            if(request!=viewGeneration) return;
+            loadingPanel.finish(request);
             statusIndicator.setStatus(LoadingAnimationPanel.StatusIndicator.StatusType.SUCCESS);
             progressLabel.setText(message);
         });
     }
-
-    /**
-     * 显示错误状态
-     */
     private void showErrorState(String message) {
-        SwingUtilities.invokeLater(() -> {
+        final long request=viewGeneration;
+        onEdt(() -> {
+            cancelPendingLoading();
+            if(request!=viewGeneration) return;
+            loadingPanel.finish(request);
             statusIndicator.setStatus(LoadingAnimationPanel.StatusIndicator.StatusType.ERROR);
-            progressLabel.setText(message);
+            progressLabel.setText(message);logManager.error(message,"MinecraftMapGUI");
         });
     }
-    
+    private DynamicRegionManager createDynamicRegionManager() {
+        final long request=viewGeneration;
+        final DynamicRegionManager manager=new DynamicRegionManager(savePath,getCurrentRegionDir(),surfaceMode,
+            heightRangeSlider.getUpperValue(),heightRangeSlider.getLowerValue(),preview,getLodLevel());
+        showMapLoadingDelayed(request,"Loading visible map regions...");
+        manager.addRegionLoadListener(new DynamicRegionManager.RegionLoadListener() {
+            public void onRegionLoaded(Point point,DynamicRegionManager.RegionTile tile) {onEdt(()->{if(request==viewGeneration&&manager==dynamicRegionManager) updateSelectionStats();});}
+            public void onRegionUnloaded(Point point) {}
+            public void onLoadingStarted(Point point) {}
+            public void onLoadingFailed(Point point,Exception error) {
+                if(UserFeedback.isBenignCancel(error)) return;
+                onEdt(() -> {
+                    if(request!=viewGeneration || dynamicRegionManager!=manager) return;
+                    String msg="Region load failed: r."+point.x+"."+point.y+".mca — "+(error.getMessage()!=null?error.getMessage():error.getClass().getSimpleName());
+                    logManager.warn(msg,"MinecraftMapGUI");
+                    // Status bar: keep short; viewport progress also shows failed count.
+                    progressLabel.setText(msg);
+                });
+            }
+            public void onViewportProgress(long revision,int settled,int total,int failed) {
+                onEdt(() -> {
+                    if(request!=viewGeneration || dynamicRegionManager!=manager || revision!=manager.getProgressRevision()) return;
+                    if(settled>=total) {
+                        // 必须先取消"延迟显示"定时器：瓦片可能在 LOADING_INDICATOR_DELAY_MS 之内就加载完，
+                        // 那时 finish() 只是把还没显示的panel收掉，但定时器还挂着 —— 它随后会 beginMap()
+                        // 把进度条设成 indeterminate 并显示出来，而之后再没有任何进度事件来收尾，
+                        // 于是条子就一直动。hideLoadingState/showSuccessState/showErrorState 都做了这一步。
+                        cancelPendingLoading();
+                        loadingPanel.finish(request);
+                        applyPendingPreset();
+                        if(revision!=manager.getProgressRevision()) return;
+                        statusIndicator.setStatus(failed==0?LoadingAnimationPanel.StatusIndicator.StatusType.IDLE:LoadingAnimationPanel.StatusIndicator.StatusType.ERROR);
+                        progressLabel.setText(total==0?"No map regions in this viewport":
+                            "Map regions loaded: "+settled+"/"+total+(failed==0?"":" (failed: "+failed+")"));
+                    } else {
+                        if(loadingPanel.getPhase()!=LoadingPhasePanel.Phase.MAP_LOADING) showMapLoadingDelayed(request,"Loading visible map regions...");
+                        loadingPanel.mapProgress(request,settled,total,"Map regions: "+settled+"/"+total+(failed==0?"":" (failed: "+failed+")"));
+                    }
+                });
+            }
+        });
+        return manager;
+    }
+    private void openPreparedWorld() {
+        renderAroundPlayerButton.setEnabled(true);reRenderButton.setEnabled(true);
+        // No preliminary static render; the dynamic viewport is the first and only startup render.
+        autoLoadCheckbox.setSelected(true);mapCanvas.enableAutoViewportManagement(false);
+        if(isDynamicMode && dynamicMapCanvas!=null) {
+            dynamicRegionManager=createDynamicRegionManager();
+            dynamicMapCanvas.setRegionManager(dynamicRegionManager,false);
+            SwingUtilities.invokeLater(() -> dynamicMapCanvas.showInitialViewport(playerPos));
+        } else enableDynamicMode();
+    }
+
     private void layoutComponents() {
         setLayout(new BorderLayout());
 
         // 菜单栏 (Windows 原生风格)
         setJMenuBar(createMenuBar());
+        getRootPane().setTransferHandler(fileDropHandler);((JComponent)getContentPane()).setTransferHandler(fileDropHandler);
+        hudTimer=new javax.swing.Timer(1000,e->{if(overlays.hud){overlays.hudText=com.minecraft.selector.core.PerformanceMonitor.heapHud()+" · "+(isDynamicMode&&dynamicRegionManager!=null?dynamicRegionManager.hudMetrics():"static viewport; tile cache n/a");repaintCanvases();}});hudTimer.start();
 
         // 顶部交互工具栏 (滑块/输入框等)
         add(createToolbar(), BorderLayout.NORTH);
 
         // 右侧地图显示区域 - 使用现代化边框
         JPanel mapPanel = new JPanel(new BorderLayout());
-        mapPanel.setBorder(BorderFactory.createCompoundBorder(
-            BorderFactory.createTitledBorder(
-                BorderFactory.createLineBorder(UIThemeManager.ThemeColors.MINECRAFT_STONE, 2, true),
-                "Map Preview",
-                TitledBorder.CENTER,
-                TitledBorder.TOP,
-                new Font(Font.SANS_SERIF, Font.BOLD, 14),
-                UIThemeManager.ThemeColors.MINECRAFT_STONE
-            ),
-            BorderFactory.createEmptyBorder(5, 5, 5, 5)
-        ));
+        mapPanel.setBorder(BorderFactory.createTitledBorder("Map Preview"));
+        heightDebounce=new javax.swing.Timer(250,e -> resetSurfaceView());heightDebounce.setRepeats(false);
+
+        // Y 带滑块与 Import Y 共用同一个模型：回传值和预览裁剪都读它
+        JPanel importYPanel = new JPanel(new BorderLayout(2, 2));
+        importYPanel.setBorder(BorderFactory.createTitledBorder("Import Y"));
+        JLabel importYHint = new JLabel("<html><center>Drag the handles.<br>Preview = import band.</center></html>",
+                                        SwingConstants.CENTER);
+        importYHint.setFont(importYHint.getFont().deriveFont(Font.PLAIN, 10f));
+        highlightCheckbox = new javax.swing.JCheckBox("Highlight band", true);
+        highlightCheckbox.setToolTipText("Purple handle: anything between it and the top Y gets marked");
+        highlightCheckbox.addActionListener(e -> {
+            heightRangeSlider.highlightEnabled = highlightCheckbox.isSelected();
+            heightRangeSlider.repaint();
+            if (isDynamicMode) dynamicBandUpdate();
+            else if (!resurfaceFromCache(false)) heightDebounce.restart();
+        });
+        JPanel importYHead = new JPanel(new java.awt.GridLayout(0, 1, 2, 2));
+        importYHead.add(highlightCheckbox);
+        importYHead.add(importYHint);
+        importYPanel.add(importYHead, BorderLayout.NORTH);
+        importYPanel.add(heightRangeSlider, BorderLayout.CENTER);
+        mapPanel.add(importYPanel, BorderLayout.EAST);
+        importLodPanel=new ImportLodPanel(this::importLodChanged);
+        importLodPanel.showResolvedCenter(resolvedImportLod(null));
+        // Collapsible top bar (not left sidebar): same fold chrome as before, starts collapsed.
+        CollapsiblePanel lodPanel=new CollapsiblePanel("Import LOD",new Color(130,150,175),true);
+        lodPanel.addContent(importLodPanel);
+        mapPanel.add(lodPanel,BorderLayout.NORTH);
 
         JScrollPane mapScrollPane = new JScrollPane(mapCanvas);
         mapScrollPane.setMinimumSize(new Dimension(400, 300));
+        mapScrollPane.getViewport().setBackground(CheckerBackground.DARK);
         mapScrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
         mapScrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
 
         mapPanel.add(mapScrollPane, BorderLayout.CENTER);
         mapPanel.setMinimumSize(new Dimension(400, 300));
 
-        add(mapPanel, BorderLayout.CENTER);
+        add(new LoadingOverlayPane(mapPanel,loadingPanel), BorderLayout.CENTER);
 
         // 底部状态栏
         JPanel statusPanel = new JPanel(new BorderLayout());
         JPanel leftStatusPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
         leftStatusPanel.add(statusIndicator);
         leftStatusPanel.add(progressLabel);
+        leftStatusPanel.add(ybandLabel);
         statusPanel.add(leftStatusPanel, BorderLayout.WEST);
         statusPanel.add(coordDisplayLabel, BorderLayout.EAST);
+        selectionStatsLabel.setToolTipText("Inclusive bounds. Cost is volume capacity, not actual solid blocks. Alt+arrows expand; Ctrl+Alt+arrows shrink; Shift=16.");
+        statusPanel.add(selectionStatsLabel,BorderLayout.CENTER);
 
         JPanel bottomPanel = new JPanel(new BorderLayout());
-        bottomPanel.add(progressBar, BorderLayout.NORTH);
         bottomPanel.add(statusPanel, BorderLayout.SOUTH);
         add(bottomPanel, BorderLayout.SOUTH);
     }
@@ -604,6 +1250,19 @@ public class MinecraftMapGUI extends JFrame {
         addMenuItem(fileMenu, "Select Save", e -> selectSave(), null, "Select Minecraft Save Folder");
         addMenuItem(fileMenu, "Select MCA File", e -> selectMcaFile(), null, "Select an MCA region file manually");
         addMenuItem(fileMenu, "Select MC Client", e -> selectMinecraftJar(), null, "Select Minecraft client JAR file");
+        addMenuItem(fileMenu, "Select Mods Folder", e -> selectColorResources(true), null, "Load actual mod textures");
+        addMenuItem(fileMenu, "Select Resource Packs", e -> selectColorResources(false), null, "Select ZIP packs in override order");
+        recentMenu=new JMenu("Recent worlds");fileMenu.add(recentMenu);refreshRecentWorlds();
+        recentMenu.addMenuListener(new javax.swing.event.MenuListener() {
+            public void menuSelected(javax.swing.event.MenuEvent e) {refreshRecentWorlds();}
+            public void menuDeselected(javax.swing.event.MenuEvent e) {}
+            public void menuCanceled(javax.swing.event.MenuEvent e) {}
+        });
+        addMenuItem(fileMenu,"Save selection preset…",e->savePreset(),null,null);
+        addMenuItem(fileMenu,"Load selection preset…",e->loadPreset(),null,null);
+        addMenuItem(fileMenu,"Save waypoints…",e->saveWaypoints(),null,null);
+        addMenuItem(fileMenu,"Load waypoints…",e->loadWaypoints(),null,null);
+        addMenuItem(fileMenu,"Export view PNG…",e->exportView(),null,null);
         fileMenu.addSeparator();
         addMenuItem(fileMenu, "Clear Cache", e -> clearPngCache(), null, "Delete PNG map cache files");
         fileMenu.addSeparator();
@@ -611,6 +1270,54 @@ public class MinecraftMapGUI extends JFrame {
         fileMenu.addSeparator();
         addMenuItem(fileMenu, "Exit", e -> System.exit(0), null, null);
         menuBar.add(fileMenu);
+        JMenu viewMenu = new JMenu("View");
+        importLodOverlayItem=new JCheckBoxMenuItem("Import LOD rings",overlays.importLodVisible);
+        importLodOverlayItem.addActionListener(e->{overlays.importLodVisible=importLodOverlayItem.isSelected();repaintCanvases();});
+        viewMenu.add(importLodOverlayItem);
+        gridMenuItem=addMenuItem(viewMenu,"Map grid: Off",e->cycleGrid(),null,"G: Off / Chunk / Chunk+Region");
+        addPreviewItem(viewMenu,"Transparent water","water",false);
+        addPreviewItem(viewMenu,"Cave floor below Top Y","cave",false);
+        biomeMenu=addMenuItem(viewMenu,"Biomes: Surface",e->togglePreview("biome"),null,"B: Surface / Tint / Biome overlay");
+        addPreviewItem(viewMenu,"Night preview","night",false);
+        addPreviewItem(viewMenu,"Contours (16 blocks)","contours",false);
+        addPreviewItem(viewMenu,"Spawn / player / POI markers","markers",true);
+        addPreviewItem(viewMenu,"Empty / missing chunk shading","gaps",false);
+        addPreviewItem(viewMenu,"Scale bar","scale",false);
+        addMenuItem(viewMenu,"World information…",e->showWorldInfo(),null,"I on map");
+        addMenuItem(viewMenu,"Resource coverage…",e->showCoverage(),null,null);
+        addPreviewItem(viewMenu,"Minimap overview","minimap",false);
+        addPreviewItem(viewMenu,"Memory / cache / viewport HUD","hud",false);
+        addPreviewItem(viewMenu,"Ore heatmap","ore",false);
+        addMenuItem(viewMenu,"Scan ore heatmap from JSON…",e->scanOres(),null,"Generic ID regex / list; uses Import Y range");
+        addMenuItem(viewMenu,"Cancel background scan",e->cancelP2Scan(),null,null);
+        addMenuItem(viewMenu,"Trim viewport cache",e->trimViewportCache(),null,"Keep current viewport; release warm tiles");
+        menuBar.add(viewMenu);
+        JMenu selectionMenu=new JMenu("Selection");
+        addMenuItem(selectionMenu,"Undo selection",e->activeCanvas().undoSelection(),null,"Ctrl+Z on map");
+        addMenuItem(selectionMenu,"Select visible viewport",e->activeCanvas().selectVisible(),null,"Ctrl+A on map");
+        addMenuItem(selectionMenu,"Edit selection bounds…",e->editSelectionBounds(),null,null);
+        addMenuItem(selectionMenu,"Auto-fit Import Y",e->autoFitImportY(),null,"Space on map; loaded heights only");
+        addPreviewItem(selectionMenu,"Pos1 / Pos2 left-click mode","pos",false);
+        addMenuItem(selectionMenu,"Fit Import Y (opaque water/glass)",e->autoFitImportY(true),null,"Shift+Space on map");
+        addMenuItem(selectionMenu,"Copy coordinates",e->copyCoordinates(),null,"Ctrl+Shift+C on map");
+        addMenuItem(selectionMenu,"Confirm selection…",e->confirmSelection(),null,"Enter on map");
+        JMenu snapMenu=new JMenu("Snap selection");
+        for(SelectionMath.Snap value:SelectionMath.Snap.values()) addMenuItem(snapMenu,value.toString(),e->{selectionSnap=value;mapCanvas.setSnapMode(value);if(dynamicMapCanvas!=null) dynamicMapCanvas.setSnapMode(value);},null,null);
+        selectionMenu.add(snapMenu);
+        // Box is the only supported import selection; no one-item tool submenu.
+        overlays.resetSelectionTool();
+        addMenuItem(selectionMenu,"Suggest selection by chunk metadata…",e->filterChunks(),null,null);
+        menuBar.add(selectionMenu);
+        JMenu navigate=new JMenu("Navigate");
+        addMenuItem(navigate,"Jump to Spawn",e->jumpAnchor("F2"),"F2",null);
+        addMenuItem(navigate,"Jump to Player (or Spawn)",e->jumpAnchor("F3"),"F3",null);
+        addMenuItem(navigate,"Jump to Selection",e->jumpAnchor("F4"),"F4",null);
+        addMenuItem(navigate,"Go to X/Z…",e->GoToDialog.show(this,this::jumpTo),"control G",null);
+        addMenuItem(navigate,"Maximum zoom",e->activeCanvas().zoomExtents(true),null,"Home on map");
+        addMenuItem(navigate,"Fit loaded content",e->activeCanvas().zoomExtents(false),null,"End on map");
+        addMenuItem(navigate,"Add waypoint / POI…",e->addWaypoint(),null,null);
+        addMenuItem(navigate,"Remove waypoint / POI…",e->removeWaypoint(),null,null);
+        menuBar.add(navigate);
 
         return menuBar;
     }
@@ -638,32 +1345,13 @@ public class MinecraftMapGUI extends JFrame {
         // ── Dimension ──
         bar.add(new JLabel("Dimension:"));
         bar.add(dimensionDropdown);
+        bar.add(new JLabel("Preview quality:"));
+        bar.add(lodDropdown);
         bar.add(new JSeparator(SwingConstants.VERTICAL));
 
         // ── 操作按钮 ──
         confirmSelectionButton.addActionListener(e -> confirmSelection());
-        confirmSelectionButton.setBackground(new Color(40, 167, 69));
         bar.add(confirmSelectionButton);
-
-        bar.add(new JSeparator(SwingConstants.VERTICAL));
-
-        // ── 高度设置 ──
-        bar.add(new JLabel("Height:"));
-        heightRangeSlider.setPreferredSize(new Dimension(120, 22));
-        bar.add(heightRangeSlider);
-        bar.add(new JLabel("Min Y:"));
-        bar.add(minYEntry);
-        bar.add(new JLabel("Max Y:"));
-        bar.add(maxYEntry);
-        minYEntry.addActionListener(e -> {
-            try { heightRangeSlider.setLowerValue(Integer.parseInt(minYEntry.getText())); }
-            catch (NumberFormatException ex) { minYEntry.setText(String.valueOf(heightRangeSlider.getLowerValue())); }
-        });
-        maxYEntry.addActionListener(e -> {
-            try { heightRangeSlider.setUpperValue(Integer.parseInt(maxYEntry.getText())); }
-            catch (NumberFormatException ex) { maxYEntry.setText(String.valueOf(heightRangeSlider.getUpperValue())); }
-        });
-
         bar.add(new JSeparator(SwingConstants.VERTICAL));
 
         // ── 坐标跳转 ──
@@ -700,78 +1388,33 @@ public class MinecraftMapGUI extends JFrame {
     // renderSelectedRegion() 方法已删除，因为地图范围选择输入框已被移除
 
     /**
-     * 渲染指定区域
-     */
-    private void renderRegion(int minX, int maxX, int minZ, int maxZ) {
-        showLoadingState("Rendering map area...");
-        // renderButton 已删除
-        renderAroundPlayerButton.setEnabled(false);
-
-        SwingWorker<Void, Void> worker = new SwingWorker<Void, Void>() {
-            @Override
-            protected Void doInBackground() throws Exception {
-                try {
-                    // 获取LOD设置
-                    int lodLevel = getLodLevel();
-
-                    // 渲染地图
-                    String regionPath = WorldPathResolver.getOverworldRegionDir(savePath).getAbsolutePath();
-                    BufferedImage image = MapRenderer.renderRegion(regionPath, minX, maxX, minZ, maxZ, lodLevel);
-
-                    if (image != null) {
-                        SwingUtilities.invokeLater(() -> {
-                            mapImage = image;
-                            mapCanvas.setImage(image); // 手动渲染时不重置视图
-
-                            // 设置世界坐标映射
-                            double pixelsPerBlock = (double) image.getWidth() / (maxX - minX);
-                            mapCanvas.setWorldCoordinateMapping(minX, minZ, pixelsPerBlock);
-
-                            mapCanvas.repaint();
-
-                            // 保存图像和数据
-                            saveRenderedData(image, minX, maxX, minZ, maxZ);
-
-                            showSuccessState(String.format("Render complete - area: (%d,%d) to (%d,%d)", minX, minZ, maxX, maxZ));
-                        });
-                    } else {
-                        SwingUtilities.invokeLater(() -> {
-                            showErrorState("Render failed");
-                        });
-                    }
-                } catch (Exception e) {
-                    SwingUtilities.invokeLater(() -> {
-                        showErrorState("Render error: " + e.getMessage());
-                        JOptionPane.showMessageDialog(MinecraftMapGUI.this, "Render failed: " + e.getMessage(),
-                                                    "Error", JOptionPane.ERROR_MESSAGE);
-                    });
-                }
-                return null;
-            }
-
-            @Override
-            protected void done() {
-                // renderButton 已删除
-                renderAroundPlayerButton.setEnabled(true);
-                hideLoadingState();
-            }
-        };
-
-        worker.execute();
-    }
-
-    /**
      * 获取LOD级别
      */
     private int getLodLevel() {
-        String selected = (String) lodDropdown.getSelectedItem();
-        if (selected.contains("1 (")) return 1;
-        if (selected.contains("2 (")) return 2;
-        if (selected.contains("4 (")) return 4;
-        if (selected.contains("8 (")) return 8;
-        return 1; // 默认或自动
+        // This path serves dynamic/auto-loaded viewports. Fixed Auto=2 avoids
+        // dimension-wide counts and quality churn as visible tiles load or unload.
+        return resolveDynamicPreviewQuality((String)lodDropdown.getSelectedItem());
     }
-    
+
+    static int resolveDynamicPreviewQuality(String selected) {
+        return resolveLodLevel(selected,9);
+    }
+
+    private int getLodLevel(int fileCount) {
+        return resolveLodLevel((String)lodDropdown.getSelectedItem(),fileCount);
+    }
+
+    // Kept independent of JFrame construction for headless policy regression tests.
+    static int resolveLodLevel(String selected,int fileCount) {
+        if(selected!=null) {
+            if(selected.startsWith("1 (")) return 1;
+            if(selected.startsWith("2 (")) return 2;
+            if(selected.startsWith("4 (")) return 4;
+            if(selected.startsWith("8 (")) return 8;
+        }
+        return fileCount<=1?1:fileCount<=9?2:fileCount<=25?4:8;
+    }
+
     /**
      * 当前维度对应的 region 目录
      */
@@ -815,7 +1458,17 @@ public class MinecraftMapGUI extends JFrame {
         if (currentDimension != null && dim.getId().equals(currentDimension.getId())) return;
         if (savePath == null) return;
 
-        currentDimension = dim;
+        currentDimension = dim;overlays.dimension=dim.getId();lastMcaPath=null;lastView=null;
+        mapCanvas.resetSelection();if(dynamicMapCanvas!=null) dynamicMapCanvas.resetSelection();
+        cancelP2Scan();++viewGeneration;
+        dynamicMapManager.clear();
+        mapCanvas.setImage(null);
+        mapImage = null;
+        sourceTop = null;
+        sourceBottom = null;
+        previewCut = false;
+        displayedTop = null;
+        displayedBottom = null;
         logManager.info("Switch dimension: " + dim.getId() + " -> " + dim.getRegionDir().getAbsolutePath(), "MinecraftMapGUI");
 
         // 如果当前处于动态模式，重建动态区域管理器并清空旧缓存
@@ -823,16 +1476,15 @@ public class MinecraftMapGUI extends JFrame {
             try {
                 dynamicMapCanvas.cleanup();
                 dynamicRegionManager.shutdown(); // stop old dimension jobs; do not retain its pool/cache
-                dynamicRegionManager = new DynamicRegionManager(savePath, getCurrentRegionDir());
+                dynamicRegionManager = createDynamicRegionManager();
                 dynamicMapCanvas.setRegionManager(dynamicRegionManager);
                 SwingUtilities.invokeLater(() -> {
-                    dynamicMapCanvas.fitToWindow();
+                    dynamicMapCanvas.showInitialViewport(playerPos);
                     dynamicMapCanvas.requestFocus();
                     progressLabel.setText("Dimension switched: " + dim.getDisplayName());
                 });
             } catch (Exception ex) {
-                logManager.error("Failed to switch dimension", "MinecraftMapGUI", ex);
-                progressLabel.setText("Failed to switch dimension: " + ex.getMessage());
+                UserFeedback.error(this, progressLabel, "Failed to switch dimension: " + ex.getMessage(), ex);
             }
         } else {
             // 静态模式：提示切换后重新渲染
@@ -857,37 +1509,42 @@ public class MinecraftMapGUI extends JFrame {
         int result = fileChooser.showOpenDialog(this);
         if (result == JFileChooser.APPROVE_OPTION) {
             File selectedDir = fileChooser.getSelectedFile();
+            cancelP2Scan();++viewGeneration;
+            dynamicMapManager.clear();
+            mapCanvas.setImage(null);
+            mapImage = null;
+            sourceTop = null;
+            sourceBottom = null;
+            previewCut = false;
+            displayedTop = null;
+            displayedBottom = null;
+            if (dynamicRegionManager != null) {
+                dynamicRegionManager.shutdown();
+                dynamicRegionManager = null;
+            }
+            if (dynamicMapCanvas != null) dynamicMapCanvas.setRegionManager(null);
+            ++colorGeneration;
+            lastMcaPath=null;singleResourcePath=null;
             savePath = selectedDir.getAbsolutePath();
             saveInfoLabel.setText("Current save: " + selectedDir.getName());
             
+            dimensionDropdown.setEnabled(false);
             showLoadingState("Reading save info...");
             
             // 在后台线程中读取存档信息
-            SwingWorker<Void, Void> worker = new SwingWorker<Void, Void>() {
-                @Override
-                protected Void doInBackground() throws Exception {
-                    loadSaveData();
-                    return null;
-                }
-                
-                @Override
+            final long request=viewGeneration;
+            final String requestedWorld=savePath;final ResourceOptions requestedResources=colorResources.copy();
+            SwingWorker<PreparedWorld, Void> worker = new SwingWorker<PreparedWorld, Void>() {
+                protected PreparedWorld doInBackground() {return loadSaveData(request,requestedWorld,requestedResources);}
                 protected void done() {
-                    showSuccessState("Save loaded");
-                    // 启用渲染按钮
-                    // renderButton 已删除
-                    renderAroundPlayerButton.setEnabled(true);
-                    reRenderButton.setEnabled(true);
-                    view3DButton.setEnabled(true);
-
-                    // 默认启用自动加载
-                    toggleAutoLoad();
-                    
-                    // 自动启用动态模式
-                    SwingUtilities.invokeLater(() -> {
-                        if (!isDynamicMode) {
-                            enableDynamicMode();
-                        }
-                    });
+                    if(request!=viewGeneration) return;
+                    try {applyPreparedWorld(get());}
+                    catch(Exception error) {
+                        if(UserFeedback.isBenignCancel(error)) return;
+                        String msg="World loading failed: "+(error.getMessage()!=null?error.getMessage():error.getClass().getSimpleName());
+                        showErrorState(msg);
+                        UserFeedback.error(MinecraftMapGUI.this, progressLabel, msg, error);
+                    }
                 }
             };
             worker.execute();
@@ -931,66 +1588,63 @@ public class MinecraftMapGUI extends JFrame {
     /**
      * 加载存档数据
      */
-    private void loadSaveData() {
-        try {
-            // Discover vanilla and mod dimensions before rendering.
-            availableDimensions = WorldPathResolver.discoverDimensions(savePath);
-            if (!availableDimensions.isEmpty()) {
-                currentDimension = availableDimensions.get(0); // resolver keeps Overworld first
-            } else {
-                currentDimension = new WorldPathResolver.DimensionInfo(
-                    "minecraft:overworld", "Overworld", WorldPathResolver.getOverworldRegionDir(savePath));
-                availableDimensions.add(currentDimension);
-            }
-            SwingUtilities.invokeLater(this::refreshDimensionDropdown);
-
-            // 先完成颜色提取，再开始渲染（提取是同步的，避免渲染与换色竞态）
-            autoExtractColorsFromSavePath();
-
-            // 读取level.dat获取玩家位置
-            File levelDat = new File(savePath, "level.dat");
-            logManager.info("Checking level.dat: " + levelDat.getAbsolutePath(), "MinecraftMapGUI");
-            logManager.info("level.dat exists: " + levelDat.exists(), "MinecraftMapGUI");
-            
-            if (levelDat.exists()) {
-                playerPos = readPlayerPos(levelDat.getAbsolutePath());
-                logManager.info("Player position read: " + (playerPos != null ? 
-                    String.format("X=%.1f, Y=%.1f, Z=%.1f", playerPos[0], playerPos[1], playerPos[2]) : "null"), "MinecraftMapGUI");
-                
-                if (playerPos != null) {
-                    SwingUtilities.invokeLater(() -> {
-                        playerPosLabel.setText(String.format("Player: X:%.1f, Y:%.1f, Z:%.1f",
-                                                           playerPos[0], playerPos[1], playerPos[2]));
-                    });
-
-                    // 渲染玩家周围的区域
-                    renderAroundPlayer();
-                } else {
-                    logManager.warn("Cannot read player position, skipping render", "MinecraftMapGUI");
-                }
-            } else {
-                logManager.warn("level.dat not found, cannot get player position", "MinecraftMapGUI");
-            }
-
-        } catch (Exception e) {
-            SwingUtilities.invokeLater(() -> {
-                JOptionPane.showMessageDialog(this, "Error loading save: " + e.getMessage(),
-                                            "Error", JOptionPane.ERROR_MESSAGE);
-                progressLabel.setText("Failed to load save");
-            });
+    private static final class PreparedWorld {
+        final List<WorldPathResolver.DimensionInfo> dimensions;
+        final BlockColors.Palette palette;
+        final double[] player;
+        final WorldAnchors anchors;
+        PreparedWorld(List<WorldPathResolver.DimensionInfo> dimensions,BlockColors.Palette palette,double[] player,WorldAnchors anchors) {
+            this.dimensions=dimensions;this.palette=palette;this.player=player;this.anchors=anchors;
         }
     }
-
-    /**
-     * 从存档路径自动提取颜色（包括minecraft和mods）
-     */
-    private void autoExtractColorsFromSavePath() {
-        // loadSaveData already runs on a worker. Finish extraction before any
-        // player-area rendering or dynamic loading starts; do not launch a second worker.
-        boolean success = BlockColors.initializeColorsFromSavePath(savePath, jarFilePath);
-        SwingUtilities.invokeLater(() -> progressLabel.setText(success
-            ? "Loaded Minecraft and mod block colors"
-            : "No JAR or mods found, using default colors"));
+    private PreparedWorld loadSaveData(long request,String world,ResourceOptions resources) {
+        showLoadingState(request,"Parsing world dimensions...");
+        String invalid=WorldPathResolver.explainInvalidSave(world);
+        if(invalid!=null) throw new IllegalStateException(invalid);
+        List<WorldPathResolver.DimensionInfo> dimensions=WorldPathResolver.discoverDimensions(world);
+        WorldPathResolver.RegionResolve overworldResolve=WorldPathResolver.resolveRegionDir(world,"minecraft:overworld");
+        if(overworldResolve.usedLegacyFallback() && overworldResolve.getNote()!=null) {
+            logManager.info(overworldResolve.getNote(),"MinecraftMapGUI");
+            showLoadingState(request,overworldResolve.getNote());
+        }
+        if(dimensions.isEmpty()) {
+            if(!overworldResolve.isFound()) {
+                throw new IllegalStateException(overworldResolve.missingMessage("minecraft:overworld"));
+            }
+            if(!WorldPathResolver.hasMcaFiles(overworldResolve.getRegionDir())) {
+                throw new IllegalStateException("region 目录中没有 .mca 文件 / No .mca files in region: "
+                    +overworldResolve.getRegionDir().getAbsolutePath());
+            }
+            // 仅有 0 字节占位也算正常世界（区块未生成），照样挂上维度。
+            dimensions.add(new WorldPathResolver.DimensionInfo(
+                "minecraft:overworld","Overworld",overworldResolve.getRegionDir()));
+        }
+        showLoadingState(request,"Extracting vanilla / mod / resource-pack colors...");
+        BlockColors.Palette palette=BlockColors.loadPalette(world,resources,resourceProgress(request));
+        resourceProgress(request).onProgress(0,0,"Reading player data and preparing the initial viewport...");
+        File levelDat=new File(world,"level.dat");
+        double[] player=levelDat.isFile()?readPlayerPos(levelDat.getAbsolutePath()):null;
+        if(player==null) {
+            logManager.warn("No player position; opening nearest available map region","MinecraftMapGUI");
+            UserFeedback.warn(this,progressLabel,"No player/spawn position in level.dat; opening nearest map region");
+        }
+        WorldAnchors anchors=WorldAnchors.empty();
+        try {if(levelDat.isFile()) anchors=WorldAnchors.read(new File(world));}
+        catch(Exception e) {
+            logManager.warn("World anchor metadata unavailable: "+e.getMessage(),"MinecraftMapGUI");
+            UserFeedback.warn(this,progressLabel,"World anchors unavailable: "+e.getMessage(),e);
+        }
+        return new PreparedWorld(dimensions,palette,player,anchors);
+    }
+    private void applyPreparedWorld(PreparedWorld world) {
+        availableDimensions=world.dimensions;currentDimension=availableDimensions.get(0);
+        BlockColors.setPalette(world.palette);playerPos=world.player;worldAnchors=world.anchors;
+        overlays.anchors=worldAnchors;overlays.dimension=currentDimension.getId();
+        try {recentWorlds.add(new File(savePath));refreshRecentWorlds();}catch(IOException e) {logManager.warn("Recent worlds: "+e.getMessage(),"MinecraftMapGUI");}
+        mapCanvas.resetSelection();if(dynamicMapCanvas!=null) dynamicMapCanvas.resetSelection();
+        refreshDimensionDropdown();
+        playerPosLabel.setText(playerPos==null?"Player: —":String.format("Player: X:%.1f, Y:%.1f, Z:%.1f",playerPos[0],playerPos[1],playerPos[2]));
+        openPreparedWorld();
     }
 
     /**
@@ -1021,72 +1675,105 @@ public class MinecraftMapGUI extends JFrame {
      * 从指定JAR文件提取颜色
      */
     private void extractColorsFromJar(String jarPath) {
-        progressLabel.setText("Extracting block colors from JAR...");
-
-        SwingWorker<Void, Void> worker = new SwingWorker<Void, Void>() {
-            @Override
-            protected Void doInBackground() throws Exception {
-                MinecraftResourceExtractor extractor = new MinecraftResourceExtractor();
-                if (extractor.extractColorsFromMinecraftJar(jarPath)) {
-                    resourceExtractor = extractor;
-                    BlockColors.setResourceExtractor(extractor);
-
-                    // 保存为JSON和Properties两种格式
-                    String jsonFile = new File(programDir, "block_colors.json").getAbsolutePath();
-                    String propsFile = new File(programDir, "extracted_colors.properties").getAbsolutePath();
-
-                    resourceExtractor.saveExtractedColorsAsJson(jsonFile);
-                    resourceExtractor.saveExtractedColors(propsFile);
-
-                    SwingUtilities.invokeLater(() -> {
-                        progressLabel.setText("Extracted " + resourceExtractor.getAllExtractedColors().size() + " block colors");
-                    });
-                } else {
-                    SwingUtilities.invokeLater(() -> {
-                        progressLabel.setText("JAR color extraction failed");
-                    });
-                }
-                return null;
-            }
-        };
-
-        worker.execute();
+        jarFilePath=jarPath;colorResources.jars.clear();colorResources.jars.add(jarPath);reloadColorResources();
     }
-    
+    private void selectColorResources(boolean mods) {
+        JFileChooser chooser=new JFileChooser();
+        chooser.setFileSelectionMode(mods?JFileChooser.DIRECTORIES_ONLY:JFileChooser.FILES_ONLY);
+        chooser.setMultiSelectionEnabled(!mods);
+        if(!mods) chooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter("Resource packs (*.zip)","zip"));
+        if(chooser.showOpenDialog(this)!=JFileChooser.APPROVE_OPTION) return;
+        if(mods) {
+            colorResources.mods.clear();
+            File[] files=chooser.getSelectedFile().listFiles((dir,name)->name.endsWith(".jar"));
+            if(files!=null) {java.util.Arrays.sort(files);for(File file:files) colorResources.mods.add(file.getAbsolutePath());}
+        } else {
+            colorResources.packs.clear();for(File file:chooser.getSelectedFiles()) colorResources.packs.add(file.getAbsolutePath());
+        }
+        reloadColorResources();
+    }
+    private void reloadColorResources() {
+        singleResourcePath=null;
+        cancelP2Scan();++viewGeneration;
+        final long generation=++colorGeneration;
+        final long request=viewGeneration;
+        final boolean dynamic=isDynamicMode;
+        if(dynamicRegionManager!=null) {dynamicRegionManager.shutdown();dynamicRegionManager=null;}
+        if(dynamicMapCanvas!=null) dynamicMapCanvas.setRegionManager(null);
+        mapImage=null;mapCanvas.setImage(null);
+displayedTop=null;displayedBottom=null;sourceTop=null;sourceBottom=null;previewCut=false;
+        final String path=savePath!=null?savePath:lastMcaPath;
+        final ResourceOptions requested=colorResources.copy();
+        showLoadingState("Loading resource colors...");
+        new SwingWorker<BlockColors.Palette,Void>() {
+            protected BlockColors.Palette doInBackground() {
+                return BlockColors.loadPalette(path,requested,resourceProgress(request));
+            }
+            protected void done() {
+                if(generation!=colorGeneration) return;
+                try {
+                    BlockColors.setPalette(get());
+                    if(dynamic && savePath!=null) {
+                        dynamicRegionManager=createDynamicRegionManager();
+                        dynamicMapCanvas.setRegionManager(dynamicRegionManager);
+                    } else if(lastMcaPath!=null) renderMap(lastMcaPath);
+                    else if(savePath!=null && playerPos!=null) {
+                        showMapLoadingDelayed(request,"Loading map regions...");renderAroundPlayer();
+                    } else showSuccessState("Resource colors loaded");
+                } catch(Exception e) {showErrorState("Resource colors failed: "+e.getMessage());}
+            }
+        }.execute();
+    }
+
     /**
-     * 读取level.dat中的玩家位置
+     * 读取玩家(或出生点)位置。兼容旧 Data.Player / SpawnX·Y·Z，以及
+     * 26.1+ singleplayer_uuid→players/data 与 spawn{pos} 复合标签。
      */
     private double[] readPlayerPos(String levelDatPath) {
         try {
             NBTReader.NBTCompound nbtFile = NBTReader.readFromFile(levelDatPath);
-
-            // 尝试获取玩家位置数据
-            try {
-                // 单人模式
-                NBTReader.NBTCompound data = nbtFile.getCompound("Data");
-                NBTReader.NBTCompound player = data.getCompound("Player");
-                NBTReader.NBTList pos = player.getList("Pos");
-
-                double x = ((NBTReader.NBTDouble) pos.get(0)).getValue();
-                double y = ((NBTReader.NBTDouble) pos.get(1)).getValue();
-                double z = ((NBTReader.NBTDouble) pos.get(2)).getValue();
-
-                return new double[]{x, y, z};
-            } catch (Exception e) {
-                // 多人模式或其他格式
-                try {
-                    NBTReader.NBTCompound data = nbtFile.getCompound("Data");
-                    int spawnX = data.getInt("SpawnX");
-                    int spawnY = data.getInt("SpawnY");
-                    int spawnZ = data.getInt("SpawnZ");
-
-                    return new double[]{spawnX, spawnY, spawnZ};
-                } catch (Exception e2) {
-                    return null;
+            NBTReader.NBTCompound data = nbtFile.get("Data") instanceof NBTReader.NBTCompound
+                ? nbtFile.getCompound("Data") : nbtFile;
+            double[] fromPlayer = xyzFromPlayerCompound(
+                data.get("Player") instanceof NBTReader.NBTCompound ? data.getCompound("Player") : null);
+            if (fromPlayer != null) return fromPlayer;
+            File world = new File(levelDatPath).getParentFile();
+            if (world != null) {
+                WorldAnchors anchors = WorldAnchors.read(world);
+                if (anchors.player != null)
+                    return new double[]{anchors.player.xz.x + 0.5, 64, anchors.player.xz.y + 0.5};
+            }
+            if (data.get("spawn") instanceof NBTReader.NBTCompound) {
+                NBTReader.NBTCompound spawn = data.getCompound("spawn");
+                if (spawn.get("pos") instanceof NBTReader.NBTIntArray) {
+                    int[] pos = ((NBTReader.NBTIntArray) spawn.get("pos")).getValue();
+                    if (pos != null && pos.length >= 3)
+                        return new double[]{pos[0], pos.length > 1 ? pos[1] : 64, pos[2]};
                 }
             }
+            if (data.get("SpawnX") instanceof NBTReader.NBTInt
+                && data.get("SpawnZ") instanceof NBTReader.NBTInt) {
+                int y = data.get("SpawnY") instanceof NBTReader.NBTInt ? data.getInt("SpawnY") : 64;
+                return new double[]{data.getInt("SpawnX"), y, data.getInt("SpawnZ")};
+            }
+            return null;
         } catch (Exception e) {
-            System.err.println("Error reading level.dat: " + e.getMessage());
+            logManager.warn("Error reading level.dat: " + e.getMessage(), "MinecraftMapGUI");
+            return null;
+        }
+    }
+
+    private static double[] xyzFromPlayerCompound(NBTReader.NBTCompound player) {
+        if (player == null || !(player.get("Pos") instanceof NBTReader.NBTList)) return null;
+        try {
+            NBTReader.NBTList pos = player.getList("Pos");
+            if (pos.size() < 3) return null;
+            double x = ((Number) pos.get(0).getValue()).doubleValue();
+            double y = ((Number) pos.get(1).getValue()).doubleValue();
+            double z = ((Number) pos.get(2).getValue()).doubleValue();
+            if (!Double.isFinite(x) || !Double.isFinite(y) || !Double.isFinite(z)) return null;
+            return new double[]{x, y, z};
+        } catch (Exception e) {
             return null;
         }
     }
@@ -1095,13 +1782,16 @@ public class MinecraftMapGUI extends JFrame {
      * 渲染玩家周围的区域
      */
     private void renderAroundPlayer() {
-        if (playerPos == null) {
+        if(loadingPanel.getPhase()==LoadingPhasePanel.Phase.PREPARING) return;
+        if (playerPos == null) {return;}
+        if(isDynamicMode && dynamicMapCanvas!=null && dynamicRegionManager!=null) {
+            dynamicMapCanvas.jumpToWorldCoordinate(new Point((int)Math.floor(playerPos[0]),(int)Math.floor(playerPos[2])));
             return;
         }
 
         // 计算玩家所在的区域文件
-        int centerRegionX = (int) (playerPos[0] / 512);
-        int centerRegionZ = (int) (playerPos[2] / 512);
+        int centerRegionX = (int) Math.floor(playerPos[0] / 512);
+        int centerRegionZ = (int) Math.floor(playerPos[2] / 512);
 
         // 获取MCA范围设置
         int mcaRange = getMcaRange();
@@ -1158,8 +1848,20 @@ public class MinecraftMapGUI extends JFrame {
                 renderMultipleMcaFiles(mcaFiles, centerRegionX - halfRange, centerRegionZ - halfRange, mcaRange);
             }
         } else {
+            final String detail;
+            if (!regionDir.exists()) {
+                WorldPathResolver.RegionResolve resolve = WorldPathResolver.resolveRegionDir(
+                    savePath, currentDimension != null ? currentDimension.getId() : "minecraft:overworld");
+                detail = resolve.isFound()
+                    ? String.format("No region files around player (center: r.%d.%d.mca) in %s", centerRegionX, centerRegionZ, regionDir.getAbsolutePath())
+                    : resolve.missingMessage(currentDimension != null ? currentDimension.getId() : "minecraft:overworld");
+            } else {
+                detail = String.format("No region files around player (center: r.%d.%d.mca) in %s",
+                    centerRegionX, centerRegionZ, regionDir.getAbsolutePath());
+            }
             SwingUtilities.invokeLater(() -> {
-                progressLabel.setText(String.format("No region files around player (center: r.%d.%d.mca)", centerRegionX, centerRegionZ));
+                UserFeedback.warn(MinecraftMapGUI.this, progressLabel, detail);
+                hideLoadingState();
             });
         }
     }
@@ -1179,20 +1881,30 @@ public class MinecraftMapGUI extends JFrame {
      * 渲染多个MCA文件
      */
     private void renderMultipleMcaFiles(java.util.List<String> mcaFiles, int startRegionX, int startRegionZ, int gridSize) {
+        final int requestedSampleInterval=getLodLevel(mcaFiles.size());
+        showMapLoadingDelayed(viewGeneration,"Loading map regions...");
+        final long requestGeneration = viewGeneration;
+        final MapRenderer.SurfaceMode requestedMode = surfaceMode;
+        final PreviewOptions requestedPreview=preview;
+        final Integer requestedTop=heightRangeSlider.getUpperValue();
+        final Integer requestedBottom=heightRangeSlider.getLowerValue();
         SwingWorker<BufferedImage, Void> worker = new SwingWorker<BufferedImage, Void>() {
+            private ViewRecipe renderedView;
             @Override
             protected BufferedImage doInBackground() throws Exception {
                 // 创建进度回调
+                final java.util.concurrent.atomic.AtomicInteger completedRegions=new java.util.concurrent.atomic.AtomicInteger();
                 MapRenderer.ProgressCallback progressCallback = new MapRenderer.ProgressCallback() {
                     @Override
                     public void onProgress(int processed, int total, double speed, Set<String> foundBlocks) {
-                        if (total == 0) return;
+                        if (total == 0 || requestGeneration!=viewGeneration) return;
 
-                        int percent = Math.min(100, processed * 100 / total);
+                        final int completed=completedRegions.get();
+                        final int units=completed*1000+(int)(1000L*processed/total);
                         SwingUtilities.invokeLater(() -> {
-                            progressBar.setValue(percent);
-                            progressBar.setString(String.format("%d%% (%d/%d) %.1f chunks/s",
-                                                               percent, processed, total, speed));
+                            if(requestGeneration!=viewGeneration) return;
+                            loadingPanel.mapProgress(requestGeneration,units,mcaFiles.size()*1000,
+                                String.format("Map regions: %d/%d; chunks: %d/%d (%.1f/s)",completed,mcaFiles.size(),processed,total,speed));
                         });
                     }
                     
@@ -1204,7 +1916,7 @@ public class MinecraftMapGUI extends JFrame {
 
                 // 创建地图渲染器
                 int maxWorkers = Math.min(Runtime.getRuntime().availableProcessors(), 4);
-                MapRenderer renderer = new MapRenderer(maxWorkers, progressCallback);
+                MapRenderer renderer = new MapRenderer(maxWorkers, progressCallback, requestedMode,requestedTop,requestedBottom,BlockColors.snapshot(),requestedPreview);
 
                 try {
                     // 计算区域范围
@@ -1238,8 +1950,18 @@ public class MinecraftMapGUI extends JFrame {
                     System.out.printf("Region range: (%d,%d) to (%d,%d), total size: %dx%d\n",
                         minRegionX, minRegionZ, maxRegionX, maxRegionZ, totalWidth, totalHeight);
 
+                    // 记下这张图的拼法：换 Y 带时用层缓存在内存里重拼
+                    java.util.List<String> viewPaths = new ArrayList<>();
+                    java.util.List<int[]> viewCoords = new ArrayList<>();
+                    for (String mcaFile : mcaFiles) {
+                        int[] coord = regionCoords.get(mcaFile);
+                        if (coord != null) { viewPaths.add(mcaFile); viewCoords.add(coord); }
+                    }
+                    renderedView = new ViewRecipe(viewPaths, viewCoords, minRegionX, minRegionZ, totalWidth, totalHeight,
+                        requestedMode, BlockColors.snapshot(),requestedPreview,requestedSampleInterval);
+
                     // 创建大图像
-                    BufferedImage combinedImage = new BufferedImage(totalWidth, totalHeight, BufferedImage.TYPE_INT_RGB);
+                    RenderedMap combinedImage = new RenderedMap(totalWidth, totalHeight);
                     Graphics2D g2d = combinedImage.createGraphics();
 
                     // 设置高质量渲染
@@ -1261,21 +1983,24 @@ public class MinecraftMapGUI extends JFrame {
                             System.out.printf("Rendering region %d/%d: r.%d.%d.mca\n",
                                 ++processedCount, mcaFiles.size(), regionX, regionZ);
 
-                            // 渲染单个区域
-                            MapRenderer.BlockInfo[][] topBlocks = renderer.getTopBlocks(mcaFile, 32, 1);
-                            if (topBlocks != null) {
-                                BufferedImage regionImage = renderer.renderToPng(topBlocks, 1);
-                                if (regionImage != null) {
-                                    // 计算在大图像中的正确位置
-                                    int offsetX = (regionX - minRegionX) * 512;
-                                    int offsetY = (regionZ - minRegionZ) * 512;
+                            // 渲染单个区域：顺带把层缓存建出来，渲染完就能实时换 Y 带
+                            MapRenderer.RegionScan scan = renderer.scanRegionBlocks(mcaFile, 32,
+                                requestedTop, requestedBottom, true, highlightBandTop(),requestedSampleInterval);   // 顺手建缓存 + 兴趣带标记
+                            if (scan.cache != null) stashColumnCache(mcaFile, scan.cache, scan.palette);
+                            BufferedImage regionImage = scan.image();
+                            if (regionImage != null) {
+                                // 计算在大图像中的正确位置
+                                int offsetX = (regionX - minRegionX) * 512;
+                                int offsetY = (regionZ - minRegionZ) * 512;
 
-                                    System.out.printf("  -> placed at: (%d, %d)\n", offsetX, offsetY);
+                                System.out.printf("  -> placed at: (%d, %d)\n", offsetX, offsetY);
 
-                                    g2d.drawImage(regionImage, offsetX, offsetY, null);
-                                }
+                                g2d.drawImage(regionImage, offsetX, offsetY, null);
+                                combinedImage.copyHeightsFrom(regionImage, offsetX, offsetY);
+                                combinedImage.copyHighlightsFrom(regionImage, offsetX, offsetY);
                             }
                         }
+                        completedRegions.incrementAndGet();
                     }
 
                     g2d.dispose();
@@ -1293,11 +2018,21 @@ public class MinecraftMapGUI extends JFrame {
 
             @Override
             protected void done() {
+                if (requestGeneration != viewGeneration) return;
                 try {
                     BufferedImage image = get();
                     if (image != null) {
+                        lastView = renderedView;
                         mapImage = image;
+                        sourceTop = requestedTop;
+                        sourceBottom = requestedBottom;
+                        previewCut = false;
+                        displayedTop = requestedTop;
+                        displayedBottom = requestedBottom;
+                        displayApproximate = false;
+                        ybandState(requestedSampleInterval>1?"coarse preview (sampling "+requestedSampleInterval+")":"rendered - preparing cache");
                         mapCanvas.setImage(image); // 手动渲染时不重置视图
+                        if (lastView != null) ensureColumnCaches(lastView, false);   // 渲染一结束就在后台预热层缓存
 
                         // 设置世界坐标映射
                         int worldMinX = lastMultiRenderMinRegionX * 512;
@@ -1312,6 +2047,7 @@ public class MinecraftMapGUI extends JFrame {
                                                           image.getWidth(), image.getHeight()));
                         progressBar.setValue(100);
                         progressBar.setString("Done");
+                        hideLoadingState();
 
                         // 保存图像
                         saveRenderedImage(image, String.format("multi_region_%dx%d", gridSize, gridSize));
@@ -1320,14 +2056,17 @@ public class MinecraftMapGUI extends JFrame {
                         progressLabel.setText("Multi-region render failed: cannot get block data");
                         progressBar.setValue(0);
                         progressBar.setString("Failed");
+                        hideLoadingState();
                     }
                 } catch (Exception e) {
+                    logManager.error("Map operation failed: "+e.getMessage(),"MinecraftMapGUI",e);
                     JOptionPane.showMessageDialog(MinecraftMapGUI.this,
                                                 "Error rendering multi-region map: " + e.getMessage(),
                                                 "Error", JOptionPane.ERROR_MESSAGE);
                     progressLabel.setText("Multi-region render failed");
                     progressBar.setValue(0);
                     progressBar.setString("Failed");
+                    hideLoadingState();
                 }
             }
         };
@@ -1339,6 +2078,14 @@ public class MinecraftMapGUI extends JFrame {
      * 渲染单个MCA文件
      */
     private void renderSingleMcaFile(String mcaFilePath) {
+        cancelP2Scan();++viewGeneration;++colorGeneration;
+        if(dynamicRegionManager!=null) {dynamicRegionManager.shutdown();dynamicRegionManager=null;}
+        if(isDynamicMode) disableDynamicMode();
+        lastView=null;savePath=null;worldAnchors=WorldAnchors.empty();overlays.anchors=worldAnchors;overlays.dimension="minecraft:overworld";currentDimension=null;availableDimensions=new ArrayList<>();refreshDimensionDropdown();mapCanvas.resetSelection();lastMcaPath=mcaFilePath;currentRegion=null;
+        String[] regionParts=new File(mcaFilePath).getName().split("\\.");
+        if(regionParts.length==4) try {currentRegion=new Point(Integer.parseInt(regionParts[1]),Integer.parseInt(regionParts[2]));}
+        catch(NumberFormatException ignored) {currentRegion=null;}
+        showLoadingState("Preparing MCA resources...");
         SwingUtilities.invokeLater(() -> {
             progressLabel.setText("Rendering MCA file: " + new File(mcaFilePath).getName());
         });
@@ -1350,17 +2097,33 @@ public class MinecraftMapGUI extends JFrame {
      * 渲染地图
      */
     private void renderMap(String regionPath) {
+        final int requestedSampleInterval=getLodLevel(1);
+        final ResourceOptions requestedResources=colorResources.copy();
+        final boolean needsResources=regionPath.equals(lastMcaPath) && !regionPath.equals(singleResourcePath);
+        final BlockColors.Palette requestedPalette=BlockColors.snapshot();
+        final long requestGeneration = viewGeneration;
+        final MapRenderer.SurfaceMode requestedMode = surfaceMode;
+        final PreviewOptions requestedPreview=preview;
+        final Integer requestedTop=heightRangeSlider.getUpperValue();
+        final Integer requestedBottom=heightRangeSlider.getLowerValue();
         SwingWorker<BufferedImage, Void> worker = new SwingWorker<BufferedImage, Void>() {
+            private ViewRecipe renderedView;
+            private BlockColors.Palette renderedPalette=requestedPalette;
             @Override
             protected BufferedImage doInBackground() throws Exception {
+                if(needsResources) renderedPalette=BlockColors.loadPalette(regionPath,requestedResources,resourceProgress(requestGeneration));
+                if(requestGeneration!=viewGeneration) return null;
+                showMapLoadingDelayed(requestGeneration,"Loading map regions...");
                 // 创建进度回调
                 MapRenderer.ProgressCallback progressCallback = new MapRenderer.ProgressCallback() {
                     @Override
                     public void onProgress(int processed, int total, double speed, Set<String> foundBlocks) {
-                        if (total == 0) return;
+                        if (total == 0 || requestGeneration!=viewGeneration) return;
 
                         int percent = Math.min(100, processed * 100 / total);
                         SwingUtilities.invokeLater(() -> {
+                            if(requestGeneration!=viewGeneration || loadingPanel.getPhase()!=LoadingPhasePanel.Phase.MAP_LOADING) return;
+                            progressBar.setIndeterminate(false);
                             progressBar.setValue(percent);
                             progressBar.setString(String.format("%d%% (%d/%d) %.1f chunks/s",
                                                                percent, processed, total, speed));
@@ -1373,20 +2136,24 @@ public class MinecraftMapGUI extends JFrame {
                     }
                 };
 
+                // 记下这张图的拼法：换 Y 带时用层缓存在内存里重拼
+                renderedView = new ViewRecipe(java.util.Collections.singletonList(regionPath),
+                    java.util.Collections.singletonList(new int[]{0, 0}), 0, 0, 512, 512,
+                    requestedMode, renderedPalette,requestedPreview,requestedSampleInterval);
+
                 // 创建地图渲染器
                 int maxWorkers = Math.min(Runtime.getRuntime().availableProcessors(), 4); // GUI模式使用较少线程
-                MapRenderer renderer = new MapRenderer(maxWorkers, progressCallback);
+                MapRenderer renderer = new MapRenderer(maxWorkers, progressCallback, requestedMode,requestedTop,requestedBottom,renderedPalette,requestedPreview);
 
                 try {
-                    // 渲染区块
-                    MapRenderer.BlockInfo[][] topBlocks = renderer.getTopBlocks(regionPath, 32, 1);
+                    // 渲染区块：顺带把层缓存建出来，渲染完就能实时换 Y 带
+                    MapRenderer.RegionScan scan = renderer.scanRegionBlocks(regionPath, 32,
+                        requestedTop, requestedBottom, true, highlightBandTop(),requestedSampleInterval);
+                    if (scan.cache != null) stashColumnCache(regionPath, scan.cache, scan.palette);
+                    BufferedImage image = scan.image();
 
-                    if (topBlocks != null) {
-                        // 保存方块数据供3D查看器使用
-                        lastRenderedBlockData = topBlocks;
+                    if (image != null) {
                         
-                        // 渲染图像
-                        BufferedImage image = renderer.renderToPng(topBlocks, 1);
 
                         // 保存图像到当前目录
                         if (image != null) {
@@ -1404,11 +2171,27 @@ public class MinecraftMapGUI extends JFrame {
 
             @Override
             protected void done() {
+                if (requestGeneration != viewGeneration) return;
                 try {
                     BufferedImage image = get();
                     if (image != null) {
+                        if(needsResources) {BlockColors.setPalette(renderedPalette);singleResourcePath=regionPath;}
+                        if(requestedTop.intValue()!=heightRangeSlider.getUpperValue()
+                           || requestedBottom.intValue()!=heightRangeSlider.getLowerValue()
+                           || requestedMode!=surfaceMode) {
+                            resetSurfaceView();return;
+                        }
+                        lastView = renderedView;
                         mapImage = image;
+                        sourceTop = requestedTop;
+                        sourceBottom = requestedBottom;
+                        previewCut = false;
+                        displayedTop = requestedTop;
+                        displayedBottom = requestedBottom;
+                        displayApproximate = false;
+                        ybandState(requestedSampleInterval>1?"coarse preview (sampling "+requestedSampleInterval+")":"rendered - preparing cache");
                         mapCanvas.setImage(image); // 手动渲染时不重置视图
+                        if (lastView != null) ensureColumnCaches(lastView, false);   // 渲染一结束就在后台预热层缓存
 
                         // 设置世界坐标映射 (一个区域文件是512x512方块)
                         if (currentRegion != null) {
@@ -1424,18 +2207,22 @@ public class MinecraftMapGUI extends JFrame {
                                                           image.getWidth(), image.getHeight()));
                         progressBar.setValue(100);
                         progressBar.setString("Done");
+                        hideLoadingState();
                     } else {
                         progressLabel.setText("Map render failed: cannot get block data");
                         progressBar.setValue(0);
                         progressBar.setString("Failed");
+                        hideLoadingState();
                     }
                 } catch (Exception e) {
+                    logManager.error("Map operation failed: "+e.getMessage(),"MinecraftMapGUI",e);
                     JOptionPane.showMessageDialog(MinecraftMapGUI.this,
                                                 "Error rendering map: " + e.getMessage(),
                                                 "Error", JOptionPane.ERROR_MESSAGE);
                     progressLabel.setText("Map render failed");
                     progressBar.setValue(0);
                     progressBar.setString("Failed");
+                    hideLoadingState();
                 }
             }
         };
@@ -1554,17 +2341,132 @@ public class MinecraftMapGUI extends JFrame {
     /**
      * 确认选择区域
      */
-    private void confirmSelection() {
-        // 根据当前模式触发相应画布的确认回调
-        if (isDynamicMode && dynamicMapCanvas != null) {
-            dynamicMapCanvas.confirmCurrentSelection();
-        } else if (mapCanvas != null) {
-            mapCanvas.confirmCurrentSelection();
-        }
-
-        // 禁用确认按钮
-        confirmSelectionButton.setEnabled(false);
+    private SelectionCanvas activeCanvas() {return isDynamicMode&&dynamicMapCanvas!=null?dynamicMapCanvas:mapCanvas;}
+    private void configureCanvas(MapCanvas canvas) {
+        canvas.setSelectionChangeListener(b->updateSelectionStats());canvas.setCommandListener(this::selectionCommand);
+        canvas.setTransferHandler(fileDropHandler);canvas.setOverlays(overlays);canvas.setLodCenterListener(this::moveLodCenterTo);canvas.setSnapMode(selectionSnap);canvas.setGridMode(gridMode);
     }
+    private void configureCanvas(DynamicMapCanvas canvas) {
+        canvas.setSelectionChangeListener(b->updateSelectionStats());canvas.setCommandListener(this::selectionCommand);
+        canvas.setTransferHandler(fileDropHandler);canvas.setOverlays(overlays);canvas.setLodCenterListener(this::moveLodCenterTo);canvas.setSnapMode(selectionSnap);canvas.setGridMode(gridMode);
+    }
+    private void selectionCommand(String command) {
+        switch(command) {
+            case "fit":autoFitImportY(false);break;
+            case "fitOpaque":autoFitImportY(true);break;
+            case "water":case "cave":case "biome":case "night":case "contours":case "pos":togglePreview(command);break;
+            case "info":showWorldInfo();break;
+            case "grid":cycleGrid();break;
+            case "goto":GoToDialog.show(this,this::jumpTo);break;
+            case "copy":copyCoordinates();break;
+            default:jumpAnchor(command);
+        }
+    }
+    private void updateSelectionStats() {
+        if(mapCanvas==null||heightRangeSlider==null) return;
+        overlays.minY=heightRangeSlider.getLowerValue();overlays.maxY=heightRangeSlider.getUpperValue();repaintCanvases();
+        SelectionMath.Bounds b=activeCanvas().getSelectionBounds();
+        if(importLodPanel!=null) importLodPanel.showResolvedCenter(resolvedImportLod(b));
+        if(confirmSelectionButton!=null) confirmSelectionButton.setEnabled(b!=null);
+        if(b==null) {selectionStatsLabel.setText("No selection");selectionStatsLabel.setForeground(UIManager.getColor("Label.foreground"));return;}
+        SelectionStats stats=new SelectionStats(b,heightRangeSlider.getLowerValue(),heightRangeSlider.getUpperValue());
+        selectionStatsLabel.setText(stats.toString()+" · checking cached columns…");queueSelectionCoverage();selectionStatsLabel.setForeground(stats.isLarge()?new Color(190,80,0):UIManager.getColor("Label.foreground"));
+    }
+    /**
+     * 中键拖动 LOD 中心：区块对齐后重建 ImportLod（autoCenter 会被置 false），
+     * 立即生效让圆环跟手，并回写面板控件。
+     */
+    private void moveLodCenterTo(Point world) {
+        if (world == null) return;
+        ImportLod next = overlays.importLod.withManualCenter(world.x, world.y);
+        if (next.centerX == overlays.importLod.centerX && next.centerZ == overlays.importLod.centerZ
+            && !overlays.importLod.autoCenter) return;   // 没跨区块就不折腾
+        overlays.importLod = next;
+        if (importLodPanel != null) importLodPanel.applyDraggedCenter(next.centerX, next.centerZ);
+        repaintCanvases();
+    }
+    private void autoFitImportY() {autoFitImportY(false);}
+    private void autoFitImportY(boolean opaque) {
+        final SelectionCanvas canvas=activeCanvas();final SelectionMath.Bounds b=canvas.getSelectionBounds();
+        if(b==null) {progressLabel.setText("Select an area before fitting Import Y");return;}
+        final long generation=viewGeneration;
+        progressLabel.setText("Fitting Import Y from cached selection heights…");
+        new SwingWorker<SelectionYFit.Result,Void>() {
+            @Override protected SelectionYFit.Result doInBackground() {return canvas.fitSelectionY(b,opaque);}
+            @Override protected void done() {
+                if(generation!=viewGeneration||canvas!=activeCanvas()||!b.equals(canvas.getSelectionBounds())) return;
+                try {
+                    SelectionYFit.Result r=get();
+                    if(r.count==0) {progressLabel.setText("No cached heights in selection; Import Y unchanged");return;}
+                    // Apply both fitted ends atomically; do not truncate extended-world heights.
+                    heightRangeSlider.setSelectedRange(r.min,r.max);
+                    progressLabel.setText("Import Y fit: "+heightRangeSlider.getLowerValue()+"…"+heightRangeSlider.getUpperValue()+" ("+r.count+" cached samples; "+r.empty+" empty, "+r.missing+" missing samples; unloaded columns ignored)");
+                } catch(Exception e) {
+                    if(UserFeedback.isBenignCancel(e)) return;
+                    UserFeedback.warn(MinecraftMapGUI.this, progressLabel, "Could not fit Import Y: "+e.getMessage(), e);
+                }
+            }
+        }.execute();
+    }
+    private void editSelectionBounds() {
+        final SelectionCanvas canvas=activeCanvas();final long generation=viewGeneration;
+        JDialog dialog=new JDialog(this,"Selection bounds (inclusive)",false);
+        dialog.setContentPane(new SelectionBoundsPanel(canvas.getSelectionBounds(),b->{
+            if(canvas!=activeCanvas()||generation!=viewGeneration) {dialog.dispose();return;}
+            canvas.setSelectionBounds(b);progressLabel.setText("Selection updated: "+canvas.getSelectionBounds());
+        }));
+        dialog.pack();dialog.setLocationRelativeTo(this);dialog.setVisible(true);
+    }
+    private void copyCoordinates() {
+        SelectionMath.Bounds b=activeCanvas().getSelectionBounds();String text;
+        if(b!=null) text=ClipboardCoords.selection(b,heightRangeSlider.getLowerValue(),heightRangeSlider.getUpperValue());
+        else {int[] xyz=activeCanvas().getHoverCoordinates();if(xyz==null||xyz[1]==RenderedMap.NO_HEIGHT) {progressLabel.setText("No selection or known hover coordinates to copy");return;}text=ClipboardCoords.hover(xyz[0],xyz[1],xyz[2]);}
+        try {Toolkit.getDefaultToolkit().getSystemClipboard().setContents(new StringSelection(text),null);progressLabel.setText("Copied: "+text);}
+        catch(IllegalStateException|HeadlessException e) {progressLabel.setText("Clipboard unavailable: "+text);}
+    }
+    private void cycleGrid() {
+        gridMode=(gridMode+1)%3;mapCanvas.setGridMode(gridMode);if(dynamicMapCanvas!=null) dynamicMapCanvas.setGridMode(gridMode);
+        String name=new String[]{"Off","Chunk","Chunk+Region"}[gridMode];gridMenuItem.setText("Map grid: "+name);progressLabel.setText("Map grid: "+name);
+    }
+    private void jumpTo(Point point) {
+        boolean data=activeCanvas().jumpToWorldCoordinate(point);
+        progressLabel.setText("View centered on ("+point.x+", "+point.y+")"+(data?"":"; no cached map data nearby"));
+    }
+    private void jumpAnchor(String key) {
+        if("F4".equals(key)) {SelectionMath.Bounds b=activeCanvas().getSelectionBounds();if(b!=null) jumpTo(b.center());else progressLabel.setText("No selection to center on");return;}
+        WorldAnchors.Anchor anchor="F3".equals(key)&&worldAnchors.player!=null?worldAnchors.player:worldAnchors.spawn;
+        if(anchor==null) {JOptionPane.showMessageDialog(this,"Spawn/player coordinates are unavailable in level.dat","World anchor unavailable",JOptionPane.INFORMATION_MESSAGE);return;}
+        if(currentDimension!=null&&!anchor.dimension.equals(currentDimension.getId())) {
+            WorldPathResolver.DimensionInfo target=null;
+            for(WorldPathResolver.DimensionInfo dim:availableDimensions) if(anchor.dimension.equals(dim.getId())) {target=dim;break;}
+            if(target==null) {JOptionPane.showMessageDialog(this,"Anchor dimension is unavailable: "+anchor.dimension);return;}
+            dimensionDropdown.setSelectedItem(target);
+            // Dimension switching queues its initial view; jump after that EDT task.
+            SwingUtilities.invokeLater(()->jumpTo(anchor.xz));
+        } else jumpTo(anchor.xz);
+    }
+    private void handleSelectionConfirmation(SelectionMath.Bounds b) {
+        if(confirmationOpen) return;
+        confirmationOpen=true;
+        try {
+            int minY=heightRangeSlider.getLowerValue(),maxY=heightRangeSlider.getUpperValue();
+            long generation=viewGeneration;SelectionCanvas canvas=activeCanvas();Map<String,Object> approvedShape=canvas.getSelectionShape().json();
+            SelectionStats stats=new SelectionStats(b,minY,maxY);
+            ImportLod approvedLod=resolvedImportLod(b);
+            String lodSummary=approvedLod.maxLevel==0?"Import LOD: Off":"Import LOD: "+approvedLod.maxLevel+"; center (blocks): "+approvedLod.centerX+", "+approvedLod.centerZ+"; widths (chunks): "+approvedLod.distance(0)+", "+approvedLod.distance(1)+", "+approvedLod.distance(2)+", "+approvedLod.distance(3);
+            String message="Import bounds: "+ClipboardCoords.selection(b,minY,maxY)+"\n"+stats+"\n"+lodSummary+"\n\n"+
+                (stats.isLarge()?"Large selection: Blender may require substantial memory and time.\n":"")+"Export uses a single inclusive AABB. All blocks within these bounds are imported.\nContinue with this selection?";
+            int result=JOptionPane.showConfirmDialog(this,message,"Confirm import selection",JOptionPane.OK_CANCEL_OPTION,stats.isLarge()?JOptionPane.WARNING_MESSAGE:JOptionPane.QUESTION_MESSAGE);
+            if(result!=JOptionPane.OK_OPTION) {progressLabel.setText("Confirmation cancelled; selection kept");return;}
+            if(!approvedLod.json().equals(resolvedImportLod(b).json())||generation!=viewGeneration||canvas!=activeCanvas()||!approvedShape.equals(canvas.getSelectionShape().json())||!b.equals(canvas.getSelectionBounds())||minY!=heightRangeSlider.getLowerValue()||maxY!=heightRangeSlider.getUpperValue()) {
+                progressLabel.setText("Map or import bounds changed during confirmation; please confirm again");return;
+            }
+            progressLabel.setText("Confirmed: "+b);
+            if(isBlenderMode&&outputFilePath!=null) outputCoordinatesToFile(b.minX,b.minZ,b.maxX,b.maxZ,minY,maxY,approvedLod);
+        } finally {confirmationOpen=false;updateSelectionStats();}
+    }
+
+    private void confirmSelection() {activeCanvas().confirmCurrentSelection();}
 
     /**
      * 切换自动加载模式
@@ -1573,7 +2475,7 @@ public class MinecraftMapGUI extends JFrame {
         boolean enabled = autoLoadCheckbox.isSelected();
 
         if (mapCanvas != null) {
-            mapCanvas.enableAutoViewportManagement(enabled);
+            mapCanvas.enableAutoViewportManagement(enabled && !isDynamicMode);
         }
 
         if (enabled) {
@@ -1587,12 +2489,19 @@ public class MinecraftMapGUI extends JFrame {
      * 在后台加载区域 - 优化版本 (Java 8兼容)
      */
     private void loadRegionInBackground(int regionX, int regionZ) {
-        if (!autoLoadCheckbox.isSelected()) return;
+        final int requestedSampleInterval=getLodLevel();
+        final long requestGeneration = viewGeneration;
+        final File requestedRegionDir = getCurrentRegionDir();
+        final MapRenderer.SurfaceMode requestedMode = surfaceMode;
+        final PreviewOptions requestedPreview=preview;
+        final Integer requestedTop=heightRangeSlider.getUpperValue();
+        final Integer requestedBottom=heightRangeSlider.getLowerValue();
+        if (!autoLoadCheckbox.isSelected() || isDynamicMode || loadingPanel.getPhase()==LoadingPhasePanel.Phase.PREPARING) return;
 
         // 使用后台线程池异步加载
         Future<BufferedImage> future = backgroundExecutor.submit(() -> {
             String regionFile = String.format("r.%d.%d.mca", regionX, regionZ);
-            File regionPath = WorldPathResolver.getMcaFile(savePath, regionX, regionZ);
+            File regionPath = new File(requestedRegionDir, regionFile);
 
             if (!regionPath.exists()) {
                 System.out.printf("Region file not found: %s\n", regionFile);
@@ -1616,17 +2525,17 @@ public class MinecraftMapGUI extends JFrame {
             };
 
             // 创建地图渲染器，使用单线程避免影响主渲染
-            MapRenderer renderer = new MapRenderer(1, progressCallback);
+            MapRenderer renderer = new MapRenderer(1, progressCallback, requestedMode,requestedTop,requestedBottom,BlockColors.snapshot(),requestedPreview);
 
             try {
-                // 渲染整个区域 (32x32区块 = 512x512方块)
-                MapRenderer.BlockInfo[][] topBlocks = renderer.getTopBlocks(regionPath.getAbsolutePath(), 32, 1);
-                if (topBlocks != null) {
-                    BufferedImage regionImage = renderer.renderToPng(topBlocks, 1);
-                    if (regionImage != null) {
-                        System.out.printf("Rendered region: %s, image size: %dx%d\n",
-                            regionFile, regionImage.getWidth(), regionImage.getHeight());
-                    }
+                // 渲染整个区域 (32x32区块 = 512x512方块)：平移加载时也顺手把该 region 的层缓存建好
+                MapRenderer.RegionScan scan = renderer.scanRegionBlocks(regionPath.getAbsolutePath(), 32,
+                    requestedTop, requestedBottom, true, highlightBandTop(),requestedSampleInterval);
+                if (scan.cache != null) stashColumnCache(regionPath.getAbsolutePath(), scan.cache, scan.palette);
+                BufferedImage regionImage = scan.image();
+                if (regionImage != null) {
+                    System.out.printf("Rendered region: %s, image size: %dx%d\n",
+                        regionFile, regionImage.getWidth(), regionImage.getHeight());
                     return regionImage;
                 }
                 return null;
@@ -1643,15 +2552,14 @@ public class MinecraftMapGUI extends JFrame {
             try {
                 BufferedImage regionImage = future.get();
                 if (regionImage != null) {
-                    // 添加到动态地图管理器
-                    dynamicMapManager.addRegion(regionX, regionZ, regionImage);
-
-                    // 更新地图显示，保持用户当前视图
                     SwingUtilities.invokeLater(() -> {
+                        if (requestGeneration != viewGeneration) return;
+                        dynamicMapManager.addRegion(regionX, regionZ, regionImage);
                         BufferedImage combinedImage = dynamicMapManager.getCombinedImage();
                         if (combinedImage != null) {
                             // 使用新方法保持世界坐标中心点不变，避免视角跳动
                             Point worldOrigin = dynamicMapManager.getWorldOrigin();
+                            adoptAutoLoadedView(combinedImage, worldOrigin, requestedTop, requestedBottom);
                             mapCanvas.setImageKeepWorldCenter(combinedImage, worldOrigin.x, worldOrigin.y);
 
                             // 确保布局稳定
@@ -1666,7 +2574,14 @@ public class MinecraftMapGUI extends JFrame {
                     System.out.printf("Loaded region r.%d.%d.mca\n", regionX, regionZ);
                 }
             } catch (Exception throwable) {
+                if (UserFeedback.isBenignCancel(throwable)) return;
                 System.err.printf("Failed to load region r.%d.%d.mca: %s\n", regionX, regionZ, throwable.getMessage());
+                final String msg = String.format("Failed to load region r.%d.%d.mca: %s", regionX, regionZ,
+                    throwable.getMessage() != null ? throwable.getMessage() : throwable.getClass().getSimpleName());
+                SwingUtilities.invokeLater(() -> {
+                    if (requestGeneration != viewGeneration) return;
+                    UserFeedback.warn(MinecraftMapGUI.this, progressLabel, msg, throwable);
+                });
             }
         });
     }
@@ -1684,6 +2599,8 @@ public class MinecraftMapGUI extends JFrame {
             if (combinedImage != null) {
                 // 使用新方法保持世界坐标中心点不变，避免视角跳动
                 Point worldOrigin = dynamicMapManager.getWorldOrigin();
+                adoptAutoLoadedView(combinedImage, worldOrigin,
+                    heightRangeSlider.getUpperValue(), heightRangeSlider.getLowerValue());
                 mapCanvas.setImageKeepWorldCenter(combinedImage, worldOrigin.x, worldOrigin.y);
 
                 // 确保布局稳定
@@ -1706,57 +2623,7 @@ public class MinecraftMapGUI extends JFrame {
      * 重新渲染当前视图
      */
     private void reRenderCurrentView() {
-        if (dynamicMapManager == null) return;
-
-        // 清除当前所有区域
-        dynamicMapManager.clear();
-        mapCanvas.setImage(null);
-
-        // 重新启动自动加载
-        if (autoLoadCheckbox.isSelected()) {
-            progressLabel.setText("Re-rendering current view...");
-
-            // 触发视野更新，重新加载区域
-            SwingUtilities.invokeLater(() -> {
-                if (mapCanvas != null) {
-                    // 强制更新视野
-                    mapCanvas.forceViewportUpdate();
-                }
-                progressLabel.setText("Reloading regions...");
-            });
-        } else {
-            progressLabel.setText("Please enable auto-load first");
-        }
-    }
-
-    /**
-     * 打开 3D 查看器 - 使用动态区块加载
-     */
-    private void openViewer3D() {
-        if (savePath == null) {
-            JOptionPane.showMessageDialog(this, 
-                "Please select an MC save first", 
-                "Info", 
-                JOptionPane.WARNING_MESSAGE);
-            return;
-        }
-        
-        try {
-            System.out.println("Open dynamic 3D viewer");
-            System.out.println("Save path: " + savePath);
-            
-            // 创建动态3D查看器
-            Dynamic3DViewer viewer = new Dynamic3DViewer(savePath, 0, 0);
-            viewer.setVisible(true);
-            
-        } catch (Exception ex) {
-            System.err.println("Failed to open 3D viewer: " + ex.getMessage());
-            ex.printStackTrace();
-            JOptionPane.showMessageDialog(this, 
-                "Failed to open 3D viewer: " + ex.getMessage(), 
-                "Error", 
-                JOptionPane.ERROR_MESSAGE);
-        }
+        resetSurfaceView();
     }
 
     /**
@@ -1765,13 +2632,24 @@ public class MinecraftMapGUI extends JFrame {
     private void loadWorldFromPath(String worldPath) {
         File worldDir = new File(worldPath);
         if (!worldDir.exists() || !worldDir.isDirectory()) {
-            System.err.println("Invalid world path: " + worldPath);
+            showErrorState("Invalid world path: " + worldPath);
+            UserFeedback.error(this, progressLabel, "Invalid world path: " + worldPath);
+            return;
+        }
+        String invalid = WorldPathResolver.explainInvalidSave(worldPath);
+        if (invalid != null) {
+            showErrorState(invalid);
+            UserFeedback.error(this, progressLabel, invalid);
             return;
         }
 
-        System.out.println("Blender mode: loading world " + worldPath);
+        cancelP2Scan();++viewGeneration;
+        dimensionDropdown.setEnabled(false);
+        showLoadingState("Parsing world: " + worldPath);
 
         // 设置存档路径
+        ++colorGeneration;
+        lastMcaPath=null;singleResourcePath=null;
         this.savePath = worldPath;
 
         // 更新GUI界面显示存档路径
@@ -1779,34 +2657,23 @@ public class MinecraftMapGUI extends JFrame {
             if (saveInfoLabel != null) {
                 saveInfoLabel.setText("Current save: " + worldDir.getName());
             }
-            progressLabel.setText("Blender mode: reading save info...");
+            progressLabel.setText("Reading save info...");
         });
 
         // 在后台线程中加载存档数据，模拟用户选择存档的完整流程
-        SwingWorker<Void, Void> worker = new SwingWorker<Void, Void>() {
-            @Override
-            protected Void doInBackground() throws Exception {
-                // 调用loadSaveData方法，这会完整地加载存档数据
-                loadSaveData();
-                return null;
-            }
-
-            @Override
+        final long request=viewGeneration;
+        final ResourceOptions requestedResources=colorResources.copy();
+        SwingWorker<PreparedWorld, Void> worker = new SwingWorker<PreparedWorld, Void>() {
+            protected PreparedWorld doInBackground() {return loadSaveData(request,worldPath,requestedResources);}
             protected void done() {
-                SwingUtilities.invokeLater(() -> {
-                    progressLabel.setText("Blender mode: save loaded, auto-load enabled");
-
-                    // 启用自动加载
-                    autoLoadCheckbox.setSelected(true);
-                    toggleAutoLoad();
-                    
-                    // 自动启用动态模式（与正常模式保持一致）
-                    if (!isDynamicMode) {
-                        enableDynamicMode();
-                    }
-
-                    System.out.println("Blender mode: world loaded with auto-load and dynamic mode " + worldPath);
-                });
+                if(request!=viewGeneration) return;
+                try {applyPreparedWorld(get());}
+                catch(Exception error) {
+                    if(UserFeedback.isBenignCancel(error)) return;
+                    String msg="World loading failed: "+(error.getMessage()!=null?error.getMessage():error.getClass().getSimpleName());
+                    showErrorState(msg);
+                    UserFeedback.error(MinecraftMapGUI.this, progressLabel, msg, error);
+                }
             }
         };
         worker.execute();
@@ -1815,32 +2682,12 @@ public class MinecraftMapGUI extends JFrame {
     /**
      * 输出坐标到文件（用于Blender集成）
      */
-    private void outputCoordinatesToFile(int minX, int minZ, int maxX, int maxZ) {
+    private void outputCoordinatesToFile(int minX,int minZ,int maxX,int maxZ,int actualMinY,int actualMaxY,ImportLod importLod) {
         try {
-            // 使用高度滑块/输入框的当前值（用户在GUI中可调整），而非构造时的固定值
-            int actualMinY;
-            int actualMaxY;
-            if (heightRangeSlider != null) {
-                actualMinY = heightRangeSlider.getLowerValue();
-                actualMaxY = heightRangeSlider.getUpperValue();
-            } else {
-                actualMinY = blenderMinY;
-                actualMaxY = blenderMaxY;
-            }
-
-            // 写入文件
-            try (java.io.FileWriter writer = new java.io.FileWriter(outputFilePath)) {
-                // 简单的JSON输出
-                writer.write("{\n");
-                writer.write("  \"minX\": " + minX + ",\n");
-                writer.write("  \"minY\": " + actualMinY + ",\n");
-                writer.write("  \"minZ\": " + minZ + ",\n");
-                writer.write("  \"maxX\": " + maxX + ",\n");
-                writer.write("  \"maxY\": " + actualMaxY + ",\n");
-                writer.write("  \"maxZ\": " + maxZ + ",\n");
-                writer.write("  \"timestamp\": " + System.currentTimeMillis() + "\n");
-                writer.write("}\n");
-            }
+            // Use exactly the Y bounds shown in the approved confirmation dialog.
+            new com.fasterxml.jackson.databind.ObjectMapper().writerWithDefaultPrettyPrinter().writeValue(
+                new File(outputFilePath),CoordinatesPayload.create(new SelectionMath.Bounds(minX,minZ,maxX,maxZ),actualMinY,actualMaxY,System.currentTimeMillis(),
+                    currentDimension==null?null:currentDimension.getId(),worldAnchors.worldName,worldAnchors.dataVersion,activeCanvas().getSelectionShape(),multiBoxExport,overlays.waypoints,includeWaypointsExport,importLod));
 
             System.out.printf("Blender mode: coordinates written to %s\n", outputFilePath);
             System.out.printf("XYZ range: (%d,%d,%d) to (%d,%d,%d)\n",
@@ -1960,6 +2807,13 @@ public class MinecraftMapGUI extends JFrame {
      * 渲染所有可用的区域
      */
     private void renderAllAvailableRegions() {
+        final File requestedRegionDir=getCurrentRegionDir();
+        final String requestedLod=(String)lodDropdown.getSelectedItem();
+        final long requestGeneration = viewGeneration;
+        final MapRenderer.SurfaceMode requestedMode = surfaceMode;
+        final PreviewOptions requestedPreview=preview;
+        final Integer requestedTop=heightRangeSlider.getUpperValue();
+        final Integer requestedBottom=heightRangeSlider.getLowerValue();
         if (savePath == null || savePath.isEmpty()) {
             JOptionPane.showMessageDialog(this, 
                 "Please select a Minecraft save first", 
@@ -1971,20 +2825,27 @@ public class MinecraftMapGUI extends JFrame {
         logManager.info("Start scanning all available regions", "MinecraftMapGUI");
         
         SwingWorker<BufferedImage, Void> worker = new SwingWorker<BufferedImage, Void>() {
+            private ViewRecipe renderedView;
             @Override
             protected BufferedImage doInBackground() throws Exception {
                 // 扫描所有可用的区域文件
-                File regionDir = WorldPathResolver.getOverworldRegionDir(savePath);
+                File regionDir = requestedRegionDir;
                 if (!regionDir.exists()) {
-                    logManager.error("Region dir does not exist: " + regionDir.getAbsolutePath(), "MinecraftMapGUI");
-                    return null;
+                    WorldPathResolver.RegionResolve resolve = WorldPathResolver.resolveRegionDir(
+                        savePath, currentDimension != null ? currentDimension.getId() : "minecraft:overworld");
+                    String msg = resolve.isFound()
+                        ? ("Region dir does not exist: " + regionDir.getAbsolutePath())
+                        : resolve.missingMessage(currentDimension != null ? currentDimension.getId() : "minecraft:overworld");
+                    logManager.error(msg, "MinecraftMapGUI");
+                    throw new IllegalStateException(msg);
                 }
-                
+
                 // 获取所有.mca文件
                 File[] mcaFiles = regionDir.listFiles((dir, name) -> name.endsWith(".mca"));
                 if (mcaFiles == null || mcaFiles.length == 0) {
-                    logManager.warn("No .mca region files found", "MinecraftMapGUI");
-                    return null;
+                    String msg = "region 目录为空（无 .mca）/ No .mca in: " + regionDir.getAbsolutePath();
+                    logManager.warn(msg, "MinecraftMapGUI");
+                    throw new IllegalStateException(msg);
                 }
                 
                 logManager.info("Found " + mcaFiles.length + " region files", "MinecraftMapGUI");
@@ -2039,8 +2900,11 @@ public class MinecraftMapGUI extends JFrame {
                         validMcaFiles.size(), totalWidth, totalHeight));
                 });
                 
+                final int requestedSampleInterval=resolveLodLevel(requestedLod,validMcaFiles.size());
+                renderedView=new ViewRecipe(validMcaFiles,coordsOf(validMcaFiles,regionCoords),regionBounds[0],regionBounds[2],
+                    totalWidth,totalHeight,requestedMode,BlockColors.snapshot(),requestedPreview,requestedSampleInterval);
                 // 创建大图像
-                BufferedImage combinedImage = new BufferedImage(totalWidth, totalHeight, BufferedImage.TYPE_INT_RGB);
+                RenderedMap combinedImage = new RenderedMap(totalWidth, totalHeight);
                 Graphics2D g2d = combinedImage.createGraphics();
                 
                 // 设置高质量渲染
@@ -2051,14 +2915,18 @@ public class MinecraftMapGUI extends JFrame {
                 g2d.setColor(new Color(32, 32, 32));
                 g2d.fillRect(0, 0, totalWidth, totalHeight);
                 
+                showMapLoadingDelayed(requestGeneration,"Loading map regions...");
                 // 创建进度回调
+                final java.util.concurrent.atomic.AtomicInteger completedRegions=new java.util.concurrent.atomic.AtomicInteger();
                 MapRenderer.ProgressCallback progressCallback = new MapRenderer.ProgressCallback() {
                     @Override
                     public void onProgress(int processed, int total, double speed, java.util.Set<String> foundBlocks) {
+                        final int completed=completedRegions.get();
+                        final int finished=completed*1000+(total<=0?0:(int)(1000L*processed/total));
                         SwingUtilities.invokeLater(() -> {
-                            int percent = total > 0 ? (processed * 100 / total) : 0;
-                            progressLabel.setText(String.format("Progress: %d%% (%d/%d) - %.1f chunks/s",
-                                percent, processed, total, speed));
+                            if(requestGeneration!=viewGeneration) return;
+                            loadingPanel.mapProgress(requestGeneration,finished,validMcaFiles.size()*1000,
+                                String.format("Map regions: %d/%d; chunks: %d/%d (%.1f/s)",completed,validMcaFiles.size(),processed,total,speed));
                         });
                     }
                     
@@ -2070,7 +2938,7 @@ public class MinecraftMapGUI extends JFrame {
                 
                 // 创建地图渲染器
                 int maxWorkers = Math.min(Runtime.getRuntime().availableProcessors(), 4);
-                MapRenderer renderer = new MapRenderer(maxWorkers, progressCallback);
+                MapRenderer renderer = new MapRenderer(maxWorkers, progressCallback, requestedMode,requestedTop,requestedBottom,BlockColors.snapshot(),requestedPreview);
                 
                 try {
                     // 渲染每个区域
@@ -2091,9 +2959,10 @@ public class MinecraftMapGUI extends JFrame {
                             });
                             
                             // 渲染单个区域
-                            MapRenderer.BlockInfo[][] topBlocks = renderer.getTopBlocks(mcaFile, 32, 1);
-                            if (topBlocks != null) {
-                                BufferedImage regionImage = renderer.renderToPng(topBlocks, 1);
+                            MapRenderer.RegionScan scan=renderer.scanRegionBlocks(mcaFile,32,requestedTop,requestedBottom,
+                                false,highlightBandTop(),requestedSampleInterval);
+                            if (scan != null) {
+                                BufferedImage regionImage = scan.image();
                                 if (regionImage != null) {
                                     // 计算在大图像中的正确位置
                                     int offsetX = (regionX - regionBounds[0]) * 512;
@@ -2101,6 +2970,8 @@ public class MinecraftMapGUI extends JFrame {
                                     
                                     logManager.debug(String.format("Placing region image at: (%d, %d)", offsetX, offsetY), "MinecraftMapGUI");
                                     g2d.drawImage(regionImage, offsetX, offsetY, null);
+                                    combinedImage.copyHeightsFrom(regionImage, offsetX, offsetY);
+                                    combinedImage.copyHighlightsFrom(regionImage, offsetX, offsetY);
                                 } else {
                                     logManager.warn("Region image render failed: r." + regionX + "." + regionZ + ".mca", "MinecraftMapGUI");
                                 }
@@ -2108,6 +2979,7 @@ public class MinecraftMapGUI extends JFrame {
                                 logManager.warn("Region data fetch failed: r." + regionX + "." + regionZ + ".mca", "MinecraftMapGUI");
                             }
                         }
+                        completedRegions.incrementAndGet();
                     }
                     
                     g2d.dispose();
@@ -2130,15 +3002,23 @@ public class MinecraftMapGUI extends JFrame {
             
             @Override
             protected void done() {
+                if (requestGeneration != viewGeneration) return;
                 try {
                     BufferedImage result = get();
                     if (result != null) {
                         mapImage = result;
+                        lastView = renderedView;
+                        sourceTop = requestedTop;
+                        sourceBottom = requestedBottom;
+                        previewCut = false;
+                        displayedTop = requestedTop;
+                        displayedBottom = requestedBottom;
+                        displayApproximate = false;
                         
                         SwingUtilities.invokeLater(() -> {
                             // 更新显示
                             mapCanvas.setImage(result);
-                            progressLabel.setText("Full-region render complete! All available regions rendered.");
+                            progressLabel.setText("Full-region render complete! All available regions rendered.");hideLoadingState();
                             
                             // 设置世界坐标映射
                             mapCanvas.setWorldCoordinateMapping(lastFullRenderMinWorldX, lastFullRenderMinWorldZ, 1.0);
@@ -2150,13 +3030,13 @@ public class MinecraftMapGUI extends JFrame {
                         logManager.info("Map display updated", "MinecraftMapGUI");
                     } else {
                         SwingUtilities.invokeLater(() -> {
-                            progressLabel.setText("Full-region rendering failed");
+                            progressLabel.setText("Full-region rendering failed");hideLoadingState();
                         });
                         logManager.error("Full-region rendering failed", "MinecraftMapGUI");
                     }
                 } catch (Exception e) {
                     SwingUtilities.invokeLater(() -> {
-                        progressLabel.setText("Render error: " + e.getMessage());
+                        progressLabel.setText("Render error: " + e.getMessage());hideLoadingState();
                         JOptionPane.showMessageDialog(MinecraftMapGUI.this,
                             "Error rendering all regions: " + e.getMessage(),
                             "Error", JOptionPane.ERROR_MESSAGE);
@@ -2173,6 +3053,7 @@ public class MinecraftMapGUI extends JFrame {
      * 切换动态模式
      */
     private void toggleDynamicMode() {
+        if(loadingPanel.getPhase()==LoadingPhasePanel.Phase.PREPARING) return;
         if (savePath == null || savePath.isEmpty()) {
             JOptionPane.showMessageDialog(this, 
                 "Please select a Minecraft save first", 
@@ -2196,53 +3077,26 @@ public class MinecraftMapGUI extends JFrame {
     private void enableDynamicMode() {
         try {
             logManager.info("Enable dynamic mode", "MinecraftMapGUI");
+            // 动态视口用的是另一块画布/另一套拼图，静态图的层缓存配方在这里失效
+            lastView = null;
             
+            mapCanvas.enableAutoViewportManagement(false);
             // Create the manager for the currently selected dimension.
-            dynamicRegionManager = new DynamicRegionManager(savePath, getCurrentRegionDir());
+            dynamicRegionManager = createDynamicRegionManager();
             
             // 创建动态地图画布
             dynamicMapCanvas = new DynamicMapCanvas();
-            dynamicMapCanvas.setRegionManager(dynamicRegionManager);
+            dynamicMapCanvas.setHoverListener(coordDisplayLabel::setText);
+            dynamicMapCanvas.setRegionManager(dynamicRegionManager,false);
             
             // 设置选区回调
             dynamicMapCanvas.setSelectionCallback(new DynamicMapCanvas.SelectionCallback() {
-                @Override
-                public void onSelectionComplete(int minX, int minZ, int maxX, int maxZ) {
-                    // 选择完成时只更新UI显示，启用确认按钮
-                    SwingUtilities.invokeLater(() -> {
-                        confirmSelectionButton.setEnabled(true);
-                        progressLabel.setText(String.format("Selected area: (%d,%d) to (%d,%d) - click Confirm",
-                            minX, minZ, maxX, maxZ));
-                    });
-                }
-                
-                @Override
-                public void onSelectionConfirmed(int minX, int minZ, int maxX, int maxZ) {
-                    // 按确认按钮时返回坐标并更新输入框
-                    SwingUtilities.invokeLater(() -> {
-                        int centerX = (minX + maxX) / 2;
-                        int centerZ = (minZ + maxZ) / 2;
-                        int sizeX = maxX - minX;
-                        int sizeZ = maxZ - minZ;
-
-                        progressLabel.setText(String.format("Confirmed area: (%d,%d) to (%d,%d)",
-                            minX, minZ, maxX, maxZ));
-
-                        // 在控制台输出坐标
-                        System.out.printf("=== Confirmed Selection ===\n");
-                        System.out.printf("Top-left corner: (%d, %d)\n", minX, minZ);
-                        System.out.printf("Bottom-right corner: (%d, %d)\n", maxX, maxZ);
-                        System.out.printf("Center: (%d, %d)\n", centerX, centerZ);
-                        System.out.printf("Area size: %dx%d\n", sizeX, sizeZ);
-
-                        // 如果是Blender模式，输出坐标到文件并关闭程序
-                        if (isBlenderMode && outputFilePath != null) {
-                            outputCoordinatesToFile(minX, minZ, maxX, maxZ);
-                        }
-                    });
-                }
+                @Override public void onSelectionComplete(int minX,int minZ,int maxX,int maxZ) {updateSelectionStats();}
+                @Override public void onSelectionConfirmed(int minX,int minZ,int maxX,int maxZ) {handleSelectionConfirmation(new SelectionMath.Bounds(minX,minZ,maxX,maxZ));}
             });
-            
+            configureCanvas(dynamicMapCanvas);
+            dynamicMapCanvas.restoreSelectionBounds(mapCanvas.getSelectionBounds());
+
             // 替换地图显示组件
             Container parent = mapCanvas.getParent();
             if (parent != null) {
@@ -2254,11 +3108,12 @@ public class MinecraftMapGUI extends JFrame {
             
             // 适应窗口
             SwingUtilities.invokeLater(() -> {
-                dynamicMapCanvas.fitToWindow();
+                dynamicMapCanvas.showInitialViewport(playerPos);
                 dynamicMapCanvas.requestFocus(); // 确保可以接收键盘事件
             });
             
             isDynamicMode = true;
+            updateSelectionStats();
             
             // 更新按钮文本和颜色（按钮已隐藏，但保留逻辑）
             // dynamicModeButton.setText("Exit dynamic mode");
@@ -2284,9 +3139,11 @@ public class MinecraftMapGUI extends JFrame {
     private void disableDynamicMode() {
         try {
             logManager.info("Disable dynamic mode", "MinecraftMapGUI");
+            lastView = null;
             
             // 清理动态组件
             if (dynamicMapCanvas != null) {
+                mapCanvas.restoreSelectionBounds(dynamicMapCanvas.getSelectionBounds());
                 dynamicMapCanvas.cleanup();
                 
                 // 替换回原来的地图画布
@@ -2308,6 +3165,7 @@ public class MinecraftMapGUI extends JFrame {
             }
             
             isDynamicMode = false;
+            updateSelectionStats();
             
             // 更新按钮文本和颜色（按钮已隐藏，但保留逻辑）
             // dynamicModeButton.setText("Dynamic Mode");
@@ -2364,5 +3222,170 @@ public class MinecraftMapGUI extends JFrame {
                     "Error", JOptionPane.ERROR_MESSAGE);
             }
         }
+    }
+
+    private void repaintCanvases() {if(mapCanvas!=null) mapCanvas.repaint();if(dynamicMapCanvas!=null) dynamicMapCanvas.repaint();}
+    private void addPreviewItem(JMenu menu,String title,String command,boolean selected) {
+        JCheckBoxMenuItem item=new JCheckBoxMenuItem(title,selected);previewItems.put(command,item);menu.add(item);item.addActionListener(e->togglePreview(command));
+    }
+    private void togglePreview(String command) {
+        overlays.resetSelectionTool();
+        boolean render=false;
+        switch(command) {
+            case "water":preview=new PreviewOptions(!preview.transparentWater,preview.cave,preview.biomeMode);render=true;break;
+            case "cave":preview=new PreviewOptions(preview.transparentWater,!preview.cave,preview.biomeMode);render=true;break;
+            case "biome":preview=new PreviewOptions(preview.transparentWater,preview.cave,preview.biomeMode+1);render=true;break;
+            case "night":overlays.night=!overlays.night;break;
+            case "contours":overlays.contours=!overlays.contours;break;
+            case "markers":overlays.markers=!overlays.markers;break;
+            case "gaps":overlays.gaps=!overlays.gaps;break;
+            case "scale":overlays.scaleBar=!overlays.scaleBar;break;
+            case "minimap":overlays.minimap=!overlays.minimap;break;
+            case "hud":overlays.hud=!overlays.hud;break;
+            case "ore":overlays.ore=!overlays.ore;break;
+            case "pos":overlays.selectionMode="Box";overlays.posMode=!overlays.posMode;overlays.addBoxMode=false;mapCanvas.resetPosCorner();if(dynamicMapCanvas!=null) dynamicMapCanvas.resetPosCorner();break;
+        }
+        String[] commands={"water","cave","night","contours","markers","gaps","scale","pos"};
+        boolean[] states={preview.transparentWater,preview.cave,overlays.night,overlays.contours,overlays.markers,overlays.gaps,overlays.scaleBar,overlays.posMode};
+        for(int i=0;i<commands.length;i++) if(previewItems.containsKey(commands[i])) previewItems.get(commands[i]).setSelected(states[i]);
+        if(biomeMenu!=null) biomeMenu.setText("Biomes: "+new String[]{"Surface","Tint composite","Biome overlay"}[preview.biomeMode]);
+        if(render) {synchronized(columnCaches){columnCaches.clear();}lastView=null;cacheBuildGeneration++;if(heightDebounce!=null) heightDebounce.stop();resetSurfaceView();}else repaintCanvases();
+    }
+    private void refreshRecentWorlds() {
+        if(recentMenu==null) return;recentMenu.removeAll();
+        try {for(String path:recentWorlds.list()) addMenuItem(recentMenu,path,e->loadWorldFromPath(path),null,path);}
+        catch(IOException e) {JMenuItem error=new JMenuItem("Recent worlds unavailable: "+e.getMessage());error.setEnabled(false);recentMenu.add(error);}
+        if(recentMenu.getItemCount()==0) {JMenuItem empty=new JMenuItem("No recent worlds");empty.setEnabled(false);recentMenu.add(empty);}
+    }
+    private void showWorldInfo() {
+        StringBuilder info=new StringBuilder("Name: ").append(worldAnchors.worldName).append("\nPath: ").append(savePath==null?lastMcaPath:savePath)
+            .append("\nVersion: ").append(worldAnchors.versionName).append("\nDataVersion: ").append(worldAnchors.dataVersion).append("\nDimensions:\n");
+        for(WorldPathResolver.DimensionInfo d:availableDimensions) info.append(d.getId()).append("  ").append(d.getRegionDir()).append('\n');
+        info.append("\nResource fingerprint (SHA-256): ").append(BlockColors.snapshot().fingerprint()).append("\nPreview: ").append(preview.cacheKey()).append("; night=").append(overlays.night);
+        WorldInfoDialog.show(this,info.toString());
+    }
+    private void showCoverage() {JOptionPane.showMessageDialog(this,new ResourceCoveragePanel(ResourceCoveragePanel.report(activeCanvas().visibleBlockCounts(),BlockColors.snapshot())),"Resource coverage",JOptionPane.PLAIN_MESSAGE);}
+    private File chooseOutput(String title,String extension) {
+        JFileChooser chooser=new JFileChooser();chooser.setDialogTitle(title);chooser.setFileFilter(new FileNameExtensionFilter(extension.toUpperCase()+" files",extension));
+        if(chooser.showSaveDialog(this)!=JFileChooser.APPROVE_OPTION) return null;
+        File f=chooser.getSelectedFile();if(!f.getName().toLowerCase(java.util.Locale.ROOT).endsWith("."+extension)) f=new File(f.getPath()+"."+extension);
+        if(f.exists()&&JOptionPane.showConfirmDialog(this,"Replace "+f.getName()+"?",title,JOptionPane.OK_CANCEL_OPTION)!=JOptionPane.OK_OPTION) return null;return f;
+    }
+    private void savePreset() {
+        SelectionMath.Bounds b=activeCanvas().getSelectionBounds();if(b==null) {progressLabel.setText("Select an area before saving a preset");return;}
+        File f=chooseOutput("Save selection preset","json");if(f==null) return;
+        try {new SelectionPreset(b,heightRangeSlider.getLowerValue(),heightRangeSlider.getUpperValue(),currentDimension==null?null:currentDimension.getId(),activeCanvas().getSelectionShape(),overlays.waypoints).save(f);progressLabel.setText("Preset saved: "+f);}
+        catch(Exception e) {showFileError(e);}
+    }
+    private void loadPreset() {
+        JFileChooser chooser=new JFileChooser();chooser.setDialogTitle("Load selection preset");if(chooser.showOpenDialog(this)!=JFileChooser.APPROVE_OPTION) return;
+        loadPresetFile(chooser.getSelectedFile());
+    }
+    private void loadPresetFile(File file) {
+        try {
+            SelectionPreset preset=SelectionPreset.load(file);
+            WorldPathResolver.DimensionInfo target=null;
+            if(preset.dimension!=null) {for(WorldPathResolver.DimensionInfo d:availableDimensions) if(preset.dimension.equals(d.getId())) target=d;
+                if(target==null) throw new IOException("Preset dimension is not available in this world: "+preset.dimension);}
+            boolean dimensionChanged=target!=null&&(currentDimension==null||!target.getId().equals(currentDimension.getId()));
+            if(target!=null) switchDimension(target);
+            // Restore the values immediately, including dimensions with no nearby cached tile.
+            overlays.resetSelectionTool();
+            activeCanvas().restoreSelectionBounds(preset.bounds);
+            if(preset.minY!=null) heightRangeSlider.setSelectedRange(preset.minY,preset.maxY);
+            pendingPreset=preset;
+            if(!isDynamicMode&&mapCanvas.getImage()==null&&target!=null) {
+                Point center=preset.bounds.center();currentRegion=new Point(Math.floorDiv(center.x,512),Math.floorDiv(center.y,512));
+                File region=new File(target.getRegionDir(),String.format("r.%d.%d.mca",currentRegion.x,currentRegion.y));
+                if(region.isFile()) renderMap(region.getAbsolutePath());
+            }
+            // switchDimension queues its initial view; recenter the preset after that task.
+            if(dimensionChanged&&isDynamicMode) SwingUtilities.invokeLater(this::applyPendingPreset);else applyPendingPreset();
+        } catch(Exception e) {showFileError(e);}
+    }
+    private void applyPendingPreset() {
+        if(pendingPreset==null||mapCanvas==null) return;
+        if(isDynamicMode) {if(dynamicMapCanvas==null||dynamicRegionManager==null) return;}
+        else if(mapCanvas.getImage()==null) return;
+        SelectionPreset preset=pendingPreset;pendingPreset=null;
+        activeCanvas().restoreSelectionBounds(preset.bounds);
+        // Legacy shapes retain their file/model data, but the active selection is their union AABB.
+        overlays.resetSelectionTool();
+        overlays.waypoints.replace(preset.waypoints);
+        if(preset.minY!=null) heightRangeSlider.setSelectedRange(preset.minY,preset.maxY);
+        jumpTo(preset.bounds.center());updateSelectionStats();
+        if(!preset.shape.isEmpty()) progressLabel.setText("Legacy preset shape loaded as a single inclusive AABB (including gaps and corners)");
+    }
+    private void exportView() {
+        File file=chooseOutput("Export current map view","png");if(file==null) return;
+        final BufferedImage image;
+        try {image=ViewExport.capture((JComponent)activeCanvas());}catch(Exception e) {showFileError(e);return;}
+        new SwingWorker<Void,Void>() {
+            protected Void doInBackground() throws Exception {ViewExport.write(image,file);return null;}
+            protected void done() {try {get();progressLabel.setText("View exported: "+file);}catch(Exception e) {showFileError(e);}}
+        }.execute();
+    }
+    private void showFileError(Exception e) {
+        if(UserFeedback.isBenignCancel(e)) return;
+        UserFeedback.error(this, progressLabel, e.getMessage()!=null?e.getMessage():e.getClass().getSimpleName(), e);
+    }
+
+    private void queueSelectionCoverage() {
+        if(selectionCoverageTimer==null) {selectionCoverageTimer=new javax.swing.Timer(180,e->refreshSelectionCoverage());selectionCoverageTimer.setRepeats(false);}selectionCoverageTimer.restart();
+    }
+    private void refreshSelectionCoverage() {
+        final SelectionCanvas canvas=activeCanvas();final SelectionMath.Bounds b=canvas.getSelectionBounds();final long generation=viewGeneration;if(b==null) return;
+        if(selectionCoverageWorker!=null) selectionCoverageWorker.cancel(true);
+        selectionCoverageWorker=new SwingWorker<SelectionYFit.Result,Void>() {
+            protected SelectionYFit.Result doInBackground() {return canvas.fitSelectionY(b,true);}
+            protected void done() {
+                if(isCancelled()||generation!=viewGeneration||canvas!=activeCanvas()||!b.equals(canvas.getSelectionBounds())) return;
+                try {
+                    SelectionYFit.Result r=get();SelectionStats stats=new SelectionStats(b,heightRangeSlider.getLowerValue(),heightRangeSlider.getUpperValue());
+                    java.math.BigInteger total=java.math.BigInteger.valueOf((long)b.maxX-b.minX+1).multiply(java.math.BigInteger.valueOf((long)b.maxZ-b.minZ+1));
+                    java.math.BigInteger missing=total.subtract(java.math.BigInteger.valueOf(r.count+r.empty)).max(java.math.BigInteger.ZERO);
+                    selectionStatsLabel.setText(stats.toString()+" · cached "+r.count+" / empty "+r.empty+" / gaps "+missing);
+                    selectionStatsLabel.setToolTipText("Cached surface columns: "+r.count+"; loaded empty: "+r.empty+"; missing/unloaded: "+missing+". Cost is volume capacity, not actual solid blocks. Alt+arrows expand; Ctrl+Alt+arrows shrink; Shift=16.");
+                } catch(Exception e) {if(!isCancelled()) progressLabel.setText("Coverage unavailable: "+e.getMessage());}
+            }
+        };selectionCoverageWorker.execute();
+    }
+
+    private void handleDroppedFile(File file)throws IOException {
+        switch(DropFiles.classify(file)) {
+            case WORLD:loadWorldFromPath(DropFiles.world(file).getCanonicalPath());break;
+            case PRESET:loadPresetFile(file);break;
+            case PACK:
+                if(JOptionPane.showConfirmDialog(this,"Add resource pack "+file.getName()+" and rebuild preview colors?","Resource pack",JOptionPane.OK_CANCEL_OPTION)!=JOptionPane.OK_OPTION)return;
+                String path=file.getCanonicalPath();if(!colorResources.packs.contains(path))colorResources.packs.add(path);reloadColorResources();break;
+        }
+    }
+    private void addWaypoint(){SelectionMath.Bounds b=activeCanvas().getSelectionBounds();int[] hover=activeCanvas().getHoverCoordinates();Point point=b!=null?b.center():hover!=null?new Point(hover[0],hover[2]):new Point();
+        JTextField label=new JTextField("POI"),x=new JTextField(Integer.toString(point.x)),z=new JTextField(Integer.toString(point.y));JPanel panel=new JPanel(new GridLayout(3,2,6,6));panel.add(new JLabel("Label"));panel.add(label);panel.add(new JLabel("X"));panel.add(x);panel.add(new JLabel("Z"));panel.add(z);
+        if(JOptionPane.showConfirmDialog(this,panel,"Add waypoint",JOptionPane.OK_CANCEL_OPTION)!=JOptionPane.OK_OPTION)return;
+        try{overlays.waypoints.add(new com.minecraft.selector.core.WaypointStore.Marker(label.getText(),Integer.parseInt(x.getText().trim()),Integer.parseInt(z.getText().trim()),overlays.dimension));repaintCanvases();}catch(Exception e){showFileError(e);}
+    }
+    private void removeWaypoint(){List<com.minecraft.selector.core.WaypointStore.Marker> markers=overlays.waypoints.list();if(markers.isEmpty()){progressLabel.setText("No waypoints to remove");return;}JList<com.minecraft.selector.core.WaypointStore.Marker> list=new JList<>(markers.toArray(new com.minecraft.selector.core.WaypointStore.Marker[0]));list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);list.setSelectedIndex(0);if(JOptionPane.showConfirmDialog(this,new JScrollPane(list),"Remove waypoint",JOptionPane.OK_CANCEL_OPTION)==JOptionPane.OK_OPTION&&list.getSelectedIndex()>=0){overlays.waypoints.remove(list.getSelectedIndex());repaintCanvases();}}
+    private void saveWaypoints(){File file=chooseOutput("Save waypoints","json");if(file!=null)try{overlays.waypoints.save(file);}catch(Exception e){showFileError(e);}}
+    private void loadWaypoints(){JFileChooser chooser=new JFileChooser();if(chooser.showOpenDialog(this)==JFileChooser.APPROVE_OPTION)try{overlays.waypoints.replace(com.minecraft.selector.core.WaypointStore.load(chooser.getSelectedFile()));repaintCanvases();}catch(Exception e){showFileError(e);}}
+    private void trimViewportCache(){if(isDynamicMode&&dynamicRegionManager!=null)dynamicRegionManager.trimViewportCache();else {ViewLayers.clearCache();dynamicMapManager.clear();}repaintCanvases();progressLabel.setText("Viewport cache trimmed");}
+    private void cancelP2Scan(){p2ScanRevision++;if(p2ScanWorker!=null){p2ScanWorker.cancel(true);p2ScanWorker=null;}overlays.oreCounts=java.util.Collections.emptyMap();}
+    private void scanOres(){JFileChooser chooser=new JFileChooser();chooser.setDialogTitle("Ore scan JSON (regex / ids)");if(chooser.showOpenDialog(this)!=JFileChooser.APPROVE_OPTION)return;try{startP2Scan(com.minecraft.selector.core.OverlayScan.load(chooser.getSelectedFile()),null);}catch(Exception e){showFileError(e);}}
+    private void filterChunks(){JTextField time=new JTextField("0"),min=new JTextField(),max=new JTextField();JPanel panel=new JPanel(new GridLayout(3,2,6,6));panel.add(new JLabel("InhabitedTime > ticks (blank = any)"));panel.add(time);panel.add(new JLabel("DataVersion minimum (blank = any)"));panel.add(min);panel.add(new JLabel("DataVersion maximum (blank = any)"));panel.add(max);if(JOptionPane.showConfirmDialog(this,panel,"Suggest selection: AND conditions",JOptionPane.OK_CANCEL_OPTION)!=JOptionPane.OK_OPTION)return;
+        try{startP2Scan(null,new com.minecraft.selector.core.ChunkFilter(time.getText().trim().isEmpty()?null:Long.valueOf(time.getText().trim()),min.getText().trim().isEmpty()?null:Integer.valueOf(min.getText().trim()),max.getText().trim().isEmpty()?null:Integer.valueOf(max.getText().trim())));}catch(Exception e){showFileError(e);}
+    }
+    private void startP2Scan(com.minecraft.selector.core.OverlayScan ore,com.minecraft.selector.core.ChunkFilter filter)throws IOException {
+        File directory=currentDimension==null?lastMcaPath==null?null:new File(lastMcaPath).getParentFile():currentDimension.getRegionDir();if(directory==null)throw new IOException("Load a world or MCA first");
+        final File[] files=lastMcaPath!=null&&currentDimension==null?new File[]{new File(lastMcaPath)}:directory.listFiles((d,n)->n.matches("r\\.-?\\d+\\.-?\\d+\\.mca"));
+        cancelP2Scan();final long revision=p2ScanRevision,generation=viewGeneration;final SelectionCanvas canvas=activeCanvas();final SelectionMath.Bounds before=canvas.getSelectionBounds();final Map<String,Object> beforeShape=canvas.getSelectionShape().json();final int minY=heightRangeSlider.getLowerValue(),maxY=heightRangeSlider.getUpperValue();
+        progressLabel.setText("Scanning chunk NBT (current selection if set, otherwise dimension; up to 65536 chunks); View → Cancel background scan");
+        p2ScanWorker=new SwingWorker<com.minecraft.selector.core.OverlayScan.Result,Void>(){
+            protected com.minecraft.selector.core.OverlayScan.Result doInBackground()throws Exception{return com.minecraft.selector.core.OverlayScan.scan(files,ore,filter,minY,maxY,()->isCancelled()||generation!=viewGeneration||revision!=p2ScanRevision,before);}
+            protected void done(){if(isCancelled()||generation!=viewGeneration||revision!=p2ScanRevision)return;try{com.minecraft.selector.core.OverlayScan.Result result=get();
+                if(ore!=null){if(minY!=heightRangeSlider.getLowerValue()||maxY!=heightRangeSlider.getUpperValue()){progressLabel.setText("Import Y changed while scanning; run ore scan again");return;}overlays.oreCounts=java.util.Collections.unmodifiableMap(result.counts);overlays.ore=true;JCheckBoxMenuItem item=previewItems.get("ore");if(item!=null)item.setSelected(true);}
+                else if(!result.suggested.isEmpty()){if(canvas!=activeCanvas()||!java.util.Objects.equals(before,canvas.getSelectionBounds())||!beforeShape.equals(canvas.getSelectionShape().json())){progressLabel.setText("Selection changed while filtering; run suggestion again");return;}canvas.restoreSelectionBounds(result.suggested.bounds());jumpTo(result.suggested.bounds().center());}
+                progressLabel.setText("Scan: "+result.scanned+" chunks, "+result.failed+" unreadable; "+(ore!=null?result.counts.size()+" ore chunks":result.suggested.boxes().size()+" matching chunks"));repaintCanvases();
+            }catch(Exception e){showFileError(e);}finally{p2ScanWorker=null;}}
+        };p2ScanWorker.execute();
     }
 }

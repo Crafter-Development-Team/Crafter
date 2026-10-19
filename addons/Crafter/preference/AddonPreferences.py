@@ -222,6 +222,9 @@ class CrafterAddonPreferences(AddonPreferences):
     Add_Crafter_time_On_Import: BoolProperty(name="Add Crafter-time on Import",
                                              description="Automatically add the Crafter-time geometry node to imported objects. It provides the current second count to material nodes (dynamic textures and water flowing), but it will reduce the preview frame rate",
                                              default=False)# type: ignore
+    Search_PBR_On_Load: BoolProperty(name="Search PBR",
+                                     description="When loading or reloading materials from the panel button, look for PBR/normal textures next to the base color texture. Textures the material already has are kept as is, only the missing one is searched for. Loading during import is not affected",
+                                     default=True)# type: ignore
     Materials_List: CollectionProperty(name="Materials",type=Material)#type: ignore
     Materials_List_index: IntProperty(name="Material",default=0)# type: ignore
     Classification_Basis_List: CollectionProperty(name="Classification Basis",type=ClassificationBasisl)# type: ignore
