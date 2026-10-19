@@ -12,7 +12,7 @@ LIFE_MS = {
     "destroy_block": 550,
     "block": 450,
     "falling_dust": 500,
-    "break_anim": 120,
+    "break_anim": 220,
     "poof": 400,
     "cloud": 450,
     "smoke": 500,
@@ -273,11 +273,12 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
             out_objs.append(ob)
         return out_objs
 
-    def mat_fire(key: str, *, color=(1.0, 0.35, 0.02), strength=20.0):
-        """Untextured additive-ish fire core (Principled emission only)."""
-        if key in mats:
-            return mats[key]
-        m = bpy.data.materials.new(f"PFire_{key}")
+    def mat_fire(key: str, *, color=(1.0, 0.35, 0.02), strength=20.0, soft=0.08):
+        """Emissive fire core; soft~0 → solid glow, soft~0.3 → airier bloom source."""
+        full = f"{key}_s{strength:.0f}_{soft:.2f}"
+        if full in mats:
+            return mats[full]
+        m = bpy.data.materials.new(f"PFire_{full}")
         m.use_nodes = True
         nt = m.node_tree
         nodes, links = nt.nodes, nt.links
@@ -286,10 +287,9 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
         emit = nodes.new("ShaderNodeEmission")
         emit.inputs["Color"].default_value = (*color, 1)
         emit.inputs["Strength"].default_value = strength
-        # soft circular falloff via soft alpha on transparent mix
         trans = nodes.new("ShaderNodeBsdfTransparent")
         mix = nodes.new("ShaderNodeMixShader")
-        mix.inputs["Fac"].default_value = 0.15  # mostly emit
+        mix.inputs["Fac"].default_value = soft
         links.new(trans.outputs["BSDF"], mix.inputs[1])
         links.new(emit.outputs["Emission"], mix.inputs[2])
         links.new(mix.outputs["Shader"], out.inputs["Surface"])
@@ -299,8 +299,46 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
                 m.shadow_method = "NONE"
         except Exception:
             pass
-        mats[key] = m
+        mats[full] = m
         return m
+
+    def enable_bloom(scene=None, *, threshold=0.6, size=8, mix=0.55):
+        """EEVEE Next has no use_bloom — add compositor Glare (Fog Glow) for flame bloom."""
+        import bpy
+        scene = scene or bpy.context.scene
+        scene.use_nodes = True
+        nt = scene.node_tree
+        nodes, links = nt.nodes, nt.links
+        # idempotent: reuse if present
+        glare = nodes.get("ReplayParticleGlare")
+        if glare is None:
+            glare = nodes.new("CompositorNodeGlare")
+            glare.name = "ReplayParticleGlare"
+            glare.glare_type = "FOG_GLOW"
+            try:
+                glare.quality = "HIGH"
+            except Exception:
+                pass
+            # wire: find Render Layers → Composite (or insert)
+            rl = next((n for n in nodes if n.type == "R_LAYERS"), None)
+            comp = next((n for n in nodes if n.type == "COMPOSITE"), None)
+            if rl is None:
+                rl = nodes.new("CompositorNodeRLayers")
+            if comp is None:
+                comp = nodes.new("CompositorNodeComposite")
+            # disconnect rl→comp if direct
+            for l in list(links):
+                if l.to_node == comp and l.from_node == rl:
+                    links.remove(l)
+            links.new(rl.outputs["Image"], glare.inputs["Image"])
+            links.new(glare.outputs["Image"], comp.inputs["Image"])
+        glare.threshold = threshold
+        glare.size = size
+        try:
+            glare.mix = mix
+        except Exception:
+            pass
+        return glare
 
     def billboard(name, size, mat, parent, loc, *, track=True):
 
@@ -404,38 +442,80 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
             stage = burst.stage if burst.stage is not None else 0
             if stage < 0 or stage > 9:
                 continue
-            # solid dirt body so the crack reads (overlay alone is sparse black pixels)
-            dirt_path = (root_tex / "block" / "dirt.png") if root_tex else None
-            body = mat_tex("dig_body_dirt", dirt_path, alpha_clip=False, emit=0.0)
+            # body textured from block_state when known, else dirt
+            body_path = pick_debris(burst.block_state) if burst.block_state is not None else None
+            if body_path is None and root_tex:
+                body_path = root_tex / "block" / "dirt.png"
+            # prefer full block tex over tiny debris crop for the dig body
+            if root_tex:
+                bare = _block_tex_name(burst.block_state, states)
+                full = root_tex / "block" / f"{bare}.png"
+                if full.is_file():
+                    body_path = full
+                elif (root_tex / "block" / "dirt.png").is_file():
+                    body_path = root_tex / "block" / "dirt.png"
+            body = mat_tex(f"dig_body_{body_path.stem if body_path else 'x'}", body_path, alpha_clip=False)
             ob_body = crack_cube(f"PB{bi}_body", body, group, (0, 0, 0), scale=1.0)
             objs.append(ob_body)
             path = (root_tex / "block" / f"destroy_stage_{stage}.png") if root_tex else None
-            mat = mat_tex(f"crack_{stage}", path, alpha_clip=False, emit=0.0)
-            # force BLEND for crack
+            mat = mat_tex(f"crack_{stage}", path, alpha_clip=False, emit=0.15, tint=(0.05, 0.05, 0.05))
             try:
                 mat.blend_method = "BLEND"
             except Exception:
                 pass
-            ob = crack_cube(f"PB{bi}_crack", mat, group, (0, 0, 0), scale=1.03)
+            ob = crack_cube(f"PB{bi}_crack", mat, group, (0, 0, 0), scale=1.04)
             objs.append(ob)
+            # tiny chips near crack for polish (stage >= 3)
+            if stage >= 3 and root_tex and left > 2:
+                for ci in range(min(4, left)):
+                    dpath = pick_debris(burst.block_state)
+                    dmat = mat_tex(f"digchip_{dpath.name if dpath else ci}", dpath, alpha_clip=True)
+                    size = 0.08 + rng.random() * 0.08
+                    dx = (rng.random() - 0.5) * 0.7
+                    dy = 0.35 + rng.random() * 0.4
+                    dz = (rng.random() - 0.5) * 0.7
+                    cob = billboard(f"PB{bi}_chip{ci}", size, dmat, group, (dx, dy, dz))
+                    objs.append(cob)
+                    left -= 1
+                    created += 1
             left -= 2
             created += 2
             vis(objs, burst.t, life)
             continue
 
         if kind in ("destroy_block", "block", "falling_dust"):
-            n = min(burst.count, 28, left)
+            # sprint dust stays low; destroy_block sprays higher
+            is_destroy = kind == "destroy_block"
+            n = min(burst.count + (8 if is_destroy else 0), 32, left)
             for i in range(n):
                 path = pick_debris(burst.block_state)
                 mat = mat_tex(f"deb_{path.name if path else 'x'}_{i%4}", path, alpha_clip=True)
-                size = 0.16 + rng.random() * 0.14
+                size = (0.12 + rng.random() * 0.1) if not is_destroy else (0.14 + rng.random() * 0.16)
                 dx = (rng.random() - 0.5) * 2 * (burst.ox or 0.35)
-                dy = abs(rng.random()) * (burst.oy or 0.35) + 0.05
+                if is_destroy:
+                    dy = abs(rng.random()) * (burst.oy or 0.45) + 0.08
+                else:
+                    dy = rng.random() * 0.12 + 0.02  # sprint: hug ground
                 dz = (rng.random() - 0.5) * 2 * (burst.oz or 0.35)
                 ob = billboard(f"PB{bi}_{i}", size, mat, group, (dx, dy, dz))
                 objs.append(ob)
                 left -= 1
                 created += 1
+            # soft dust puff for sprint/block
+            if not is_destroy and root_tex and left > 0:
+                sd = seq_dir_for("poof") or seq_dir_for("smoke")
+                fr_on = _frame_at(frame_times, burst.t)
+                for i in range(min(3, left)):
+                    if sd:
+                        mat = mat_seq(f"sprintdust", sd, emit=0.0, alpha_clip=False,
+                                      frame_start=fr_on, frame_offset=rng.randint(0, 5))
+                    else:
+                        mat = mat_tex(f"sprintdust_{i}", pick_sprite("poof"), alpha_clip=False)
+                    ob = billboard(f"PB{bi}_puff{i}", 0.22 + rng.random() * 0.12, mat, group,
+                                   ((rng.random()-0.5)*0.3, 0.05 + rng.random()*0.08, (rng.random()-0.5)*0.3))
+                    objs.append(ob)
+                    left -= 1
+                    created += 1
             vis(objs, burst.t, life)
             continue
 
@@ -535,18 +615,28 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
                     objs.append(ob)
                     left -= 1
                     created += 1
-                # Hot untextured fire cores (punchy orange)
-                for i in range(min(10, left)):
+                # Hot untextured fire cores + soft bloom plates
+                for i in range(min(16, left)):
                     theta = rng.random() * math.tau
-                    r = radius * rng.random() * 0.35
+                    r = radius * rng.random() * 0.4
                     dx = math.cos(theta) * r
                     dz = math.sin(theta) * r
-                    dy = 0.15 + rng.random() * 0.7
-                    # yellow-white core vs deep orange rim
-                    col = (1.0, 0.85, 0.25) if i % 3 == 0 else (1.0, 0.28, 0.0)
-                    mat = mat_fire(f"core_{i%3}_{col[1]:.2f}", color=col, strength=25.0 if i % 3 == 0 else 18.0)
-                    size = 0.4 + rng.random() * 0.55
+                    dy = 0.1 + rng.random() * 0.85
+                    if i % 4 == 0:
+                        col, strength, size, soft = (1.0, 0.95, 0.55), 40.0, 0.9 + rng.random() * 0.6, 0.05
+                    elif i % 4 == 1:
+                        col, strength, size, soft = (1.0, 0.45, 0.02), 32.0, 0.7 + rng.random() * 0.5, 0.1
+                    else:
+                        col, strength, size, soft = (1.0, 0.22, 0.0), 22.0, 0.45 + rng.random() * 0.4, 0.12
+                    mat = mat_fire(f"core_{i%4}", color=col, strength=strength, soft=soft)
                     ob = billboard(f"PB{bi}_core{i}", size, mat, group, (dx, dy, dz))
+                    objs.append(ob)
+                    left -= 1
+                    created += 1
+                # Wide soft bloom plate at center (feeds compositor glare)
+                if left > 0:
+                    mat = mat_fire("bloom_plate", color=(1.0, 0.4, 0.05), strength=28.0, soft=0.35)
+                    ob = billboard(f"PB{bi}_bloom", 2.2, mat, group, (0, 0.5, 0))
                     objs.append(ob)
                     left -= 1
                     created += 1
@@ -606,6 +696,12 @@ def build_particles(store, frame_times, *, box=None, mc_space=None, log=print, s
             created += 1
         vis(objs, burst.t, life)
 
+    if any(b.kind.startswith("explo") or b.kind == "flame" for b in bursts):
+        try:
+            enable_bloom(bpy.context.scene)
+            log("particles: compositor Fog Glow bloom enabled")
+        except Exception as e:
+            log(f"particles: bloom skip ({e})")
     log(f"particles: {created} sprites from {len(bursts)} bursts (tex={bool(root_tex)})")
     return [root]
 
