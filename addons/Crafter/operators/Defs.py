@@ -1775,6 +1775,69 @@ def apply_tint(group_CI, nodes, links, tint):
     if tint_interface_enable in group_CI.inputs:
         group_CI.inputs[tint_interface_enable].default_value = 1.0 if kind else 0.0
 
+    # 固定色(红石线/茎/睡莲)而 CI 组没有 tint_color 接口：通用 CI- 组(或
+    # fixed_tint_CI_group 换成的无群系色组)在基础色连好后用 link_fixed_tint 乘上固定色。
+    # 其它自带颜色的组(如 CI-spruce_leaves)保持原样。
+    if "Crafter_fixed_tint" in group_CI.keys():
+        del group_CI["Crafter_fixed_tint"]
+    if kind == "fixed" and tint_interface_color not in group_CI.inputs and group_CI.node_tree is not None \
+            and (group_CI.node_tree.name == "CI-" or group_CI.get("Crafter_fixed_tint_swapped")):
+        color = tint.get("color", (1.0, 1.0, 1.0))
+        group_CI["Crafter_fixed_tint"] = (color[0], color[1], color[2], 1.0)
+        link_fixed_tint(group_CI=group_CI, nodes=nodes, links=links)
+
+def fixed_tint_CI_group(group_CI, tint):
+    '''
+    固定色材质被分类到群系色组(如睡莲/茎 -> CI-grass_plant_move)时，换成去掉群系前缀的同类组
+    (CI-plant_move)，颜色改由 link_fixed_tint 乘固定色；否则会染成草色。
+    须在 find_CI_group 之后、连接输出之前调用。
+    '''
+    if tint is None or tint.get("kind") != "fixed" or group_CI.node_tree is None:
+        return
+    if tint_interface_color in group_CI.inputs:
+        return
+    name = group_CI.node_tree.name
+    for kind in TINT_BIOME_KINDS:
+        prefix = "CI-" + kind + "_"
+        if name.startswith(prefix) and kind in group_CI.inputs:
+            candidate = "CI-" + name[len(prefix):]
+            if candidate in bpy.data.node_groups:
+                group_CI.node_tree = bpy.data.node_groups[candidate]
+                group_CI["Crafter_fixed_tint_swapped"] = True
+            return
+
+def link_fixed_tint(group_CI, nodes, links):
+    '''
+    apply_tint 标记了固定色的通用 CI- 组：在 Base Color 前插一个 Multiply。
+    幂等：已插过则只更新颜色；基础色还没连上时什么都不做(连好后再调用一次)。
+    '''
+    if "Crafter_fixed_tint" not in group_CI.keys() or "Base Color" not in group_CI.inputs:
+        return
+    rgba = tuple(group_CI["Crafter_fixed_tint"])
+    socket = group_CI.inputs["Base Color"]
+    if not socket.links:
+        return
+    def by_id(sockets, identifier):
+        return next(sock for sock in sockets if sock.identifier == identifier)
+    src = socket.links[0].from_node
+    if src.get("Crafter_fixed_tint_mix"):
+        by_id(src.inputs, "B_Color").default_value = rgba
+        return
+    # 清掉上一轮留下、已经断开的 Multiply
+    for node in [n for n in nodes if n.get("Crafter_fixed_tint_mix") and n.parent == group_CI.parent
+                 and not by_id(n.outputs, "Result_Color").links]:
+        nodes.remove(node)
+    mix = nodes.new(type="ShaderNodeMix")
+    mix.data_type = 'RGBA'
+    mix.blend_type = 'MULTIPLY'
+    mix["Crafter_fixed_tint_mix"] = True
+    mix.parent = group_CI.parent
+    mix.location = (group_CI.location.x, group_CI.location.y + 220)
+    mix.inputs["Factor"].default_value = 1.0
+    links.new(socket.links[0].from_socket, by_id(mix.inputs, "A_Color"))
+    by_id(mix.inputs, "B_Color").default_value = rgba
+    links.new(by_id(mix.outputs, "Result_Color"), socket)
+
 def reload_Undivided_Vsersions(context: bpy.types.Context,dir_versions):#刷新无版本隔离列表
 
         addon_prefs = context.preferences.addons[__addon_name__].preferences
