@@ -63,7 +63,7 @@ def material_setup_missing(context):
     '''
     列出复用所需的东西里缺哪些（返回空列表 = 可以复用）。
     只查后续流程真正会取用的：C-PBR_Parser、当前 PBR 解析器组、至少一个 CI- 分类组。
-    材质设置物体仅面板需要，导入路径不加载它。
+    材质设置物体（面板载体）不在必查项里：它缺失时由 Load Material 在同一次 load 中补上。
     '''
     missing = []
     for name in node_groups_use_fake_user:
@@ -698,18 +698,20 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):
                 tuple(obj.rotation_euler) != (0.0, 0.0, 0.0) or tuple(obj.scale) != (1.0, 1.0, 1.0)
                 for obj in context.selected_objects if obj.type == "MESH"):
             bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
-        # 工程里已有一套同库的材质节点组就直接复用，只有换库/缺件/强制重加载才拆了重来
+        # 工程里已有一套同库的材质节点组就直接复用，只有换库/缺件/强制重加载才拆了重来。
+        # 材质设置物体（面板载体）缺失时也要补：随 CI/CO 在同一次 load 里加载，否则导入后
+        # 第一次打开材质面板会触发一次全量重载（工程材质越多越慢）。
         library_name = get_material_library_name(context)
         reusable, reason = can_reuse_material_setup(context)
-        needs_settings = not self.from_import and name_material_settings not in bpy.data.objects
+        needs_settings = name_material_settings not in bpy.data.objects
         if self.force_reload or not reusable or needs_settings:
             if self.force_reload:
                 reason = f"强制重加载材质节点组（{library_name}）"
             elif needs_settings and reusable:
-                reason = f"加载材质设置面板（{library_name}）"
+                reason = f"补载材质设置物体（{library_name}）"
             push_log(f'[unknown] 重加载材质节点组：{reason}', 'INFO')
-            reload_material_setup(context, library_name,
-                                  include_settings=self.force_reload or not self.from_import)
+            # include_settings 恒为 True：设置物体必须和 CI/CO 同一次 load，避免生成 CI-*.001
+            reload_material_setup(context, library_name, include_settings=True)
             set_loaded_material_library(context, library_name)
         else:
             push_log(f'[unknown] {reason}', 'INFO')
@@ -1330,6 +1332,9 @@ class VIEW3D_OT_CrafterMaterialPanel(bpy.types.Operator):
                     output_item.float_max = output_data['float_max']
                 if 'has_float_range' in output_data:
                     output_item.has_float_range = output_data['has_float_range']
+                if 'float_value' in output_data:
+                    # 范围/步进只写一次；draw 每帧不再重写动态 IDProperty 的 UI 数据
+                    self.apply_float_ui_range(output_item)
                 # 开关项缺少 On/Off 接口：不渲染开关控件，面板顶部显示错误提示
                 if output_item.is_switch and (output_item.on_index < 0 or output_item.off_index < 0):
                     panel_item.on_off_missing = True
@@ -1416,7 +1421,6 @@ class VIEW3D_OT_CrafterMaterialPanel(bpy.types.Operator):
                         split2.prop(output, "use_on", text="")
                 else:
                     if output.socket_type in ('FLOAT', 'VALUE'):
-                        self.apply_float_ui_range(output)
                         # float_value 是动态 IDProperty，prop 须用 '["..."]' 自定义属性语法；
                         # 与原节点组显示一致：FACTOR 类接口显示滑块，其余保持数字框
                         split2.prop(output, '["float_value"]', text="", slider=(output.float_subtype == 'FACTOR'))
