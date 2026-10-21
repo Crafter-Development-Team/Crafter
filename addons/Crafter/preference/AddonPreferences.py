@@ -118,6 +118,9 @@ class CrafterAddonPreferences(AddonPreferences):
     mergeModTextures: BoolProperty(name="Merge Mod Textures",
                                    description="Let mod blocks reuse the material already created for the same texture instead of creating one material per block (vanilla blocks are never merged with each other). Materials with tint or overlay are excluded. This greatly reduces the material count and speeds up material processing; turn it off to get one material per block again",
                                    default=True)# type: ignore
+    useEntityModels: BoolProperty(name="Entities",
+                                  description="Include the mobs and entities found inside the selected area. They come in with their own models, textures, tint and overlay metadata",
+                                  default=True,)# type: ignore
     notexportFullModel: BoolProperty(name="As Chunk",
                                   default=False,)# type: ignore
     autoPartitionSettings: BoolProperty(name="Auto Chunk Settings",

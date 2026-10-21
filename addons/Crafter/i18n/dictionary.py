@@ -37,6 +37,8 @@ dictionary = {
         "Export Light Block":"导出光源方块",
         "Only Export Light Block":"只导出光源方块",
         "Light Block Size":"光源方块大小",
+        "Entities":"生物",
+        "Include the mobs and entities found inside the selected area. They come in with their own models, textures, tint and overlay metadata":"是否包含选区内的生物。它们会带着各自的模型、贴图、着色和叠加层元数据一起进来",
         "Allow Double Face":"允许重叠面",
         "Coincident Offset":"共面偏移",
         "Outward offset in metres (1 block = 1 m) for coincident faces: per-layer offset for overlay faces (grass side / CTM overlay), and the outward push that separates a zero-thickness decal's edge face from the neighbouring block's contact face (thin decals like Cluttered mod polaroids z-fight otherwise). Keep it above the float precision at your coordinates: 0.0001 is only safe within roughly 1000 blocks of the origin, 0.0005 within about 4000, 0.001+ anywhere. Increase it if z-fighting persists in EEVEE":"共面面的外移量（米，1 格 = 1 米）：一是叠加层（草侧 / CTM overlay）的逐层外移；二是把零厚度贴片贴边的那一面从相邻方块的接触面推开（Cluttered 那类薄贴片否则会 z-fighting）。必须大于你坐标处的 float 精度：0.0001 只对原点约 1000 格内安全，0.0005 约 4000 格内，0.001 以上则任意坐标都安全。EEVEE 下仍闪烁时可调大",

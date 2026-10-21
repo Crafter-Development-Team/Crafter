@@ -23,6 +23,22 @@ from .AutoChunkSettings import calculate_auto_chunk_settings
 
 dir_importer = os.path.join(dir_init_main, "importer")
 
+# WorldImporter 把选区内生物单独导出成 exe 目录下的 entities.obj（main.cpp 写死该名字），
+# 导入端按文件名识别，和导出端共用同一个 Entities 开关。
+ENTITY_OBJ_FILENAME = "entities.obj"
+
+
+def is_entity_obj(filename):
+    """判断是否为 WorldImporter 导出的生物模型 obj（固定文件名 entities.obj）。"""
+    return os.path.basename(filename).lower() == ENTITY_OBJ_FILENAME
+
+
+def select_obj_files(filenames, use_entities):
+    """从 importer 目录的文件列表中挑出要导入的 obj；关闭 Entities 时排除生物模型。"""
+    return [f for f in filenames
+            if f.endswith('.obj') and (use_entities or not is_entity_obj(f))]
+
+
 # ==================== 导入世界 ====================
 
 class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世界
@@ -99,6 +115,8 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         row_Light_Block = col_output_1.row()
         row_Light_Block.enabled = addon_prefs.exportLightBlock
         row_Light_Block.prop(addon_prefs, "exportLightBlockOnly")
+        # 生物与面合并同列，保持行距一致
+        col_output_1.prop(addon_prefs, "useEntityModels")
         col_output_2 = row_output.column(align=True)
         col_output_2.prop(addon_prefs, "exportLightBlock")
         row_Light_Block_size = col_output_2.row()
@@ -584,6 +602,8 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             "overlayLayerStep":addon_prefs.overlayLayerStep,
             "mergeModTextures":addon_prefs.mergeModTextures,
             "exportFullModel":not effective_as_chunk,
+            # 生物模型与区域 obj 分开导出；同一开关也控制导入端是否导入
+            "exportEntityModels":addon_prefs.useEntityModels,
             "autoPartitionSettings":addon_prefs.autoPartitionSettings,
             "partitionSize":effective_partition_size,
             "maxTasksPerBatch":effective_max_tasks,
@@ -841,18 +861,23 @@ def finish_import(ctx, prefs, imported_time, worldconfig, prepared_time,
     material_should_delete = []
     before_objects = set(bpy.data.objects)
     log_stage_begin("列举导出文件")
+    # 旧版 prefs 热更新后可能还没有该属性：缺省按"含生物"处理，保持旧行为
+    use_entities = getattr(prefs, "useEntityModels", True)
     try:
         importer_files = os.listdir(dir_importer)
     except (FileNotFoundError, PermissionError):
         importer_files = []
-    obj_files = [f for f in importer_files if f.endswith('.obj')]
+    obj_files = select_obj_files(importer_files, use_entities)
+    skipped_entities = [f for f in importer_files
+                        if f.endswith('.obj') and is_entity_obj(f) and not use_entities]
     log_step(f"发现 {len(obj_files)} 个 obj 文件")
+    if skipped_entities:
+        log_step("跳过生物模型（Entities 已关闭）: " + ", ".join(skipped_entities))
     log_stage_end("列举导出文件")
 
     log_stage_begin("导入 OBJ", f"{len(obj_files)} 个文件")
     obj_idx = 0
-    for file in importer_files:
-        if not file.endswith('.obj'): continue
+    for file in obj_files:
         obj_idx += 1
         _obj_t0 = time.perf_counter()
         debug_log(f"Importing OBJ: {file}")
@@ -899,6 +924,8 @@ def finish_import(ctx, prefs, imported_time, worldconfig, prepared_time,
     if not have_obj:
         if obj_files:
             error_log(f"OBJ 导入失败（{len(obj_files)} 个文件均未导入成功）")
+        elif skipped_entities:
+            warn_log("没有可导入的 obj：本次只导出了生物模型，且 Entities 已关闭")
         else:
             error_log("WorldImporter 未导出任何 obj 文件")
         log_stage_end("后处理导入", "无 obj")
