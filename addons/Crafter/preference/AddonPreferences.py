@@ -239,7 +239,7 @@ class CrafterAddonPreferences(AddonPreferences):
                                     max=1.0,)# type: ignore
     Default_Roughness: FloatProperty(name="Roughness",
                                     subtype="FACTOR",
-                                    default=0.5,
+                                    default=0.75,
                                     min=0.0,
                                     max=1.0,)# type: ignore
     Default_IOR: FloatProperty(name="IOR",
