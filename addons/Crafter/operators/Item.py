@@ -206,7 +206,7 @@ pixel_min_names = ("Pxel Min", "Pixel Min")
 
 def _find_group_input(node_group, names):
     '''
-    在节点组接口里找一个数值输入，返回它的 identifier（modifier[...] 要的就是这个）。
+    在节点组接口里找一个数值输入，返回它的 identifier（修改器写入时要的就是这个）。
     只认非几何的 INPUT 插槽；找不到返回 None。
     '''
     for item in node_group.interface.items_tree:
@@ -219,6 +219,37 @@ def _find_group_input(node_group, names):
         if item.name in names:
             return item.identifier
     return None
+
+
+def _modifier_input_owner(modifier, identifier):
+    '''
+    取几何节点修改器某个输入的 RNA 包装（写 .value 用的那个）。
+    4.x～5.1 的输入是 ID 属性，直接 modifier[identifier]；5.2 起改成了
+    modifier.properties.inputs.<identifier>，而 ID 属性接口被移除
+    （modifier[key] = val 会抛 "id properties not supported for this type"）。
+    老版本 / 找不到该输入时返回 None，调用方再回退到 ID 属性。
+    '''
+    props = getattr(modifier, "properties", None)
+    inputs = getattr(props, "inputs", None)
+    if inputs is None:
+        return None
+    return getattr(inputs, identifier, None)
+
+
+def _set_modifier_input(modifier, identifier, value):
+    '''
+    写一个几何节点修改器输入，成功返回 True。
+    先走 5.2+ 的 properties.inputs，再回退到老版本的 ID 属性。
+    '''
+    input_owner = _modifier_input_owner(modifier, identifier)
+    if input_owner is not None:
+        input_owner.value = value
+        return True
+    try:
+        modifier[identifier] = value
+    except (KeyError, TypeError):
+        return False
+    return True
 
 
 def set_item_thickness_inputs(object_item, thickness_px, pixel_min):
@@ -242,8 +273,11 @@ def set_item_thickness_inputs(object_item, thickness_px, pixel_min):
             warn_log("C-item node group is missing the 'Offset Scale' / 'Pxel Min' inputs; "
                      "item thickness falls back to the template default")
             return
-        modifier[offset_key] = float(thickness_px)
-        modifier[pixel_key] = float(pixel_min)
+        if not _set_modifier_input(modifier, offset_key, float(thickness_px)) or \
+                not _set_modifier_input(modifier, pixel_key, float(pixel_min)):
+            warn_log("could not write the 'Offset Scale' / 'Pxel Min' inputs of the C-item "
+                     "modifier; item thickness falls back to the template default")
+            return
         return
     warn_log("no C-item geometry-node modifier found; item thickness was not applied")
 
@@ -409,7 +443,7 @@ class VIEW3D_OT_CrafterScaleUV(bpy.types.Operator):
     bl_description = "Scale all selected UV faces. See F6 or redo-last panel to adjust factor"
     bl_options = {'REGISTER', 'UNDO'}
 
-    scale: bpy.props.FloatProperty(default=0.9999, name="Scale")# type: ignore
+    scale: bpy.props.FloatProperty(default=0.999, name="Scale")# type: ignore
     selected_only: bpy.props.BoolProperty(default=False, name="Seleced only") # type: ignore
     skipUsage: bpy.props.BoolProperty(default=False, options={'HIDDEN'}) # type: ignore
 
