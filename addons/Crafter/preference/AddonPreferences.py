@@ -252,6 +252,14 @@ class CrafterAddonPreferences(AddonPreferences):
                                           default=0.0,
                                           min=0.0,
                                           max=1.0,)# type: ignore
+    # 性能开关：默认关闭，只在确实需要时才建群系纹理/解析器；
+    # 打开后恢复旧行为（不管需不需要都加），用于排查兼容问题。
+    Always_Add_Biome_Tex: BoolProperty(name="Always Add Biome Texture",
+                                       description="Add the biome color texture node to every material, even ones that do not use biome colors (slower import and bigger shaders)",
+                                       default=False)# type: ignore
+    Always_Add_PBR_Parser: BoolProperty(name="Always Add PBR Parser",
+                                        description="Add the PBR parser to every material, even ones without PBR or normal textures (bigger shaders)",
+                                        default=False)# type: ignore
     Parallax_Iterations: IntProperty(name="Parallax Iterations",
                                      min=8,
                                      default=32)# type: ignore
@@ -290,6 +298,8 @@ class CrafterAddonPreferences(AddonPreferences):
         col_default_PBR.prop(self, "Default_Roughness")
         col_default_PBR.prop(self, "Default_IOR")
         col_default_PBR.prop(self, "Default_Emission_Strength")
+        col_default_PBR.prop(self, "Always_Add_Biome_Tex")
+        col_default_PBR.prop(self, "Always_Add_PBR_Parser")
 # ==========修改变量操作==========
     def update_world_path(self, context):
         if context.area:

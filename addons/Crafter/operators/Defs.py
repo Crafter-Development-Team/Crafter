@@ -1378,110 +1378,6 @@ def apply_double_sided_backface_cull(material, dir_importer):
                 _write_socket_default(node, CI_BACKCULL_INPUT, 1.0)
     return True
 
-# ========== 渲染层 alpha 测试（renderLayer.json）==========
-# 游戏里 cutout 层丢弃 alpha < 0.1 的像素、其余按不透明画；cutout_mipped 阈值 0.5；
-# translucent 才按 alpha 混合。WorldImporter 把导出方块的渲染层写进 renderLayer.json
-# （{"cutout": [方块 id...], "cutout_mipped": [...], ...}）。命中 cutout 类的材质，
-# 在贴图 Alpha 和 CI- 组 Alpha 之间插一个"大于阈值"节点，半透明像素不再显得发虚。
-render_layer_json_name = "renderLayer.json"
-RENDER_LAYER_CUTOFF = {"cutout": 0.1, "cutout_mipped": 0.5}
-ALPHA_CUTOFF_NODE_NAME = "Crafter-alpha-cutoff"
-# renderLayer.json 的按 mtime 失效的读盘缓存：{"stamp": float|None, "cutoff": {方块 id: 阈值}}
-_render_layer_cache = {"stamp": None, "cutoff": {}}
-
-def load_render_layer_cutoffs(dir_importer):
-    '''
-    读取 renderLayer.json，返回 {方块 id: alpha 阈值}（只含 cutout / cutout_mipped）。
-    文件不存在或格式异常时返回空字典。
-    '''
-    path = os.path.join(dir_importer, render_layer_json_name)
-    if not os.path.exists(path):
-        return {}
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            raw = json.load(f)
-    except Exception as ex:
-        warn_log(f"renderLayer.json 读取失败: {ex}")
-        return {}
-    if not isinstance(raw, dict):
-        warn_log("renderLayer.json 格式异常（应为对象），已忽略")
-        return {}
-    cutoff = {}
-    for layer, value in RENDER_LAYER_CUTOFF.items():
-        names = raw.get(layer, [])
-        if isinstance(names, list):
-            for name in names:
-                if name:
-                    cutoff[str(name)] = value
-    return cutoff
-
-def material_block_id(name: str):
-    '''
-    材质名 -> 方块 id：先按 material_base_name 去掉 @ 后缀，再去掉 # 与 [ 之后的部分。
-    "yuushya:title_white#0~character_white@ctm/..." -> "yuushya:title_white"
-    '''
-    base = material_base_name(name)
-    for sep in ("#", "["):
-        cut = base.find(sep)
-        if cut != -1:
-            base = base[:cut]
-    return base
-
-def apply_render_layer_alpha(material, dir_importer):
-    '''
-    材质所属方块在 renderLayer.json 里是 cutout / cutout_mipped 时，给 CI- 组的 Alpha
-    输入插入阈值节点（alpha >= 阈值 -> 1，否则 0），与游戏的 alpha 测试一致。
-    重复调用只更新已插入节点的阈值。
-    return: 是否处理了该材质
-    '''
-    if material is None or getattr(material, "library", None) is not None:
-        return False
-    path = os.path.join(dir_importer, render_layer_json_name)
-    try:
-        stamp = os.path.getmtime(path)
-    except OSError:
-        return False
-    global _render_layer_cache
-    if _render_layer_cache.get("stamp") != stamp:
-        _render_layer_cache["stamp"] = stamp
-        _render_layer_cache["cutoff"] = load_render_layer_cutoffs(dir_importer)
-    threshold = _render_layer_cache["cutoff"].get(material_block_id(material.name))
-    if threshold is None:
-        return False
-    node_tree = getattr(material, "node_tree", None)
-    if node_tree is None:
-        return False
-    nodes, links = node_tree.nodes, node_tree.links
-    done = False
-    for node in list(nodes):
-        if node.type != "GROUP" or getattr(node, "node_tree", None) is None:
-            continue
-        if not node.node_tree.name.startswith("CI-") or "Alpha" not in node.inputs:
-            continue
-        socket = node.inputs["Alpha"]
-        if not socket.is_linked:
-            continue   # 叠加层帧里的 CI 故意不接 Alpha，保持不动
-        link = socket.links[0]
-        src = link.from_node
-        if src.type == "MATH" and src.name.startswith(ALPHA_CUTOFF_NODE_NAME):
-            src.inputs[1].default_value = threshold - 1e-4
-            done = True
-            continue
-        node_cut = nodes.new("ShaderNodeMath")
-        node_cut.name = ALPHA_CUTOFF_NODE_NAME
-        node_cut.label = "alpha cutout"
-        node_cut.operation = "GREATER_THAN"
-        node_cut.inputs[1].default_value = threshold - 1e-4   # 游戏: alpha < 阈值才丢弃
-        node_cut.location = (node.location.x - 200, node.location.y - 300)
-        if node.parent is not None:
-            node_cut.parent = node.parent
-        from_socket = link.from_socket
-        links.remove(link)
-        links.new(from_socket, node_cut.inputs[0])
-        links.new(node_cut.outputs[0], socket)
-        done = True
-    return done
-
 def link_CI_output(group_CI, node_output_EEVEE, node_output_Cycles, links):
     '''
     group_CI: 材质组节点
@@ -1543,14 +1439,62 @@ def ensure_pbr_parser_group(addon_prefs):
         group.links.new(input, node_input.outputs[input.name])
 
 
-def add_node_parser(group_CI, nodes, links, parent=None, addon_prefs=None):
+def apply_default_pbr_to_ci_inputs(group_CI, addon_prefs):
+    '''
+    没有法向/PBR 贴图、又不建 C-PBR_Parser 时，把解析器在"全默认输入"下本会输出的
+    常量直接写进 CI 组输入，避免糙度/金属度/IOR 等退回模板默认值。
+    只写没接线的插槽，写不进去（类型不符）就跳过，不影响导入。
+    '''
+    # 无贴图时解析器的输出就是常量：old PBR 的 G 是金属度、IOR 固定 1.5；
+    # lab PBR 的 G 是 F0（换算回来就是偏好里的 IOR），金属度恒为 0。
+    if str(getattr(addon_prefs, "PBR_Parser", "")) == "old_PBR":
+        metallic = float(addon_prefs.Default_Metallic)
+        ior = 1.5
+    else:
+        metallic = 0.0
+        ior = float(addon_prefs.Default_IOR)
+    defaults = (
+        ("Roughness", float(addon_prefs.Default_Roughness)),
+        ("Metallic", metallic),
+        ("IOR", ior),
+        ("AO", 1.0),
+        ("Height", 1.0),
+        ("Parsed Normal", (0.0, 0.0, 1.0)),
+        ("SSS", 0.0),
+        ("Porosity", 0.0),
+        ("Emission Strength", float(addon_prefs.Default_Emission_Strength)),
+    )
+    for name, value in defaults:
+        socket = group_CI.inputs.get(name)
+        if socket is None or socket.is_linked:
+            continue
+        try:
+            socket.default_value = value
+        except (TypeError, ValueError):
+            pass
+
+
+def add_node_parser(group_CI, nodes, links, parent=None, addon_prefs=None,
+                    has_pbr_texture=True):
     '''
     gout_CI: 材质组节点
     nodes: 目标材质节点组
     links:目标材质连接组
     parent: 新建节点要挂到的父帧（overlay 帧），None 表示不挂
-    return: node_C_PBR_Parser
+    has_pbr_texture: 本材质（overlay 帧）是否有 PBR 或法线贴图；
+                     没有且偏好里没开"始终添加"时，不建解析器，直接把默认常量写进 CI
+    return: node_C_PBR_Parser（不建时为 None）
     '''
+    if addon_prefs is None:
+        addon_prefs = bpy.context.preferences.addons[__addon_name__].preferences
+    if not getattr(addon_prefs, "Always_Add_PBR_Parser", False) and not has_pbr_texture:
+        # 重复加载时先清掉上一轮留下的解析器（同一父帧/同一层），否则关掉开关也不生效
+        for node in [n for n in nodes
+                     if n.type == "GROUP" and n.node_tree is not None
+                     and n.node_tree.name == "C-PBR_Parser" and n.parent == parent]:
+            nodes.remove(node)
+        apply_default_pbr_to_ci_inputs(group_CI, addon_prefs)
+        return None
     node_C_PBR_Parser = nodes.new(type="ShaderNodeGroup")
     # 先挂父帧再设 location (node.location 是父帧相对坐标)
     if parent is not None:
@@ -1559,8 +1503,6 @@ def add_node_parser(group_CI, nodes, links, parent=None, addon_prefs=None):
     node_C_PBR_Parser.node_tree = bpy.data.node_groups["C-PBR_Parser"]
     # Load Material passes its preferences once for base and overlay parsers, so
     # imports need no second material walk to initialize unconnected PBR inputs.
-    if addon_prefs is None:
-        addon_prefs = bpy.context.preferences.addons[__addon_name__].preferences
     apply_default_pbr_to_parser_node(node_C_PBR_Parser, addon_prefs)
     for output in node_C_PBR_Parser.outputs:
         if output.name in group_CI.inputs:
@@ -1668,15 +1610,17 @@ def link_base_normal_PBR(node_tex_base, group_CI, links, node_C_PBR_Parser, node
         if "Alpha" in group_CI.inputs:
             links.new(node_tex_base.outputs["Alpha"], group_CI.inputs["Alpha"])
     if node_tex_normal != None:
-        links.new(node_tex_normal.outputs["Color"], node_C_PBR_Parser.inputs["Normal"])
-        links.new(node_tex_normal.outputs["Alpha"], node_C_PBR_Parser.inputs["Normal Alpha"])
+        if node_C_PBR_Parser is not None:
+            links.new(node_tex_normal.outputs["Color"], node_C_PBR_Parser.inputs["Normal"])
+            links.new(node_tex_normal.outputs["Alpha"], node_C_PBR_Parser.inputs["Normal Alpha"])
         if "Normal" in group_CI.inputs:
             links.new(node_tex_normal.outputs["Color"], group_CI.inputs["Normal"])
         if "Normal Alpha" in group_CI.inputs:
             links.new(node_tex_normal.outputs["Alpha"], group_CI.inputs["Normal Alpha"])
     if node_tex_PBR != None:
-        links.new(node_tex_PBR.outputs["Color"], node_C_PBR_Parser.inputs["PBR"])
-        links.new(node_tex_PBR.outputs["Alpha"], node_C_PBR_Parser.inputs["PBR Alpha"])
+        if node_C_PBR_Parser is not None:
+            links.new(node_tex_PBR.outputs["Color"], node_C_PBR_Parser.inputs["PBR"])
+            links.new(node_tex_PBR.outputs["Alpha"], node_C_PBR_Parser.inputs["PBR Alpha"])
         if "PBR" in group_CI.inputs:
             links.new(node_tex_PBR.outputs["Color"], group_CI.inputs["PBR"])
         if "PBR Alpha" in group_CI.inputs:

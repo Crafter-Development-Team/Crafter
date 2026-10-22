@@ -99,12 +99,16 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         row_material = box_material.row()
         col_material_1 = row_material.column(align=True)
         col_material_1.prop(addon_prefs, "Auto_Load_Material")
+        row_parser_always = col_material_1.row()
+        row_parser_always.enabled = addon_prefs.Auto_Load_Material
+        row_parser_always.prop(addon_prefs, "Always_Add_PBR_Parser")
         col_material_1.prop(addon_prefs, "mergeModTextures")
         col_material_2 = row_material.column(align=True)
         # 背面剔除是加载材质时做的事，同时依赖双面几何：任一条件不满足都置灰
         row_ds_cull = col_material_2.row()
         row_ds_cull.enabled = addon_prefs.doubleSidedGeometry and addon_prefs.Auto_Load_Material
         row_ds_cull.prop(addon_prefs, "doubleSidedBackfaceCull")
+        col_material_2.prop(addon_prefs, "Always_Add_Biome_Tex")
 
         box_output = layout.box()
         box_output.label(text=i18n("Output"), icon="EXPORT")
@@ -674,7 +678,8 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
                     removed_obj += 1
                 except:
                     pass
-        # 旧的 tint/overlay/doubleSided/renderLayer 元数据一并清理，避免和本次导出的 objs 不匹配
+        # 旧的 tint/overlay/doubleSided 元数据一并清理，避免和本次导出的 objs 不匹配；
+        # renderLayer.json 是已移除功能的遗留文件，顺手删掉
         for _old_meta in ("tint.json", "overlay.json", "doubleSided.json", "renderLayer.json"):
             try:
                 _old_meta_path = os.path.join(dir_importer, _old_meta)
@@ -809,6 +814,24 @@ def biome_texture_bounds(worldconfig):
 
     return (effective("minX"), -effective("maxZ") - 1,
             effective("maxX") + 1, -effective("minZ"))
+
+
+def tint_value_needs_biome(value):
+    '''递归判断一个 tint.json 条目（含 overlay 子项）是否用到群系颜色。'''
+    if isinstance(value, dict):
+        if str(value.get("kind", "")) in TINT_BIOME_KINDS:
+            return True
+        return any(tint_value_needs_biome(v) for v in value.values())
+    if isinstance(value, (list, tuple)):
+        return any(tint_value_needs_biome(v) for v in value)
+    return False
+
+
+def tint_map_needs_biome(tint_map):
+    '''tint/overlay 元数据里是否有条目用到群系颜色；空或 None 返回 False（未知情况由调用方判断）。'''
+    if not tint_map:
+        return False
+    return any(tint_value_needs_biome(v) for v in tint_map.values())
 
 
 def finish_import(ctx, prefs, imported_time, worldconfig, prepared_time,
@@ -971,48 +994,60 @@ def finish_import(ctx, prefs, imported_time, worldconfig, prepared_time,
     log_stage_end("读取 overlay 元数据")
 
     # Copy biomeTex
+    # 偏好默认只在有材质需要群系色时才复制/加载整套图集；开关打开则恢复无条件加载
+    always_add_biome = bool(getattr(prefs, "Always_Add_Biome_Tex", False))
+    biome_needed = (always_add_biome
+                    or tint_map is None
+                    or tint_map_needs_biome(tint_map)
+                    or tint_map_needs_biome(overlay_map))
     log_stage_begin("复制 biomeTex")
-    dir_bt = os.path.join(dir_importer, "biomeTex")
-    dir_btn = os.path.join(dir_bt, imported_time)
-    os.makedirs(dir_btn, exist_ok=True)
-    try:
-        bt_files = [f for f in os.listdir(dir_bt) if f.endswith('.png')]
-        for f in bt_files:
-            shutil.copy(os.path.join(dir_bt, f), os.path.join(dir_btn, f))
-        log_step(f"复制 {len(bt_files)} 张群系纹理到 {dir_btn}")
-    except Exception as ex:
-        warn_log(f"biomeTex 复制异常: {ex}")
+    if biome_needed:
+        dir_bt = os.path.join(dir_importer, "biomeTex")
+        dir_btn = os.path.join(dir_bt, imported_time)
+        os.makedirs(dir_btn, exist_ok=True)
+        try:
+            bt_files = [f for f in os.listdir(dir_bt) if f.endswith('.png')]
+            for f in bt_files:
+                shutil.copy(os.path.join(dir_bt, f), os.path.join(dir_btn, f))
+            log_step(f"复制 {len(bt_files)} 张群系纹理到 {dir_btn}")
+        except Exception as ex:
+            warn_log(f"biomeTex 复制异常: {ex}")
+    else:
+        log_step("没有材质需要群系颜色，跳过 biomeTex 图集")
     log_stage_end("复制 biomeTex")
 
-    # Clone biomeTex node group（无条件克隆：CI 之后按需索取群系色）
+    # Clone biomeTex node group（有材质需要群系色时才克隆；CI 之后按需索取群系色）
     log_stage_begin("克隆 biomeTex 节点组")
     node_group = None
-    try:
-        node_group_src = bpy.data.node_groups["Crafter-biomeTex"]
-        node_group = node_group_src.copy()
-        node_group.name = "Crafter-biomeTex_" + imported_time
-        node_group.use_fake_user = True
-        min_x, min_y, max_x, max_y = biome_texture_bounds(worldconfig)
-        loaded_imgs = 0
-        for node in node_group.nodes:
-            if node.type == "TEX_IMAGE":
-                try:
-                    fn = fuq_bl_dot_number(node.image.name)
-                    node.image = bpy.data.images.load(os.path.join(dir_btn, fn))
-                    loaded_imgs += 1
-                    debug_log(f"  Loaded: {fn}")
-                except Exception as ex:
-                    debug_log(f"  Image load: {ex}")
-            elif node.type == "GROUP":
-                node.inputs["min X"].default_value = min_x
-                node.inputs["min Y"].default_value = min_y
-                node.inputs["max X"].default_value = max_x
-                node.inputs["max Y"].default_value = max_y
-        log_step(f"节点组 {node_group.name} 就绪，加载 {loaded_imgs} 张群系图")
-        debug_log("biomeTex node group ready")
-    except Exception as ex:
-        warn_log(f"biomeTex 节点组克隆失败: {ex}")
-        node_group = None
+    if biome_needed:
+        try:
+            node_group_src = bpy.data.node_groups["Crafter-biomeTex"]
+            node_group = node_group_src.copy()
+            node_group.name = "Crafter-biomeTex_" + imported_time
+            node_group.use_fake_user = True
+            min_x, min_y, max_x, max_y = biome_texture_bounds(worldconfig)
+            loaded_imgs = 0
+            for node in node_group.nodes:
+                if node.type == "TEX_IMAGE":
+                    try:
+                        fn = fuq_bl_dot_number(node.image.name)
+                        node.image = bpy.data.images.load(os.path.join(dir_btn, fn))
+                        loaded_imgs += 1
+                        debug_log(f"  Loaded: {fn}")
+                    except Exception as ex:
+                        debug_log(f"  Image load: {ex}")
+                elif node.type == "GROUP":
+                    node.inputs["min X"].default_value = min_x
+                    node.inputs["min Y"].default_value = min_y
+                    node.inputs["max X"].default_value = max_x
+                    node.inputs["max Y"].default_value = max_y
+            log_step(f"节点组 {node_group.name} 就绪，加载 {loaded_imgs} 张群系图")
+            debug_log("biomeTex node group ready")
+        except Exception as ex:
+            warn_log(f"biomeTex 节点组克隆失败: {ex}")
+            node_group = None
+    else:
+        log_step("没有材质需要群系颜色，跳过 biomeTex 节点组")
     log_stage_end("克隆 biomeTex 节点组")
 
     # 预处理材质：写入 tint 元数据，并整理贴图节点
@@ -1044,7 +1079,10 @@ def finish_import(ctx, prefs, imported_time, worldconfig, prepared_time,
         for nd in todel: nodes.remove(nd)
         if ntb and pri:
             links.new(ntb.outputs["Alpha"], pri.inputs["Alpha"])
-        if out_ev and node_group:
+        # 群系纹理节点同样只在材质需要时创建；旧导出器没有 tint 元数据，保持全加
+        material_needs_biome = (always_add_biome or tint_map is None
+                                or tint_value_needs_biome(entry))
+        if out_ev and node_group and material_needs_biome:
             nbn = nodes.new("ShaderNodeGroup")
             nbn.location = (out_ev.location.x - 400, out_ev.location.y - 550)
             nbn.node_tree = node_group

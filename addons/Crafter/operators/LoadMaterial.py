@@ -273,11 +273,6 @@ def process_single_material(material, context, classification_list, imported_by_
 
     def _apply_ds_cull():
         '''CI- 组建好后按 doubleSided.json 应用背面剔除（两条分支各自触发）'''
-        # 渲染层 alpha 测试（renderLayer.json）与背面剔除开关无关，同一时机处理
-        try:
-            apply_render_layer_alpha(material, dir_importer)
-        except Exception as ex:
-            warn_log(f"渲染层 alpha 测试失败 [{material.name}]: {ex}")
         if not _ds_enabled:
             return
         try:
@@ -332,7 +327,8 @@ def process_single_material(material, context, classification_list, imported_by_
             apply_tint(group_CI=group_CI, nodes=nodes, links=links, tint=tint)
         except Exception as ex:
             warn_log(f"apply_tint 失败 [{material.name}]: {ex}")
-        add_node_parser(group_CI=group_CI, nodes=nodes, links=links, addon_prefs=addon_prefs)
+        add_node_parser(group_CI=group_CI, nodes=nodes, links=links, addon_prefs=addon_prefs,
+                        has_pbr_texture=False)
         _apply_ds_cull()
         return
 
@@ -439,8 +435,6 @@ def process_single_material(material, context, classification_list, imported_by_
         apply_tint(group_CI=group_CI, nodes=nodes, links=links, tint=tint)
     except Exception as ex:
         warn_log(f"apply_tint 失败 [{material.name}]: {ex}")
-    node_C_PBR_Parser = add_node_parser(group_CI=group_CI, nodes=nodes, links=links,
-                                      addon_prefs=addon_prefs)
     if manual:
         # 只补缺：已有哪一类就保留哪一类，开关开着的才去文件夹找缺的那张
         want_normal = bool(folder_search) and node_tex_normal is None
@@ -455,6 +449,11 @@ def process_single_material(material, context, classification_list, imported_by_
                 node_tex_PBR = node_new_PBR
     elif not imported_by_crafter:
         node_tex_normal, node_tex_PBR = load_normal_and_PBR(node_tex_base=node_tex_base, nodes=nodes, links=links)
+    # 贴图确定后再建解析器：没有法向/PBR 贴图且偏好没开"始终添加"时跳过，改写成默认常量
+    has_pbr_texture = node_tex_normal is not None or node_tex_PBR is not None
+    node_C_PBR_Parser = add_node_parser(group_CI=group_CI, nodes=nodes, links=links,
+                                      addon_prefs=addon_prefs,
+                                      has_pbr_texture=has_pbr_texture)
     link_base_normal_PBR(node_tex_base=node_tex_base, group_CI=group_CI, links=links, node_C_PBR_Parser=node_C_PBR_Parser, node_tex_normal=node_tex_normal, node_tex_PBR=node_tex_PBR)
     link_fixed_tint(group_CI=group_CI, nodes=nodes, links=links)
     if node_tex_base is not None:
@@ -614,9 +613,10 @@ def process_overlay_frames(material, nodes, links, group_CI,
         except Exception as ex:
             warn_log(f"apply_tint 失败 [overlay {name}]: {ex}")
 
-        node_parser = add_node_parser(group_CI=node_CI, nodes=nodes, links=links, parent=frame,
-                                      addon_prefs=addon_prefs)
         node_tex_normal, node_tex_PBR = _overlay_frame_pbr_textures(nodes, frame)
+        node_parser = add_node_parser(group_CI=node_CI, nodes=nodes, links=links, parent=frame,
+                                      addon_prefs=addon_prefs,
+                                      has_pbr_texture=(node_tex_normal is not None or node_tex_PBR is not None))
         link_base_normal_PBR(node_tex_base=None, group_CI=node_CI, links=links,
                              node_C_PBR_Parser=node_parser,
                              node_tex_normal=node_tex_normal, node_tex_PBR=node_tex_PBR)
@@ -936,7 +936,7 @@ class VIEW3D_OT_CrafterLoadParallax(bpy.types.Operator):
                             if input.name == "Filter Width":
                                 input.default_value = 1.2
                                 node_bump.inputs["Distance"].default_value = 1
-                        if addon_prefs.Parallax_Based_on_Parsed_Normal:
+                        if addon_prefs.Parallax_Based_on_Parsed_Normal and node_C_PBR_Parser is not None:
                             links.new(node_C_PBR_Parser.outputs["Parsed Normal"], node_bump.inputs["Normal"])
                         break
                 
