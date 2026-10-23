@@ -1119,6 +1119,72 @@ def parse_material_name(name: str):
         texture = block
     return {"block": namespace + ":" + block, "key": key or None, "texture": texture or None}
 
+# 与 WorldImporter blocktint.cpp LookupVanillaKind 对齐。资源包改写模型时常丢掉
+# tintindex，WI 可能写出空 tint；导入侧按方块名回退，避免树叶/草呈灰色。
+_VANILLA_TINT_KIND = {
+    "grass_block": "grass",
+    "grass": "grass",
+    "short_grass": "grass",
+    "tall_grass": "grass",
+    "fern": "grass",
+    "large_fern": "grass",
+    "potted_fern": "grass",
+    "sugar_cane": "grass",
+    "pink_petals": "grass",
+    "wildflowers": "grass",
+    "bush": "grass",
+    "firefly_bush": "grass",
+    "oak_leaves": "foliage",
+    "jungle_leaves": "foliage",
+    "acacia_leaves": "foliage",
+    "dark_oak_leaves": "foliage",
+    "mangrove_leaves": "foliage",
+    "vine": "foliage",
+    "short_dry_grass": "dryfoliage",
+    "tall_dry_grass": "dryfoliage",
+    "leaf_litter": "dryfoliage",
+    "spruce_leaves": "fixed",
+    "birch_leaves": "fixed",
+    "lily_pad": "fixed",
+}
+_VANILLA_FIXED_TINT_COLOR = {
+    # 与 WI 固定色一致的 sRGB/255 近似；CI-birch/spruce 另有节点内写死色
+    "spruce_leaves": (0x61 / 255.0, 0x99 / 255.0, 0x61 / 255.0),
+    "birch_leaves": (0x80 / 255.0, 0xA7 / 255.0, 0x55 / 255.0),
+    "lily_pad": (0x20 / 255.0, 0x80 / 255.0, 0x30 / 255.0),
+}
+
+
+def infer_vanilla_tint(material_name: str):
+    """
+    从材质名推断原版群系/固定色型。
+    仅 minecraft 命名空间；返回 {"kind", "color"?} 或 None。
+    grass_block 只对 top/overlay 回退。
+    """
+    if not material_name:
+        return None
+    base = material_base_name(material_name)
+    parsed = parse_material_name(base)
+    if parsed is None:
+        return None
+    block = parsed.get("block") or ""
+    if not block.startswith("minecraft:"):
+        return None
+    block_id = block.split(":", 1)[1]
+    if block_id == "grass_block":
+        key = parsed.get("key")
+        if key not in ("top", "overlay"):
+            return None
+    kind = _VANILLA_TINT_KIND.get(block_id)
+    if not kind:
+        return None
+    tint = {"kind": kind}
+    if kind == "fixed":
+        color = _VANILLA_FIXED_TINT_COLOR.get(block_id)
+        if color:
+            tint["color"] = color
+    return tint
+
 def _compile_classification_pattern(pattern: str):
     '''把一条匹配项编译为 ("exact", 字符串) 或 ("wild", 正则)（fnmatch 通配）'''
     if any(ch in pattern for ch in "*?["):
