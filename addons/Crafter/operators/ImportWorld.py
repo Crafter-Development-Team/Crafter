@@ -971,6 +971,35 @@ def finish_import(ctx, prefs, imported_time, worldconfig, prepared_time,
         log_step("未找到 tint.json，回退分类依据上色")
     log_stage_end("读取 tint 元数据")
 
+    # 读取导出器的"超长材质名"映射：Blender 材质名上限 63 字节，导出器会把超长名截成
+    # "<头部>~!<哈希>"；这里按可见名查回完整名，写进材质节点树的嵌套帧里，
+    # 供后续分类（贴图名等尾部信息）使用。
+    log_stage_begin("读取材质全名")
+    full_name_map = {}
+    dir_materials_json = os.path.join(dir_importer, "materials.json")
+    if os.path.exists(dir_materials_json):
+        try:
+            with open(dir_materials_json, "r", encoding="utf-8") as f:
+                raw_names = json.load(f)
+            full_name_map = {fuq_bl_dot_number(k): v for k, v in raw_names.items()
+                             if isinstance(v, str) and v}
+            log_step(f"materials.json 载入 {len(full_name_map)} 条超长材质名")
+        except Exception as ex:
+            warn_log(f"materials.json 读取失败: {ex}")
+            full_name_map = {}
+    else:
+        log_step("未找到 materials.json（没有超长材质名，或为旧版导出器）")
+    stored_names = 0
+    if full_name_map:
+        for material_name in set(real_name_dic.values()):
+            mat = bpy.data.materials.get(material_name)
+            full_name = full_name_map.get(fuq_bl_dot_number(material_name))
+            if mat is not None and full_name and store_full_material_name(mat, full_name):
+                stored_names += 1
+    if stored_names:
+        log_step(f"完整材质名写入材质属性 {stored_names} 个")
+    log_stage_end("读取材质全名")
+
     def material_tint_entry(mat):
         if tint_map is None:
             return None

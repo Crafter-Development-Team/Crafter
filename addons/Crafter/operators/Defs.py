@@ -157,6 +157,16 @@ tint_interface_color = "tint_color"
 # 分类/合成留到 Load Material 阶段，此处只承载贴图与元数据。
 overlay_frame_prefix = "C#"
 overlay_frame_prefix_legacy = "Crafter-overlay#"
+# 叠加层材质全名：frame.label 也有 63 字节上限，超长会在 Blender 里被截断，
+# 分类时就认不出这一层；完整名另存一份到 frame 的自定义属性（无长度限制）。
+overlay_name_prop = "Crafter_overlay_name"
+# overlay 帧的层序号标记（frame.label 可被用户改名/被 63 字节截断，检测不能只靠 label）
+overlay_index_prop = "Crafter_overlay_index"
+
+
+def overlay_layer_name_prop(index):
+    '''叠加层材质全名在材质上的属性名（与 Crafter_overlay<i>_kind/_color 同一套约定）。'''
+    return "Crafter_overlay" + str(index) + "_name"
 overlay_layer_stride = 1000.0   # 每层 overlay 帧在基础材质下方的纵向间距
 overlay_node_offset_x = 50.0    # 帧内贴图相对帧左上角的 x 偏移(与基础材质 x 列对齐)
 overlay_mix_step = 250.0        # 输出前 Mix 链每层占用的横向间距(其他节点据此左移)
@@ -193,18 +203,104 @@ def parse_overlay_frame_label(label):
     return int(index_text), name
 
 
-def find_overlay_frames(nodes):
+def overlay_frame_index(node):
     '''
-    收集材质节点里的 overlay 帧，按层序号排序返回 [(index, name, frame), ...]
+    取 frame 的叠加层序号（从 1 开始；不是 overlay 帧返回 None）。
+    优先读 frame 上的 Crafter_overlay_index 属性，label 只是显示用、用户可能改名或
+    被 63 字节截断，所以不作为唯一依据；两者都没有才判定"不是 overlay 帧"。
+    '''
+    if node is None or getattr(node, "type", "") != "FRAME":
+        return None
+    try:
+        index = int(node.get(overlay_index_prop, 0) or 0)
+    except (TypeError, ValueError):
+        index = 0
+    if index > 0:
+        return index
+    index, _ = parse_overlay_frame_label(node.label)
+    return index
+
+
+def find_overlay_frames(nodes, material=None):
+    '''
+    收集材质节点里的 overlay 帧，按层序号排序返回 [(index, name, frame), ...]。
+    name 取该层材质全名：优先材质属性 Crafter_overlay<i>_name（与 _kind/_color 同一套），
+    其次兼容旧版存在 frame 上的属性，最后才用 label（label 只有 63 字节，超长会被截断）。
     '''
     frames = []
     for node in nodes:
-        if node.type == "FRAME":
-            index, name = parse_overlay_frame_label(node.label)
-            if index is not None:
-                frames.append((index, name, node))
+        index = overlay_frame_index(node)
+        if index is None:
+            continue
+        _, label_name = parse_overlay_frame_label(node.label)
+        name = label_name or ""
+        stored_name = ""
+        if material is not None:
+            stored_name = str(material.get(overlay_layer_name_prop(index), ""))
+        if not stored_name:
+            stored_name = str(node.get(overlay_name_prop, ""))
+        if stored_name:
+            name = stored_name
+        frames.append((index, name, node))
     frames.sort(key=lambda item: item[0])
     return frames
+
+
+# ========== 材质全名存储（自定义属性） ==========
+# 导出器会把超过 63 字节的材质名截成 "<头部>~!<8位哈希>"，同时输出 materials.json
+# （可见名 -> 完整名）。导入时把完整名写进材质自定义属性（IDProperty）：这是 .blend
+# 里的数据，跟插件装没装无关——禁用/卸载/删掉插件、重开文件都不会丢，只有材质本身
+# 被删除或属性被手动清掉才会没有。
+full_name_prop = "Crafter_full_name"
+# 已提示过"截断名缺全名"的材质名，避免每个材质刷一遍日志
+_truncated_name_warned = set()
+# 旧版做法（已废弃，仅保留读取兼容）：用 "CF<序号>#<片段>" 的嵌套 frame 存名字。
+legacy_full_name_frame_prop = "crafter_full_name"
+legacy_full_name_frame_pattern = re.compile(r"^CF(\d+)#(.*)$", re.S)
+
+
+def store_full_material_name(material, full_name):
+    '''
+    把完整材质名写进材质自定义属性。
+    return: 是否写入（名字没被截断或材质不可用返回 False）
+    '''
+    if material is None or not full_name:
+        return False
+    if fuq_bl_dot_number(material.name) == full_name:
+        return False
+    material[full_name_prop] = full_name
+    return True
+
+
+def get_full_material_name(material):
+    '''读回完整材质名：优先自定义属性，其次兼容旧版 CF 嵌套帧；都没有返回 None。'''
+    if material is None:
+        return None
+    stored = str(material.get(full_name_prop, ""))
+    if stored:
+        return stored
+    if material.node_tree is None:
+        return None
+    legacy = []
+    for node in material.node_tree.nodes:
+        if node.type != "FRAME" or not node.get(legacy_full_name_frame_prop):
+            continue
+        match = legacy_full_name_frame_pattern.match(str(node.label))
+        if match is None:
+            continue
+        legacy.append((int(match.group(1)), match.group(2)))
+    if not legacy:
+        # 可见名带截断标记（"~!<哈希>"）却拿不到全名：多半是 materials.json 缺失或来自
+        # 旧版导出器。此时分类会退回用截断名，贴图名等尾部信息丢失——提示一次，免得
+        # 用户只看到"分组怪怪的"却不知道原因。
+        name = str(getattr(material, "name", ""))
+        if "~!" in name and name not in _truncated_name_warned:
+            _truncated_name_warned.add(name)
+            warn_log(f"材质名被截断但缺少完整名（materials.json 缺失或旧导出器），"
+                     f"分类将按截断名进行: {name}")
+        return None
+    legacy.sort(key=lambda item: item[0])
+    return "".join(chunk for _, chunk in legacy)
 
 
 def overlay_layout_shift(nodes, frames=None):
@@ -224,10 +320,8 @@ def in_overlay_frame(node):
     '''
     parent = getattr(node, "parent", None)
     while parent is not None:
-        if parent.type == "FRAME":
-            index, _ = parse_overlay_frame_label(parent.label)
-            if index is not None:
-                return True
+        if parent.type == "FRAME" and overlay_frame_index(parent) is not None:
+            return True
         parent = getattr(parent, "parent", None)
     return False
 
@@ -304,6 +398,10 @@ def build_overlay_frames(material, overlays, dir_importer):
 
         frame = nodes.new(type="NodeFrame")
         frame.label = overlay_frame_label(index, name)
+        # 层序号存属性：它是"这个材质有叠加层"的判定依据，不能只靠 label（用户可改名、
+        # 超长会被截断）。完整名同样存材质属性（与 Crafter_overlay<i>_kind/_color 对齐）。
+        frame[overlay_index_prop] = index
+        material[overlay_layer_name_prop(index)] = name
         # 基础材质正下方同一 x 列, 层号越大越靠下; 帧内贴图 x 与基础材质基础色对齐
         frame.location = (base_location[0] - overlay_node_offset_x,
                           base_location[1] - overlay_layer_stride * index)

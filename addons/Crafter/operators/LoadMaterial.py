@@ -396,13 +396,15 @@ def process_single_material(material, context, classification_list, imported_by_
                 if node.node_tree.name.startswith("Crafter-biomeTex"):
                     node_biomeTex = node
     # 分类取值：优先材质名的完整名（如 minecraft:block/oak_leaves；CTM 材质去掉 @ 后缀后
-    # 得到原材质名），没有命名空间时回退图像名（兼容用户自己导入的 OBJ）
+    # 得到原材质名）。名字超过 63 字节时 Blender 侧是截断名，这里从节点帧里读回完整名
+    # （见 Defs.store_full_material_name），否则贴图名等尾部信息会丢。
+    full_material_name = get_full_material_name(material) or material.name
     if ":" in material.name:
-        real_block_name = material_base_name(material.name)
+        real_block_name = material_base_name(full_material_name)
     elif node_tex_base is not None:
         real_block_name = texture_base_name(fuq_bl_dot_number(node_tex_base.image.name))
     else:
-        real_block_name = material_base_name(material.name)
+        real_block_name = material_base_name(full_material_name)
     if real_block_name is None:
         return
     for node in nodes_wait_remove:
@@ -419,7 +421,7 @@ def process_single_material(material, context, classification_list, imported_by_
     group_CI = nodes.new(type="ShaderNodeGroup")
     # 给输出前面的 overlay Mix 链留位置: 有 overlay 时基础 CI 与 Mix 链按同一步长左移
     # (CI -> Mix1 -> ... -> 输出的左边缘间距统一为 overlay_mix_step)
-    overlay_frames = find_overlay_frames(nodes)
+    overlay_frames = find_overlay_frames(nodes, material)
     overlay_count = len(overlay_frames)
     ci_offset_x = overlay_mix_step * (overlay_count + 1) if overlay_count > 0 else 200.0
     group_CI.location = (node_output_EEVEE.location.x - ci_offset_x,
@@ -468,6 +470,7 @@ def process_single_material(material, context, classification_list, imported_by_
 
     # 最后一步：CI- 组与 overlay 帧里的 CI 节点都已就位，再按双面几何清单应用剔除
     _apply_ds_cull()
+
 
 # ========== overlay 图层加载 ==========
 
@@ -566,7 +569,7 @@ def process_overlay_frames(material, nodes, links, group_CI,
     - 可重复调用：先清掉上一轮的 Mix 链与帧内 CI/Parser 再重建。
     '''
     if frames is None:
-        frames = find_overlay_frames(nodes)
+        frames = find_overlay_frames(nodes, material)
     if not frames:
         # Most imported materials have no overlay. Only undo layout/mix state
         # when overlay frames from a previous load have actually been removed.
