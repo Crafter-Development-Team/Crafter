@@ -225,9 +225,12 @@ class CrafterAddonPreferences(AddonPreferences):
                                           max=100.0,
                                           description=" ",
                                           update=lambda self,context: self.set_parsed_normal_strength(context))# type: ignore
-    Add_Crafter_time_On_Import: BoolProperty(name="Add Crafter-time on Import",
-                                             description="Automatically drive the imported objects' color alpha with frame * fps_base / fps (the current second). Material nodes read it from the Object Info node's Alpha output; no geometry nodes are involved, so it costs nothing on heavy geometry",
+    Add_Crafter_time_On_Import: BoolProperty(name="Add Time Driver on Import",
+                                             description="Automatically give imported objects a time driver: the object color alpha holds the current second (frame * fps_base / fps), and material nodes read it from the Object Info node's Alpha output. No geometry nodes are involved, so it costs nothing on heavy geometry",
                                              default=True)# type: ignore
+    Cycles_Time_Refresh: BoolProperty(name="Refresh Time in Cycles",
+                                      description="Cycles only re-reads an object's color when it is told that object changed, so a driven time value freezes until the render engine is switched. With this on, the objects that carry a time driver are marked on every frame change while Cycles is the render engine, which makes the time advance during playback and animation renders. EEVEE reads the object color every frame and is never touched",
+                                      default=True)# type: ignore
     # Crafter-time 换实现的迁移标记：不等于 CRAFTER_TIME_PREFS_VERSION 就说明还没迁移过
     Crafter_time_prefs_version: IntProperty(name="Crafter Time Prefs Version",
                                             default=0,
@@ -389,11 +392,12 @@ def migrate_crafter_time_preference():
     '''老偏好里关着的"导入时添加Crafter-time"一次性打开（换了实现，默认开启）'''
     try:
         addon_prefs = bpy.context.preferences.addons[__addon_name__].preferences
+        if addon_prefs is None:
+            return
+        if addon_prefs.Crafter_time_prefs_version >= CRAFTER_TIME_PREFS_VERSION:
+            return
+        addon_prefs.Add_Crafter_time_On_Import = True
+        addon_prefs.Crafter_time_prefs_version = CRAFTER_TIME_PREFS_VERSION
     except (KeyError, AttributeError):
+        # 注册早期偏好实例可能还取不到，或者属性还没注册：跳过一次，下次启动再迁移
         return
-    if addon_prefs is None:
-        return
-    if addon_prefs.Crafter_time_prefs_version >= CRAFTER_TIME_PREFS_VERSION:
-        return
-    addon_prefs.Add_Crafter_time_On_Import = True
-    addon_prefs.Crafter_time_prefs_version = CRAFTER_TIME_PREFS_VERSION

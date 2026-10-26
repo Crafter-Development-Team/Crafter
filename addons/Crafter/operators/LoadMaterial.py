@@ -1678,14 +1678,15 @@ class VIEW3D_OT_CrafterSetParsedNormalStrength(bpy.types.Operator):
 
         return {'FINISHED'}
 
-# ==================== Crafter-time设置 ====================
+# ==================== 时间驱动（Time Driver，旧名 Crafter-time）====================
 # 时间写在物体颜色属性的 alpha 通道上（驱动器 frame * fps_base / fps = 当前秒数），
-# 材质里用 Object Info 节点的 Alpha 输出读取；不再挂几何节点，几何再重也不拖慢预览。
+# 材质里用 Object Info 节点的 Alpha 输出读取。一次驱动器求值，与几何量无关，可以常开。
+# 内部 id 保持 add_craftertime/remove_craftertime，避免破坏已有的快捷键与脚本。
 
 class VIEW3D_OT_CrafterAddCrafterTime(bpy.types.Operator):
-    bl_label = "Add Crafter-time"
+    bl_label = "Add Time Driver"
     bl_idname = "crafter.add_craftertime"
-    bl_description = "Drive the object color alpha with frame * fps_base / fps (the current second). Material nodes read it from the Object Info node's Alpha output; no geometry nodes are involved, so heavy imported geometry is not slowed down"
+    bl_description = "Write the current second (frame * fps_base / fps) into the object's color alpha with a driver. Material nodes read it from the Object Info node's Alpha output. The cost is one driver evaluation per object and no geometry work, so it can stay on while you work"
     
     @classmethod
     def poll(cls, context: bpy.types.Context):
@@ -1704,9 +1705,9 @@ class VIEW3D_OT_CrafterAddCrafterTime(bpy.types.Operator):
         return {'FINISHED'}
 
 class VIEW3D_OT_CrafterRemoveCrafterTime(bpy.types.Operator):
-    bl_label = "Remove Crafter-time"
+    bl_label = "Remove Time Driver"
     bl_idname = "crafter.remove_craftertime"
-    bl_description = "Remove the object color alpha driver added by Crafter-time, and the Crafter-time geometry node modifier left by older versions"
+    bl_description = "Remove the time driver from the object color alpha and set the alpha back to 1. The Crafter-time geometry node modifier left by older versions is cleaned up as well"
     
     @classmethod
     def poll(cls, context: bpy.types.Context):
@@ -1714,6 +1715,25 @@ class VIEW3D_OT_CrafterRemoveCrafterTime(bpy.types.Operator):
     def execute(self, context: bpy.types.Context):
         for object in bpy.data.objects:
             remove_Crafter_time(object)
+        return {'FINISHED'}
+
+class VIEW3D_OT_CrafterTimeSettings(bpy.types.Operator):
+    '''时间驱动的设置弹窗（和坐标选择器的齿轮一样，细项不占主面板）'''
+    bl_label = "Time Driver Settings"
+    bl_idname = "crafter.time_settings"
+    bl_description = "Settings for the time driver: add it on import, and keep it refreshing while Cycles is the render engine"
+
+    def draw(self, context: bpy.types.Context):
+        addon_prefs = context.preferences.addons[__addon_name__].preferences
+        layout = self.layout
+        layout.prop(addon_prefs, "Add_Crafter_time_On_Import")
+        if hasattr(addon_prefs, "Cycles_Time_Refresh"):
+            layout.prop(addon_prefs, "Cycles_Time_Refresh")
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(self)
+
+    def execute(self, context):
         return {'FINISHED'}
 
 # ==================== 刷新 ====================

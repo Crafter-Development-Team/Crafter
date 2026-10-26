@@ -1724,8 +1724,8 @@ def link_base_normal_PBR(node_tex_base, group_CI, links, node_C_PBR_Parser, node
         if "PBR Alpha" in group_CI.inputs:
             links.new(node_tex_PBR.outputs["Alpha"], group_CI.inputs["PBR Alpha"])
 
-# ==================== Crafter-time ====================
-# 时间不再走几何节点：几何节点每帧都要在整个网格上重算，几何一多模型就卡。
+# ==================== 时间驱动（Time Driver，旧名 Crafter-time）====================
+# 时间不走几何节点：几何节点每帧都要在整个网格上重算，几何一多模型就卡。
 # 改成给物体的颜色属性 alpha 通道挂一个驱动器 #frame * fps_base / fps，也就是场景
 # 当前秒数（与几何节点 Scene Time 的 Seconds 一致：frame / (fps / fps_base)）。
 # 材质侧用 Object Info 节点的 Alpha 输出取值，代价只有一次驱动器求值，与几何量无关。
@@ -1791,6 +1791,7 @@ def remove_Crafter_time(obj):
         obj.driver_remove(CRAFTER_TIME_DRIVER_PATH, CRAFTER_TIME_DRIVER_INDEX)
         obj.color[CRAFTER_TIME_DRIVER_INDEX] = 1.0
     remove_crafter_time_modifier(obj)
+    unregister_crafter_time_object(obj)
 
 
 def add_Crafter_time(obj):
@@ -1825,6 +1826,186 @@ def add_Crafter_time(obj):
     driver.expression = CRAFTER_TIME_DRIVER_EXPRESSION
     # 不逐帧求值的时候（比如直接看 UI）alpha 也应该是当前秒数
     obj.color[CRAFTER_TIME_DRIVER_INDEX] = crafter_time_seconds(scene)
+    register_crafter_time_object(obj)
+
+
+# ---------- Cycles 刷新补丁 ----------
+# Cycles 只在对象被标记为"变换/着色有更新"时才重建该对象的数据（含物体颜色 alpha）。
+# 单纯驱动物体颜色时，4.2 的 Cycles 不会自己发现，Object Info 的 Alpha 会停在旧值，
+# 必须切一次渲染引擎才刷新。这里在换帧时给带时间驱动器的物体补一次标记，让 Cycles 重新
+# 同步；EEVEE 每帧直接读物体颜色，不需要，所以补丁只在 CYCLES 引擎下才动手。
+_crafter_time_objects = {}   # obj.as_pointer() -> Object（存引用，改名字不影响）
+# addon register 期间 bpy.data 会被 Blender 换成空的占位对象，那时不能扫物体建表，
+# 所以表标成"待建"，等第一次换帧或打开文件时再真正重建。
+_crafter_time_registry_stale = True
+
+
+def register_crafter_time_object(obj):
+    '''登记一个带时间驱动器的物体，供 Cycles 刷新补丁逐帧打标记'''
+    if obj is None:
+        return
+    try:
+        _crafter_time_objects[obj.as_pointer()] = obj
+    except ReferenceError:
+        pass
+    # 材质刚加载/重载过，置换判定要重新问一次
+    _crafter_time_displacement_cache.clear()
+
+
+def unregister_crafter_time_object(obj):
+    '''注销（物体删了、驱动器被移除时调用）'''
+    if obj is None:
+        return
+    try:
+        _crafter_time_objects.pop(obj.as_pointer(), None)
+    except ReferenceError:
+        pass
+
+
+def _crafter_time_refresh_enabled():
+    '''偏好里的开关：关掉就完全不做事，方便开着/关着对比'''
+    try:
+        addon_prefs = bpy.context.preferences.addons[__addon_name__].preferences
+        return bool(addon_prefs is not None and addon_prefs.Cycles_Time_Refresh)
+    except (KeyError, AttributeError):
+        return False
+
+
+def _crafter_time_has_driver(obj):
+    '''物体上还有没有我们那条驱动器（用户手动删掉时要能认出来）'''
+    anim_data = obj.animation_data
+    if anim_data is None:
+        return False
+    for fcurve in anim_data.drivers:
+        if fcurve.data_path == CRAFTER_TIME_DRIVER_PATH \
+                and fcurve.array_index == CRAFTER_TIME_DRIVER_INDEX:
+            return True
+    return False
+
+
+def _crafter_time_rebuild_registry():
+    '''按驱动器重建注册表。
+
+    注册阶段 bpy.data 是 Blender 的占位对象（addon_utils 的 RestrictBlend），
+    这时直接跳过并保持 stale，绝不能在 register() 里抛异常——那会让 Blender
+    移除 addon 条目，所有面板都会因为拿不到偏好而变空。
+    '''
+    global _crafter_time_registry_stale
+    try:
+        objects = bpy.data.objects
+    except AttributeError:
+        return
+    _crafter_time_objects.clear()
+    _crafter_time_displacement_cache.clear()
+    for obj in objects:
+        try:
+            if _crafter_time_has_driver(obj):
+                _crafter_time_objects[obj.as_pointer()] = obj
+        except (ReferenceError, AttributeError):
+            continue
+    _crafter_time_registry_stale = False
+
+
+_crafter_time_displacement_cache = {}   # 材质名 -> 是否用真置换（需要重算几何）
+
+
+def _crafter_time_material_needs_geometry(material):
+    '''材质是否用了"真置换"：Displacement 输出接了线，且 displacement_method 不是 BUMP。
+
+    法线/Bump 是着色阶段算的，刷新物体数据就够；真置换要重新细分/位移几何，
+    只刷物体数据不会变，必须连几何一起标记。
+    '''
+    cached = _crafter_time_displacement_cache.get(material.name)
+    if cached is not None:
+        return cached
+    needs = False
+    try:
+        if material.displacement_method != 'BUMP':
+            tree = getattr(material, "node_tree", None)
+            if tree is not None:
+                for node in tree.nodes:
+                    if node.type == 'OUTPUT_MATERIAL' and node.inputs["Displacement"].is_linked:
+                        needs = True
+                        break
+    except (AttributeError, KeyError):
+        needs = False
+    _crafter_time_displacement_cache[material.name] = needs
+    return needs
+
+
+def _crafter_time_object_uses_displacement(obj):
+    '''物体上有没有用真置换的材质（结果按材质名缓存）'''
+    for slot in obj.material_slots:
+        material = slot.material
+        if material is not None and _crafter_time_material_needs_geometry(material):
+            return True
+    return False
+
+
+def _crafter_time_refresh_for_cycles(scene):
+    '''换帧时给带时间驱动器的物体打标记，让 Cycles 重新同步物体数据（真置换连几何一起）'''
+    if scene is None or scene.render.engine != 'CYCLES':
+        return  # EEVEE 每帧自己读物体颜色，不用管
+    if _crafter_time_registry_stale:
+        _crafter_time_rebuild_registry()   # 注册阶段建不了表，第一次真正用到时补建
+    if not _crafter_time_objects or not _crafter_time_refresh_enabled():
+        return
+    stale = []
+    for pointer, obj in _crafter_time_objects.items():
+        try:
+            if obj.name not in bpy.data.objects or not _crafter_time_has_driver(obj):
+                stale.append(pointer)   # 已删除 / 驱动器被手动移除
+                continue
+            # OBJECT = ID_RECALC_TRANSFORM：Cycles 重新同步该物体（颜色/alpha 等对象数据）
+            refresh = {'OBJECT'}
+            if _crafter_time_object_uses_displacement(obj):
+                # DATA = ID_RECALC_GEOMETRY：真置换要重算几何才会跟着时间变
+                refresh.add('DATA')
+            obj.update_tag(refresh=refresh)
+        except ReferenceError:          # 换文件 / 撤销后引用失效
+            stale.append(pointer)
+    for pointer in stale:
+        _crafter_time_objects.pop(pointer, None)
+
+
+@bpy.app.handlers.persistent
+def _crafter_time_on_frame_change(scene):
+    _crafter_time_refresh_for_cycles(scene)
+
+
+@bpy.app.handlers.persistent
+def _crafter_time_on_load(*_args):
+    '''handler 跨文件存活，但表里是上一个文件的对象：清空后按驱动器重建'''
+    _crafter_time_rebuild_registry()
+
+
+def register_crafter_time_handlers():
+    '''挂 handler（幂等：先摘再挂，避免重载插件时叠好几份）
+
+    注意：addon register 期间 Blender 会把 bpy.data 换成空的占位对象
+    （addon_utils 的 RestrictBlend），所以这里只挂 handler、不能扫物体，
+    注册表推迟到第一次换帧或打开文件时再建。
+    '''
+    global _crafter_time_registry_stale
+    remove_crafter_time_handlers()
+    bpy.app.handlers.frame_change_pre.append(_crafter_time_on_frame_change)
+    bpy.app.handlers.load_post.append(_crafter_time_on_load)
+    _crafter_time_registry_stale = True
+
+
+def remove_crafter_time_handlers():
+    global _crafter_time_registry_stale
+    for handlers, callback in ((bpy.app.handlers.frame_change_pre, _crafter_time_on_frame_change),
+                               (bpy.app.handlers.load_post, _crafter_time_on_load)):
+        while callback in handlers:
+            handlers.remove(callback)
+        # 插件重新加载后，列表里可能残留旧模块里的同名函数对象：按名字再清一遍
+        for existing in list(handlers):
+            if getattr(existing, "__name__", "") == callback.__name__:
+                handlers.remove(existing)
+    _crafter_time_objects.clear()
+    _crafter_time_displacement_cache.clear()
+    _crafter_time_registry_stale = True
 
 
 def link_biome_tex(node_biomeTex, group_CI, links):

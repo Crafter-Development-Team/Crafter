@@ -112,12 +112,13 @@ class VIEW3D_PT_CrafterMaterials(bpy.types.Panel):
         row_Parsed_Normal_Strength.label(icon="NODE_TEXTURE")
         row_Parsed_Normal_Strength.prop(addon_prefs, "Parsed_Normal_Strength")
 
+        # 时间驱动：面板只留动作，细项（导入时添加 / Cycles 刷新）收进齿轮弹窗
         row_Crafter_time = box_other.row()
         row_Crafter_time.label(icon="TIME")
         row_Crafter_time_ops = row_Crafter_time.row(align=True)
         row_Crafter_time_ops.operator("crafter.add_craftertime",icon="LINKED",text="Add")
         row_Crafter_time_ops.operator("crafter.remove_craftertime",icon="UNLINKED",text="Remove")
-        row_Crafter_time_ops.prop(addon_prefs, "Add_Crafter_time_On_Import", text="")
+        row_Crafter_time_ops.operator("crafter.time_settings",icon="PREFERENCES",text="")
 
         row_parallax = box_other.row()
         col1_parallax = row_parallax.column()

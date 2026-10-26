@@ -85,9 +85,19 @@ def register():
     auto_load.init()
     auto_load.register()
     add_properties(_addon_properties)
-    # Crafter-time 改成颜色 alpha 驱动器后，老偏好里关着的开关一次性打开（只迁移一次）
-    from .preference.AddonPreferences import migrate_crafter_time_preference
-    migrate_crafter_time_preference()
+    # 上面这两个是可选的辅助功能：任何一个出问题都不能把整个插件注册拖垮。
+    # register() 一旦抛异常，Blender 会移除 addon 条目，所有面板都会因为拿不到偏好而变空。
+    try:
+        # Crafter-time 改成颜色 alpha 驱动器后，老偏好里关着的开关一次性打开（只迁移一次）
+        from .preference.AddonPreferences import migrate_crafter_time_preference
+        migrate_crafter_time_preference()
+        # 时间驱动的 Cycles 刷新补丁：换帧时给带驱动器的物体打标记（EEVEE 下不做事）
+        from .operators.Defs import register_crafter_time_handlers
+        register_crafter_time_handlers()
+    except Exception:
+        import traceback
+        traceback.print_exc()
+        print("[Crafter] 时间驱动/迁移注册失败（已跳过，不影响其他功能）")
     # Internationalization
     load_dictionary(dictionary)
     bpy.app.translations.register(__addon_name__, common_dictionary)
@@ -138,6 +148,13 @@ def unregister():
         bpy.utils.previews.remove(icons_plan_resource)
     # Internationalization
     bpy.app.translations.unregister(__addon_name__)
+    # 摘掉时间驱动的 Cycles 刷新补丁（失败也不能阻止插件卸载）
+    try:
+        from .operators.Defs import remove_crafter_time_handlers
+        remove_crafter_time_handlers()
+    except Exception:
+        import traceback
+        traceback.print_exc()
     # unRegister classes
     auto_load.unregister()
     remove_properties(_addon_properties)
