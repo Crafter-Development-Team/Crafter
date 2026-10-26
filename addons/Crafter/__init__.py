@@ -85,6 +85,9 @@ def register():
     auto_load.init()
     auto_load.register()
     add_properties(_addon_properties)
+    # Crafter-time 改成颜色 alpha 驱动器后，老偏好里关着的开关一次性打开（只迁移一次）
+    from .preference.AddonPreferences import migrate_crafter_time_preference
+    migrate_crafter_time_preference()
     # Internationalization
     load_dictionary(dictionary)
     bpy.app.translations.register(__addon_name__, common_dictionary)

@@ -1724,22 +1724,108 @@ def link_base_normal_PBR(node_tex_base, group_CI, links, node_C_PBR_Parser, node
         if "PBR Alpha" in group_CI.inputs:
             links.new(node_tex_PBR.outputs["Alpha"], group_CI.inputs["PBR Alpha"])
 
-def add_Crafter_time(obj):
-    if not "Crafter-time" in bpy.data.node_groups:
-        with bpy.data.libraries.load(dir_blend_append, link=False) as (data_from, data_to):
-            data_to.node_groups = ["Crafter-time"]
-    # 检查是否已存在该节点修改器
-    has_modifier = any(
-        mod.type == 'NODES' and 
-        mod.node_group == bpy.data.node_groups["Crafter-time"]
-        for mod in obj.modifiers)
+# ==================== Crafter-time ====================
+# 时间不再走几何节点：几何节点每帧都要在整个网格上重算，几何一多模型就卡。
+# 改成给物体的颜色属性 alpha 通道挂一个驱动器 #frame * fps_base / fps，也就是场景
+# 当前秒数（与几何节点 Scene Time 的 Seconds 一致：frame / (fps / fps_base)）。
+# 材质侧用 Object Info 节点的 Alpha 输出取值，代价只有一次驱动器求值，与几何量无关。
+CRAFTER_TIME_DRIVER_EXPRESSION = "frame*fps_base/fps"
+CRAFTER_TIME_DRIVER_PATH = "color"
+CRAFTER_TIME_DRIVER_INDEX = 3               # 颜色属性的 alpha 通道
+CRAFTER_TIME_MODIFIER_NAME = "Crafter-time" # 旧版本几何节点修改器的名字
 
-    if not has_modifier:
-        # 添加几何节点修改器
-        new_mod = obj.modifiers.new("Crafter-time", 'NODES')
-        new_mod.node_group = bpy.data.node_groups["Crafter-time"]
-        new_mod.use_pin_to_last = True
-        new_mod.show_in_editmode = False
+
+def crafter_time_scene(obj=None):
+    '''时间跟哪个场景的帧率走：优先物体所在场景，拿不到就用当前场景'''
+    if obj is not None and len(obj.users_scene) > 0:
+        return obj.users_scene[0]
+    return getattr(bpy.context, "scene", None)
+
+
+def crafter_time_seconds(scene=None):
+    '''当前秒数 = frame * fps_base / fps，和几何节点 Scene Time 的 Seconds 一致'''
+    if scene is None:
+        scene = getattr(bpy.context, "scene", None)
+    if scene is None:
+        return 0.0
+    fps = float(scene.render.fps) / float(scene.render.fps_base or 1.0)
+    return (float(scene.frame_current) / fps) if fps > 0.0 else 0.0
+
+
+def is_crafter_time_driver(fcurve):
+    '''这条驱动器是不是 Crafter-time 加在颜色 alpha 上的那条'''
+    if fcurve is None or fcurve.data_path != CRAFTER_TIME_DRIVER_PATH:
+        return False
+    if fcurve.array_index != CRAFTER_TIME_DRIVER_INDEX:
+        return False
+    driver = getattr(fcurve, "driver", None)
+    return (driver is not None and driver.type == 'SCRIPTED'
+            and driver.expression == CRAFTER_TIME_DRIVER_EXPRESSION)
+
+
+def get_crafter_time_driver(obj):
+    '''取物体颜色 alpha 上已有的 Crafter-time 驱动器，没有就返回 None'''
+    anim_data = obj.animation_data
+    if anim_data is None:
+        return None
+    for fcurve in anim_data.drivers:
+        if is_crafter_time_driver(fcurve):
+            return fcurve
+    return None
+
+
+def remove_crafter_time_modifier(obj):
+    '''清掉旧版本留下的 Crafter-time 几何节点修改器'''
+    for modifier in list(obj.modifiers):
+        if modifier.type != 'NODES' or modifier.node_group is None:
+            continue
+        if modifier.node_group.name == CRAFTER_TIME_MODIFIER_NAME:
+            obj.modifiers.remove(modifier)
+
+
+def remove_Crafter_time(obj):
+    '''撤掉时间：删掉颜色 alpha 上的驱动器（alpha 还原成 1），并清理旧的几何节点修改器'''
+    if obj is None or obj.library is not None:  # 库链接的物体改不了
+        return
+    if get_crafter_time_driver(obj) is not None:
+        obj.driver_remove(CRAFTER_TIME_DRIVER_PATH, CRAFTER_TIME_DRIVER_INDEX)
+        obj.color[CRAFTER_TIME_DRIVER_INDEX] = 1.0
+    remove_crafter_time_modifier(obj)
+
+
+def add_Crafter_time(obj):
+    '''
+    给物体的颜色 alpha 挂时间驱动器（幂等：重复调用只是刷新一下场景变量）。
+    材质侧用 Object Info 节点的 Alpha 输出取当前秒数，不再需要几何节点。
+    '''
+    if obj is None or obj.library is not None:  # 库链接的物体改不了驱动器
+        return
+    scene = crafter_time_scene(obj)
+    if scene is None:
+        return
+    # 旧版本的几何节点直接清掉，免得时间叠一层
+    remove_crafter_time_modifier(obj)
+
+    fcurve = get_crafter_time_driver(obj)
+    if fcurve is None:
+        fcurve = obj.driver_add(CRAFTER_TIME_DRIVER_PATH, CRAFTER_TIME_DRIVER_INDEX)
+    driver = fcurve.driver
+    driver.type = 'SCRIPTED'
+    for name, data_path in (("fps", "render.fps"), ("fps_base", "render.fps_base")):
+        variable = driver.variables.get(name)
+        if variable is None:
+            variable = driver.variables.new()
+            variable.name = name
+        variable.type = 'SINGLE_PROP'
+        target = variable.targets[0]
+        target.id_type = 'SCENE'
+        target.id = scene
+        target.data_path = data_path
+    # 表达式的变量齐了再写表达式，免得中途降到 Python 求值
+    driver.expression = CRAFTER_TIME_DRIVER_EXPRESSION
+    # 不逐帧求值的时候（比如直接看 UI）alpha 也应该是当前秒数
+    obj.color[CRAFTER_TIME_DRIVER_INDEX] = crafter_time_seconds(scene)
+
 
 def link_biome_tex(node_biomeTex, group_CI, links):
     if not node_biomeTex == None:

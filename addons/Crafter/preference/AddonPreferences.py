@@ -223,8 +223,12 @@ class CrafterAddonPreferences(AddonPreferences):
                                           description=" ",
                                           update=lambda self,context: self.set_parsed_normal_strength(context))# type: ignore
     Add_Crafter_time_On_Import: BoolProperty(name="Add Crafter-time on Import",
-                                             description="Automatically add the Crafter-time geometry node to imported objects. It provides the current second count to material nodes (dynamic textures and water flowing), but it will reduce the preview frame rate",
-                                             default=False)# type: ignore
+                                             description="Automatically drive the imported objects' color alpha with frame * fps_base / fps (the current second). Material nodes read it from the Object Info node's Alpha output; no geometry nodes are involved, so it costs nothing on heavy geometry",
+                                             default=True)# type: ignore
+    # Crafter-time 换实现的迁移标记：不等于 CRAFTER_TIME_PREFS_VERSION 就说明还没迁移过
+    Crafter_time_prefs_version: IntProperty(name="Crafter Time Prefs Version",
+                                            default=0,
+                                            options={'HIDDEN'})# type: ignore
     Search_PBR_On_Load: BoolProperty(name="Search PBR",
                                      description="When loading or reloading materials from the panel button, look for PBR/normal textures next to the base color texture. Textures the material already has are kept as is, only the missing one is searched for. Loading during import is not affected",
                                      default=True)# type: ignore
@@ -370,3 +374,23 @@ class CrafterAddonPreferences(AddonPreferences):
     def set_parallax_depth(self, context):
         bpy.ops.crafter.set_parallax_depth()
         return None
+
+
+# Crafter-time 从几何节点换成颜色 alpha 驱动器后，这项开关已经没有性能代价了。
+# 老配置里存着的 False 是"几何节点会掉帧"时代的取舍，这里一次性翻成开；
+# 之后用户想关还是可以自己关（版本号记在偏好里，只迁移一次）。
+CRAFTER_TIME_PREFS_VERSION = 1
+
+
+def migrate_crafter_time_preference():
+    '''老偏好里关着的"导入时添加Crafter-time"一次性打开（换了实现，默认开启）'''
+    try:
+        addon_prefs = bpy.context.preferences.addons[__addon_name__].preferences
+    except (KeyError, AttributeError):
+        return
+    if addon_prefs is None:
+        return
+    if addon_prefs.Crafter_time_prefs_version >= CRAFTER_TIME_PREFS_VERSION:
+        return
+    addon_prefs.Add_Crafter_time_On_Import = True
+    addon_prefs.Crafter_time_prefs_version = CRAFTER_TIME_PREFS_VERSION

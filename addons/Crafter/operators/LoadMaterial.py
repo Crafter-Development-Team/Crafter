@@ -1679,11 +1679,13 @@ class VIEW3D_OT_CrafterSetParsedNormalStrength(bpy.types.Operator):
         return {'FINISHED'}
 
 # ==================== Crafter-time设置 ====================
+# 时间写在物体颜色属性的 alpha 通道上（驱动器 frame * fps_base / fps = 当前秒数），
+# 材质里用 Object Info 节点的 Alpha 输出读取；不再挂几何节点，几何再重也不拖慢预览。
 
 class VIEW3D_OT_CrafterAddCrafterTime(bpy.types.Operator):
     bl_label = "Add Crafter-time"
     bl_idname = "crafter.add_craftertime"
-    bl_description = "The Crafter-time node can provide the current second count to material nodes (dynamic textures and water flowing), but it will reduce the preview frame rate. It is recommended to remove it during previews and add it back before rendering"
+    bl_description = "Drive the object color alpha with frame * fps_base / fps (the current second). Material nodes read it from the Object Info node's Alpha output; no geometry nodes are involved, so heavy imported geometry is not slowed down"
     
     @classmethod
     def poll(cls, context: bpy.types.Context):
@@ -1704,19 +1706,14 @@ class VIEW3D_OT_CrafterAddCrafterTime(bpy.types.Operator):
 class VIEW3D_OT_CrafterRemoveCrafterTime(bpy.types.Operator):
     bl_label = "Remove Crafter-time"
     bl_idname = "crafter.remove_craftertime"
-    bl_description = "The Crafter-time node can provide the current second count to material nodes (dynamic textures and water flowing), but it will reduce the preview frame rate. It is recommended to remove it during previews and add it back before rendering"
+    bl_description = "Remove the object color alpha driver added by Crafter-time, and the Crafter-time geometry node modifier left by older versions"
     
     @classmethod
     def poll(cls, context: bpy.types.Context):
         return True
     def execute(self, context: bpy.types.Context):
         for object in bpy.data.objects:
-            if object.type == 'MESH':
-                for modifier in object.modifiers:
-                    if modifier.type == 'NODES':
-                        if modifier.node_group.name == "Crafter-time":
-                            object.modifiers.remove(modifier)
-                            break
+            remove_Crafter_time(object)
         return {'FINISHED'}
 
 # ==================== 刷新 ====================
