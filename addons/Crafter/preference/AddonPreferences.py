@@ -102,6 +102,9 @@ class CrafterAddonPreferences(AddonPreferences):
     doubleSidedBackfaceCull: BoolProperty(name="Double-Sided Backface Cull",
                                           description="On material load, look up doubleSided.json (written by the exporter) and enable backface culling for the materials that use double-sided geometry: EEVEE render + shadow culling, and set the CI node's Cycles backface-cull input to 1. Solid geometry of other materials keeps rendering both sides, so no light leaks. Requires Double-Sided Geometry to be on",
                                           default=True,)# type: ignore
+    plantOffset: BoolProperty(name="Plant Offset",
+                              description="Apply the vanilla random offset (BlockBehaviour.OffsetType) to plants and flowers: grass, ferns and flowers shift up to 0.25 blocks horizontally, grass-type plants also sink up to 0.2 blocks. The shift comes from the block position exactly like in game, so every export of the same world matches. Turn it off to keep every plant centred in its block",
+                              default=True)# type: ignore
     doubleSidedFaceOffset: FloatProperty(name="Double-Sided Offset",
                                          description="Outward offset of the reverse face of a zero-thickness plane, in metres (1 block = 1 m); keeps the two coincident faces from z-fighting when backface culling is off. It must stay above the float precision at your coordinates: 0.0001 is only safe within roughly 1000 blocks of the origin, 0.0005 within about 4000, 0.003 anywhere. 0 keeps the faces exactly coincident",
                                          default=0.0005,

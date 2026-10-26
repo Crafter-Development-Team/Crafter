@@ -45,6 +45,8 @@ dictionary = {
         "Merge Mod Textures":"模组材质复用",
         "Double-Sided Geometry":"几何双面",
         "Let the importer keep both windings of zero-thickness planes (leaves, fronds, grass) exactly like the game defines them. Turn it off to keep only one face of each coincident pair (older behaviour): that halves those faces, but a single-sided plane then disappears when seen from behind. This switch only affects the importer's output geometry":"让导入器保留零厚度贴片（叶片/草叶）的正反两面，与游戏定义一致。关闭则每组重合面只留一张（旧行为）：这些面少一半，但单面贴片从背面看会消失。此开关只影响导入器输出的几何",
+        "Plant Offset":"植物位移",
+        "Apply the vanilla random offset (BlockBehaviour.OffsetType) to plants and flowers: grass, ferns and flowers shift up to 0.25 blocks horizontally, grass-type plants also sink up to 0.2 blocks. The shift comes from the block position exactly like in game, so every export of the same world matches. Turn it off to keep every plant centred in its block":"按原版随机偏移(BlockBehaviour.OffsetType)平移植物: 草/蕨/花水平最多偏移 0.25 格, 草类还会下沉最多 0.2 格. 位移由方块坐标决定, 与游戏内一致, 同一世界每次导出结果相同. 关掉后所有植物都待在格子中心",
         "Double-Sided Offset":"几何双面偏移",
         "Double-Sided Backface Cull":"几何双面背面剔除",
         "On material load, look up doubleSided.json (written by the exporter) and enable backface culling for the materials that use double-sided geometry: EEVEE render + shadow culling, and set the CI node's Cycles backface-cull input to 1. Solid geometry of other materials keeps rendering both sides, so no light leaks. Requires Double-Sided Geometry to be on":"加载材质时读取导出器写出的 doubleSided.json，为使用双面几何的材质打开背面剔除：EEVEE 的渲染侧与阴影侧剔除，并把 CI 节点的 Cycles 背面剔除输入写为 1。其余材质（实心几何）仍双面可见，因此不会漏光。需要先开启几何双面",

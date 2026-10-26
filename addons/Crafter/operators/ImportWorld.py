@@ -115,14 +115,15 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         row_output = box_output.row()
         col_output_1 = row_output.column(align=True)
         col_output_1.prop(addon_prefs, "useGreedyMesh")
-        # 光源方块的两个细项常驻显示，导出关掉时置灰（不再隐藏，避免布局跳动）
-        row_Light_Block = col_output_1.row()
-        row_Light_Block.enabled = addon_prefs.exportLightBlock
-        row_Light_Block.prop(addon_prefs, "exportLightBlockOnly")
+        col_output_1.prop(addon_prefs, "plantOffset")
         # 生物与面合并同列，保持行距一致
         col_output_1.prop(addon_prefs, "useEntityModels")
+        # 光源方块的三项全部归到右列，导出关掉时两个细项置灰（常驻显示，避免布局跳动）
         col_output_2 = row_output.column(align=True)
         col_output_2.prop(addon_prefs, "exportLightBlock")
+        row_Light_Block = col_output_2.row()
+        row_Light_Block.enabled = addon_prefs.exportLightBlock
+        row_Light_Block.prop(addon_prefs, "exportLightBlockOnly")
         row_Light_Block_size = col_output_2.row()
         row_Light_Block_size.enabled = addon_prefs.exportLightBlock
         row_Light_Block_size.prop(addon_prefs, "lightBlockSize")
@@ -605,6 +606,7 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             "doubleSidedFaceOffset":addon_prefs.doubleSidedFaceOffset,
             "overlayLayerStep":addon_prefs.overlayLayerStep,
             "mergeModTextures":addon_prefs.mergeModTextures,
+            "plantOffset":addon_prefs.plantOffset,
             "exportFullModel":not effective_as_chunk,
             # 生物模型与区域 obj 分开导出；同一开关也控制导入端是否导入
             "exportEntityModels":addon_prefs.useEntityModels,
