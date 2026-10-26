@@ -147,8 +147,8 @@ def texture_node_by_role(texture_nodes, roles):
 # ========== tint 接口约定 ==========
 # tint.json 里的 kind 取值；与 Crafter-biomeTex 的输出名一致（waterFog 为大写 F）
 TINT_BIOME_KINDS = ("grass", "foliage", "dryfoliage", "water", "waterFog", "fog", "sky")
-tint_interface_enable = "tint_enable"
-tint_interface_color = "tint_color"
+tint_interface_enable = "Tint Enable"
+tint_interface_color = "Tint Color"
 
 # ========== overlay 帧约定 ==========
 # 导入时把导出器给出的共面叠加层(overlay.json)贴图放进材质内的 NodeFrame，
@@ -1388,7 +1388,7 @@ def sync_CI_culling(material, count=False):
 # 已剥掉 @tint 后缀）。这些材质在 Blender 里是双面几何，需要关闭背面剔除才不会漏光；
 # 其余材质（实心几何）保持双面可见。
 # CI- 组若声明了这个输入接口，就把 Cycles 侧的背面剔除打开（写 1）。
-CI_BACKCULL_INPUT = "cycles 背面剔除/back cull"
+CI_BACKCULL_INPUT = "Cycles Back Cull"
 double_sided_json_name = "doubleSided.json"
 # doubleSided.json 的按 mtime 失效的读盘缓存：{"stamp": float|None, "names": set[str]}
 _double_sided_cache = {"stamp": None, "names": set()}
@@ -1942,10 +1942,37 @@ def _crafter_time_object_uses_displacement(obj):
     return False
 
 
+def _crafter_time_cycles_is_drawing():
+    '''当前是不是真有 Cycles 在出图：最终渲染中，或某个 3D 视口处于 Rendered。
+
+    scene.render.engine 是 CYCLES 并不代表视口在用 Cycles——Material Preview / Solid
+    视口跑的其实是 EEVEE / Workbench，它们每帧自己读物体颜色，不需要我们补标记；
+    给它们打几何标记反而会让这些视口每帧重建几何，明显掉帧。
+    '''
+    if bpy.app.is_job_running('RENDER'):
+        return True
+    window_manager = getattr(bpy.context, "window_manager", None)
+    if window_manager is None:
+        return False
+    for window in window_manager.windows:
+        screen = getattr(window, "screen", None)
+        if screen is None:
+            continue
+        for area in screen.areas:
+            if area.type != 'VIEW_3D':
+                continue
+            space = area.spaces.active
+            if space is not None and space.shading.type == 'RENDERED':
+                return True
+    return False
+
+
 def _crafter_time_refresh_for_cycles(scene):
     '''换帧时给带时间驱动器的物体打标记，让 Cycles 重新同步物体数据（真置换连几何一起）'''
     if scene is None or scene.render.engine != 'CYCLES':
         return  # EEVEE 每帧自己读物体颜色，不用管
+    if not _crafter_time_cycles_is_drawing():
+        return  # 视口是 Material Preview / Solid，或者根本没在用 Cycles 出图
     if _crafter_time_registry_stale:
         _crafter_time_rebuild_registry()   # 注册阶段建不了表，第一次真正用到时补建
     if not _crafter_time_objects or not _crafter_time_refresh_enabled():
@@ -2147,9 +2174,10 @@ def apply_tint(group_CI, nodes, links, tint):
     CI 驱动的 tint 供给：
     - CI 组暴露的命名群系输入（grass/foliage/dryfoliage/water/waterFog/fog/sky）：
       按需追加 biomeTex 节点并连接（CI 想要就给，与元数据无关）。
-    - tint_color：元数据有 kind 时，群系类连对应输出、fixed 类写常量；无 kind（明确不上色）
-      写白色；没有元数据（旧导出器）则不动。
-    - tint_enable：有元数据时写 0/1。
+    - Tint Color（tint_interface_color）：元数据有 kind 时，群系类连对应输出、fixed 类写常量；
+      无 kind（明确不上色）写白色；没有元数据（旧导出器）则不动。
+    - Tint Enable（tint_interface_enable）：有元数据时写 0/1。
+    - 固定色也只走 Tint Color：组里没有这个接口就不上色，不再往材质里插"正片叠底"兜底。
     tint: {"kind", "color"?} / {} / None
     '''
     group_biomeTex = find_biome_tex_group()
@@ -2187,69 +2215,6 @@ def apply_tint(group_CI, nodes, links, tint):
             socket.default_value = (1.0, 1.0, 1.0, 1.0)
     if tint_interface_enable in group_CI.inputs:
         group_CI.inputs[tint_interface_enable].default_value = 1.0 if kind else 0.0
-
-    # 固定色(红石线/茎/睡莲)而 CI 组没有 tint_color 接口：通用 CI- 组(或
-    # fixed_tint_CI_group 换成的无群系色组)在基础色连好后用 link_fixed_tint 乘上固定色。
-    # 其它自带颜色的组(如 CI-spruce_leaves)保持原样。
-    if "Crafter_fixed_tint" in group_CI.keys():
-        del group_CI["Crafter_fixed_tint"]
-    if kind == "fixed" and tint_interface_color not in group_CI.inputs and group_CI.node_tree is not None \
-            and (group_CI.node_tree.name == "CI-" or group_CI.get("Crafter_fixed_tint_swapped")):
-        color = tint.get("color", (1.0, 1.0, 1.0))
-        group_CI["Crafter_fixed_tint"] = (color[0], color[1], color[2], 1.0)
-        link_fixed_tint(group_CI=group_CI, nodes=nodes, links=links)
-
-def fixed_tint_CI_group(group_CI, tint):
-    '''
-    固定色材质被分类到群系色组(如睡莲/茎 -> CI-grass_plant_move)时，换成去掉群系前缀的同类组
-    (CI-plant_move)，颜色改由 link_fixed_tint 乘固定色；否则会染成草色。
-    须在 find_CI_group 之后、连接输出之前调用。
-    '''
-    if tint is None or tint.get("kind") != "fixed" or group_CI.node_tree is None:
-        return
-    if tint_interface_color in group_CI.inputs:
-        return
-    name = group_CI.node_tree.name
-    for kind in TINT_BIOME_KINDS:
-        prefix = "CI-" + kind + "_"
-        if name.startswith(prefix) and kind in group_CI.inputs:
-            candidate = "CI-" + name[len(prefix):]
-            if candidate in bpy.data.node_groups:
-                group_CI.node_tree = bpy.data.node_groups[candidate]
-                group_CI["Crafter_fixed_tint_swapped"] = True
-            return
-
-def link_fixed_tint(group_CI, nodes, links):
-    '''
-    apply_tint 标记了固定色的通用 CI- 组：在 Base Color 前插一个 Multiply。
-    幂等：已插过则只更新颜色；基础色还没连上时什么都不做(连好后再调用一次)。
-    '''
-    if "Crafter_fixed_tint" not in group_CI.keys() or "Base Color" not in group_CI.inputs:
-        return
-    rgba = tuple(group_CI["Crafter_fixed_tint"])
-    socket = group_CI.inputs["Base Color"]
-    if not socket.links:
-        return
-    def by_id(sockets, identifier):
-        return next(sock for sock in sockets if sock.identifier == identifier)
-    src = socket.links[0].from_node
-    if src.get("Crafter_fixed_tint_mix"):
-        by_id(src.inputs, "B_Color").default_value = rgba
-        return
-    # 清掉上一轮留下、已经断开的 Multiply
-    for node in [n for n in nodes if n.get("Crafter_fixed_tint_mix") and n.parent == group_CI.parent
-                 and not by_id(n.outputs, "Result_Color").links]:
-        nodes.remove(node)
-    mix = nodes.new(type="ShaderNodeMix")
-    mix.data_type = 'RGBA'
-    mix.blend_type = 'MULTIPLY'
-    mix["Crafter_fixed_tint_mix"] = True
-    mix.parent = group_CI.parent
-    mix.location = (group_CI.location.x, group_CI.location.y + 220)
-    mix.inputs["Factor"].default_value = 1.0
-    links.new(socket.links[0].from_socket, by_id(mix.inputs, "A_Color"))
-    by_id(mix.inputs, "B_Color").default_value = rgba
-    links.new(by_id(mix.outputs, "Result_Color"), socket)
 
 def reload_Undivided_Vsersions(context: bpy.types.Context,dir_versions):#刷新无版本隔离列表
 

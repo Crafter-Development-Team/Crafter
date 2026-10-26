@@ -427,7 +427,6 @@ def process_single_material(material, context, classification_list, imported_by_
     group_CI.location = (node_output_EEVEE.location.x - ci_offset_x,
                          node_output_EEVEE.location.y)
     find_CI_group(group_CI=group_CI, real_block_name=real_block_name, classification_list=classification_list)
-    fixed_tint_CI_group(group_CI=group_CI, tint=get_material_tint(material))
     link_CI_output(group_CI=group_CI, node_output_EEVEE=node_output_EEVEE, node_output_Cycles=node_output_Cycles, links=links)
     # 按 CI- 组的输出接口名决定这个材质的剔除（见 Defs.CI_CULL_OUTPUT_*）：有 → 开，没有 → 关
     sync_CI_culling(material, count=True)
@@ -457,7 +456,6 @@ def process_single_material(material, context, classification_list, imported_by_
                                       addon_prefs=addon_prefs,
                                       has_pbr_texture=has_pbr_texture)
     link_base_normal_PBR(node_tex_base=node_tex_base, group_CI=group_CI, links=links, node_C_PBR_Parser=node_C_PBR_Parser, node_tex_normal=node_tex_normal, node_tex_PBR=node_tex_PBR)
-    link_fixed_tint(group_CI=group_CI, nodes=nodes, links=links)
     if node_tex_base is not None:
         nodes.active = node_tex_base
     # overlay 图层：帧内建 CI/Parser，并用 Mix Shader 按层盖到基础表面上
@@ -607,7 +605,6 @@ def process_overlay_frames(material, nodes, links, group_CI,
                       real_block_name=material_base_name(name),
                       classification_list=classification_list)
         tint = get_overlay_tint(material, index)
-        fixed_tint_CI_group(group_CI=node_CI, tint=tint)
         if "Base Color" in node_CI.inputs:
             links.new(node_tex.outputs["Color"], node_CI.inputs["Base Color"])
 
