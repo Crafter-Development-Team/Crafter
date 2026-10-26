@@ -56,7 +56,8 @@
             "minecraft:attached_melon_stem", "minecraft:attached_pumpkin_stem",
             "minecraft:bush", "minecraft:fern", "minecraft:grass", "minecraft:large_fern",
             "minecraft:lily_pad", "minecraft:melon_stem", "minecraft:pumpkin_stem",
-            "minecraft:short_grass", "minecraft:tall_grass", "minecraft:vine"
+            "minecraft:short_grass", "minecraft:tall_grass", "minecraft:vine",
+            "minecraft:sugar_cane"
         ]},
         {"block": ["minecraft:potted_fern"], "key": ["plant"]}
     ],
@@ -107,10 +108,6 @@
         {"block": ["minecraft:cactus"], "key": ["side", "top"]},
         {"block": ["minecraft:potted_cactus"], "key": ["cactus", "cactus_top"]},
         {"block": ["minecraft:cocoa"]}
-    ],
-
-    "plant": [
-        {"block": ["minecraft:sugar_cane"]}
     ],
 
     "no_rain": [

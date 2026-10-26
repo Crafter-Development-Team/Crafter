@@ -1058,10 +1058,18 @@ def finish_import(ctx, prefs, imported_time, worldconfig, prepared_time,
         mat = bpy.data.materials[nm]
         entry = material_tint_entry(mat)
         # 写入 tint 元数据，之后单独执行 Load Material 时也能按接口接线（空 kind 表示明确不上色）
+        # 资源包去掉 tintindex 时 WI 会写出 {}：对已知原版方块按方块名回退色型
         if tint_map is not None:
-            mat["Crafter_tint_kind"] = str(entry.get("kind", "")) if entry else ""
-            if entry and entry.get("color"):
-                color = entry["color"]
+            kind = str(entry.get("kind", "")) if entry else ""
+            color = entry.get("color") if entry else None
+            if not kind:
+                inferred = infer_vanilla_tint(mat.name)
+                if inferred:
+                    kind = inferred.get("kind", "") or ""
+                    if not color:
+                        color = inferred.get("color")
+            mat["Crafter_tint_kind"] = kind
+            if color:
                 mat["Crafter_tint_color"] = (float(color[0]), float(color[1]), float(color[2]))
         nodes = mat.node_tree.nodes
         links = mat.node_tree.links
