@@ -90,8 +90,11 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         col_surface_1.prop(addon_prefs, "allowDoubleFace")
         col_surface_1.prop(addon_prefs, "keepBoundary")
         col_surface_2 = row_surface.column(align=True)
-        col_surface_2.prop(addon_prefs, "doubleSidedGeometry")
-        col_surface_2.prop(addon_prefs, "useChunkPrecision")
+        # 几何双面恒开，不再提供开关；这里只留两个合并档位（旧版 prefs 热更新后可能还没有）
+        if hasattr(addon_prefs, "mergeSameDoubleSided"):
+            col_surface_2.prop(addon_prefs, "mergeSameDoubleSided")
+        if hasattr(addon_prefs, "mergeAllDoubleSided"):
+            col_surface_2.prop(addon_prefs, "mergeAllDoubleSided")
         col_surface_2.prop(addon_prefs, "cullCave")
 
         box_material = layout.box()
@@ -104,9 +107,9 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         row_parser_always.prop(addon_prefs, "Always_Add_PBR_Parser")
         col_material_1.prop(addon_prefs, "mergeModTextures")
         col_material_2 = row_material.column(align=True)
-        # 背面剔除是加载材质时做的事，同时依赖双面几何：任一条件不满足都置灰
+        # 背面剔除是加载材质时做的事，依赖自动加载材质（几何双面已恒开）
         row_ds_cull = col_material_2.row()
-        row_ds_cull.enabled = addon_prefs.doubleSidedGeometry and addon_prefs.Auto_Load_Material
+        row_ds_cull.enabled = addon_prefs.Auto_Load_Material
         row_ds_cull.prop(addon_prefs, "doubleSidedBackfaceCull")
         col_material_2.prop(addon_prefs, "Always_Add_Biome_Tex")
 
@@ -131,6 +134,7 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         # 详细参数：枚举/数值型，各占整行，避免标签被省略
         box_values = layout.box()
         box_values.label(text=i18n("Detailed Parameters"), icon="OPTIONS")
+        box_values.prop(addon_prefs, "useChunkPrecision")
         box_values.prop(addon_prefs, "variantSeedMode")
         box_values.prop(addon_prefs, "doubleSidedFaceOffset")
         box_values.prop(addon_prefs, "overlayLayerStep")
@@ -602,7 +606,11 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             "exportLightBlockOnly":addon_prefs.exportLightBlockOnly,
             "lightBlockSize":addon_prefs.lightBlockSize,
             "allowDoubleFace":addon_prefs.allowDoubleFace,
-            "doubleSidedGeometry":addon_prefs.doubleSidedGeometry,
+            # 几何双面恒开（旧行为："关掉=只留一张面"已由合并开关取代）
+            "doubleSidedGeometry": True,
+            # 旧版 prefs 热更新后可能还没有该属性：缺省按关闭处理
+            "mergeSameDoubleSided":getattr(addon_prefs, "mergeSameDoubleSided", False),
+            "mergeAllDoubleSided":getattr(addon_prefs, "mergeAllDoubleSided", False),
             "doubleSidedFaceOffset":addon_prefs.doubleSidedFaceOffset,
             "overlayLayerStep":addon_prefs.overlayLayerStep,
             "mergeModTextures":addon_prefs.mergeModTextures,

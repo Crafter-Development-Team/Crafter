@@ -179,6 +179,8 @@ def reload_material_setup(context, library_name, include_settings=False):
             bpy.data.node_groups[name].use_fake_user = True
     # 导入Crafter-Moving_texture节点组
     add_node_group_if_not_exists(names_Crafter_Moving_texture)
+    # Cycles 剔除组（CI 的 Cycles 输出与最终输出之间那层，默认静音）
+    add_node_group_if_not_exists([CULL_GROUP_NAME])
     # Import only the shader groups on the automatic path; Blender loads their
     # nested helpers. Panel loads request the settings object in this same pass.
     blend_material_dir = os.path.join(dir_materials, library_name + ".blend")
@@ -320,7 +322,7 @@ def process_single_material(material, context, classification_list, imported_by_
             group_CI.node_tree = bpy.data.node_groups["CI-"]
         if "Base Color" in group_CI.inputs:
             group_CI.inputs["Base Color"].default_value = [float(material.name[6:10]), float(material.name[11:15]), float(material.name[16:20]), 1]
-        link_CI_output(group_CI=group_CI, node_output_EEVEE=node_output_EEVEE, node_output_Cycles=node_output_Cycles, links=links)
+        link_CI_output(group_CI=group_CI, node_output_EEVEE=node_output_EEVEE, node_output_Cycles=node_output_Cycles, links=links, material=material)
         link_biome_tex(node_biomeTex=node_biomeTex, group_CI=group_CI, links=links)
         tint = get_material_tint(material)
         try:
@@ -427,7 +429,7 @@ def process_single_material(material, context, classification_list, imported_by_
     group_CI.location = (node_output_EEVEE.location.x - ci_offset_x,
                          node_output_EEVEE.location.y)
     find_CI_group(group_CI=group_CI, real_block_name=real_block_name, classification_list=classification_list)
-    link_CI_output(group_CI=group_CI, node_output_EEVEE=node_output_EEVEE, node_output_Cycles=node_output_Cycles, links=links)
+    link_CI_output(group_CI=group_CI, node_output_EEVEE=node_output_EEVEE, node_output_Cycles=node_output_Cycles, links=links, material=material)
     # 按 CI- 组的输出接口名决定这个材质的剔除（见 Defs.CI_CULL_OUTPUT_*）：有 → 开，没有 → 关
     sync_CI_culling(material, count=True)
     link_biome_tex(node_biomeTex=node_biomeTex, group_CI=group_CI, links=links)
@@ -581,15 +583,18 @@ def process_overlay_frames(material, nodes, links, group_CI,
     # 按 overlay 数量把其他节点左移, 给输出节点前面的 Mix 链让位(记录差值, 重复加载不漂移)
     _apply_overlay_layout_shift(material, nodes, overlay_layout_shift(nodes, frames=frames))
 
-    # 每个输出目标一条链: (CI 输出名, 输出节点)
+    # 每个输出目标一条链: (CI 输出名, 输出节点, overlay 终点插座)
+    # Cycles 有剔除组时，Mix 链接到剔除组的输入（剔除组放在整条 Mix 链之后）
     targets = []
     if node_output_EEVEE is not None and "EEVEE-Surface" in group_CI.outputs:
-        targets.append(("EEVEE-Surface", node_output_EEVEE))
+        targets.append(("EEVEE-Surface", node_output_EEVEE, node_output_EEVEE.inputs["Surface"]))
     if node_output_Cycles is not None and "Cycles-Surface" in group_CI.outputs:
-        targets.append(("Cycles-Surface", node_output_Cycles))
+        cull_input = overlay_cull_input(material)
+        end_socket = cull_input if cull_input is not None else node_output_Cycles.inputs["Surface"]
+        targets.append(("Cycles-Surface", node_output_Cycles, end_socket))
     if not targets:
         return
-    chain = {name: group_CI.outputs[name] for name, _ in targets}
+    chain = {name: group_CI.outputs[name] for name, _, _ in targets}
 
     for seq, (index, name, frame) in enumerate(frames, start=1):
         _clear_overlay_generated_nodes(nodes, frame)
@@ -621,7 +626,7 @@ def process_overlay_frames(material, nodes, links, group_CI,
                              node_C_PBR_Parser=node_parser,
                              node_tex_normal=node_tex_normal, node_tex_PBR=node_tex_PBR)
 
-        for surface_name, output_node in targets:
+        for surface_name, output_node, end_socket in targets:
             if surface_name not in node_CI.outputs:
                 continue
             mix_node = nodes.new(type="ShaderNodeMixShader")
@@ -634,10 +639,9 @@ def process_overlay_frames(material, nodes, links, group_CI,
             links.new(node_tex.outputs["Alpha"], mix_node.inputs[0])
             links.new(chain[surface_name], mix_node.inputs[1])
             links.new(node_CI.outputs[surface_name], mix_node.inputs[2])
-            out_socket = output_node.inputs["Surface"]
-            for old_link in list(out_socket.links):
+            for old_link in list(end_socket.links):
                 links.remove(old_link)
-            links.new(mix_node.outputs[0], out_socket)
+            links.new(mix_node.outputs[0], end_socket)
             chain[surface_name] = mix_node.outputs[0]
 
 # ========== 提取的为物体加载材质的函数（供外部调用，假设 C-PBR_Parser 已存在）==========

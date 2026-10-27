@@ -1307,8 +1307,12 @@ def find_CI_group(classification_list,real_block_name,group_CI):
 
 # ========== CI- 组输出接口 → 剔除开关 ==========
 # CI- 组声明了某个名字就打开对应的剔除；换名字只改这两行。
-CI_CULL_OUTPUT_RENDER = "BackfaceCull"        # 声明 → 渲染侧背面剔除（背面看不见）
-CI_CULL_OUTPUT_SHADOW = "ShadowBackfaceCull"  # 声明 → 阴影侧剔除
+# 两层含义：材质属性（EEVEE）与 Cycles 剔除组（见 CULL_GROUP_NAME）的输出选择。
+CI_CULL_OUTPUT_RENDER = "Back Cull"          # 声明 → 摄影机（渲染）背面剔除
+CI_CULL_OUTPUT_SHADOW = "Shadow Back Cull"   # 声明 → 摄影机 + 阴影背面剔除都开
+# 兼容材质库里还没改名的旧接口（BackCull / ShadowBackCull 等）
+CI_CULL_OUTPUT_RENDER_ALIASES = (CI_CULL_OUTPUT_RENDER, "BackCull", "BackfaceCull")
+CI_CULL_OUTPUT_SHADOW_ALIASES = (CI_CULL_OUTPUT_SHADOW, "ShadowBackCull", "ShadowBackfaceCull")
 
 _ci_cull_stats = {"render": 0, "shadow": 0, "scanned": 0}
 
@@ -1349,9 +1353,9 @@ def _material_CI_cull_flags(material):
         if not node.node_tree.name.startswith("CI-"):
             continue
         names = query_CI_outputs(node)
-        if CI_CULL_OUTPUT_RENDER in names:
+        if any(name in names for name in CI_CULL_OUTPUT_RENDER_ALIASES):
             render_on = True
-        if CI_CULL_OUTPUT_SHADOW in names:
+        if any(name in names for name in CI_CULL_OUTPUT_SHADOW_ALIASES):
             shadow_on = True
         if render_on and shadow_on:
             break
@@ -1360,8 +1364,9 @@ def _material_CI_cull_flags(material):
 def sync_CI_culling(material, count=False):
     '''
     按 CI- 组的输出接口名决定一个材质的剔除开关（纯两向判断，无全局兜底）：
-      - 任一 CI- 组声明了 CI_CULL_OUTPUT_RENDER → 打开渲染侧背面剔除，否则关闭
-      - 任一 CI- 组声明了 CI_CULL_OUTPUT_SHADOW → 打开阴影侧剔除，否则关闭
+      - 声明 CI_CULL_OUTPUT_RENDER → 打开摄影机（渲染）背面剔除；
+      - 声明 CI_CULL_OUTPUT_SHADOW → 摄影机和阴影的背面剔除都打开（阴影标识包含渲染侧）；
+      - 合并过的双面几何只剩一张面 → 两者都关闭，保持双面可见。
     只在值不同时写入，避免无谓的属性写入。
     material: 目标材质
     count: 是否累加到 get_CI_cull_stats() 的统计里
@@ -1370,11 +1375,19 @@ def sync_CI_culling(material, count=False):
     if material is None or getattr(material, "library", None) is not None:
         return (False, False)   # 链接库材质只读，跳过
     desired_render, desired_shadow = _material_CI_cull_flags(material)
+    # 阴影标识已经包含渲染侧：声明 Shadow Back Cull 时摄影机和阴影都剔除
+    if desired_shadow:
+        desired_render = True
+    # 合并后的双面几何只剩一张面：不剔除，否则背面看不见
+    if _is_merged_double_sided(material):
+        desired_render = False
+        desired_shadow = False
     if getattr(material, "use_backface_culling", None) != desired_render:
         material.use_backface_culling = desired_render
     if (hasattr(material, "use_backface_culling_shadow") and
             material.use_backface_culling_shadow != desired_shadow):
         material.use_backface_culling_shadow = desired_shadow
+    _sync_cull_group_output(material, desired_render, desired_shadow)
     if count:
         _ci_cull_stats["scanned"] += 1
         if desired_render:
@@ -1384,14 +1397,16 @@ def sync_CI_culling(material, count=False):
     return (desired_render, desired_shadow)
 
 # ========== 双面几何（doubleSided.json）==========
-# 导出器把"零厚度贴片被分离出正反两面"的材质基础全名写成 doubleSided.json（纯数组，
-# 已剥掉 @tint 后缀）。这些材质在 Blender 里是双面几何，需要关闭背面剔除才不会漏光；
+# 导出器把"零厚度贴片被分离出正反两面"的材质基础全名写成 doubleSided.json（对象格式，
+# materials 数组已剥掉 @tint 后缀，另带 samePairs/mirrorPairs/otherPairs/mergedPairs 统计）。
+# 这些材质在 Blender 里是双面几何，需要关闭背面剔除才不会漏光；
 # 其余材质（实心几何）保持双面可见。
 # CI- 组若声明了这个输入接口，就把 Cycles 侧的背面剔除打开（写 1）。
 CI_BACKCULL_INPUT = "Cycles Back Cull"
 double_sided_json_name = "doubleSided.json"
-# doubleSided.json 的按 mtime 失效的读盘缓存：{"stamp": float|None, "names": set[str]}
-_double_sided_cache = {"stamp": None, "names": set()}
+# doubleSided.json 的按 mtime 失效的读盘缓存：
+# {"stamp": float|None, "names": set[str], "kinds": dict, "merged": set[str]}
+_double_sided_cache = {"stamp": None, "names": set(), "kinds": {}, "merged": set()}
 
 def load_double_sided_materials(dir_importer):
     '''
@@ -1410,11 +1425,51 @@ def load_double_sided_materials(dir_importer):
         warn_log(f"doubleSided.json 读取失败: {ex}")
         return set()
     if isinstance(raw, dict):
-        raw = raw.get("materials", [])   # 兼容将来带元信息的对象格式
+        raw = raw.get("materials", [])   # 对象格式：{"materials": [...], "samePairs": {...}, ...}
     if not isinstance(raw, list):
-        warn_log("doubleSided.json 格式异常（应为数组），已忽略")
+        warn_log("doubleSided.json 格式异常（materials 应为数组），已忽略")
         return set()
     return {str(name) for name in raw if name}
+
+def load_double_sided_kinds(dir_importer):
+    '''
+    读取 doubleSided.json 里的分类统计：
+      samePairs   : 同材质且 UV 一一对应的对（可安全合并）
+      mirrorPairs : 同材质但 UV 镜像的对（两面从左到右都正常，保留两张面）
+      otherPairs  : 材质/UV 区域不同的对
+      mergedPairs : 导出器本次实际合并掉的 Same 对数
+    这些信息只用于日志/诊断；背面剔除仍然只看 materials。
+    dir_importer: WorldImporter 输出目录
+    return: dict[str, dict[str, int]]；文件不存在、旧版纯数组或格式异常时返回空 dict
+    '''
+    path = os.path.join(dir_importer, double_sided_json_name)
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+    except Exception as ex:
+        warn_log(f"doubleSided.json 读取失败: {ex}")
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    kinds = {}
+    for key in ("samePairs", "mirrorPairs", "otherPairs", "mergedPairs"):
+        table = raw.get(key)
+        if isinstance(table, dict):
+            kinds[key] = {str(k): int(v) for k, v in table.items()
+                          if isinstance(v, (int, float))}
+    return kinds
+
+def _is_merged_double_sided(material):
+    '''材质是否在 doubleSided.json 的 mergedPairs 里：合并后只剩一张面，必须双面可见。'''
+    merged = _double_sided_cache.get("merged")
+    if not merged:
+        return False
+    try:
+        return material_base_name(material.name) in merged
+    except Exception:
+        return False
 
 def _write_socket_default(group_node, socket_name, value):
     '''
@@ -1457,8 +1512,27 @@ def apply_double_sided_backface_cull(material, dir_importer):
     if _double_sided_cache.get("stamp") != stamp:
         _double_sided_cache["stamp"] = stamp
         _double_sided_cache["names"] = load_double_sided_materials(dir_importer)
-    if material_base_name(material.name) not in _double_sided_cache["names"]:
+        # 分类统计只用于诊断日志；mergedPairs 决定该材质合并后是否关闭剔除
+        kinds = load_double_sided_kinds(dir_importer)
+        _double_sided_cache["kinds"] = kinds
+        _double_sided_cache["merged"] = set(kinds.get("mergedPairs", {}))
+        if kinds:
+            merged_pairs = sum(kinds.get("mergedPairs", {}).values())
+            mirror_pairs = sum(kinds.get("mirrorPairs", {}).values())
+            debug_log(f"doubleSided.json: 已合并 {merged_pairs} 对, "
+                      f"保留 {mirror_pairs} 对镜像双面")
+    base = material_base_name(material.name)
+    if base not in _double_sided_cache["names"]:
         return False
+
+    # 合并过的双面几何只剩一张面：关闭剔除，否则背面直接看不见
+    if base in _double_sided_cache["merged"]:
+        if getattr(material, "use_backface_culling", None) is not None:
+            material.use_backface_culling = False
+        if hasattr(material, "use_backface_culling_shadow"):
+            material.use_backface_culling_shadow = False
+        _sync_cull_group_output(material, False, False)
+        return True
 
     # EEVEE：渲染侧 + 阴影侧（与 sync_CI_culling 的写法一致）
     if getattr(material, "use_backface_culling", None) is not None:
@@ -1466,7 +1540,9 @@ def apply_double_sided_backface_cull(material, dir_importer):
     if hasattr(material, "use_backface_culling_shadow"):
         material.use_backface_culling_shadow = True
 
-    # Cycles：CI- 组提供输入接口时写 1（叠加层帧里的 CI 节点同样处理）
+    # Cycles：剔除组选 Shadow Back Cull 输出并解除静音；
+    # CI- 组提供输入接口时也写 1（叠加层帧里的 CI 节点同样处理）
+    _sync_cull_group_output(material, True, True)
     node_tree = getattr(material, "node_tree", None)
     if node_tree is not None:
         for node in node_tree.nodes:
@@ -1476,7 +1552,138 @@ def apply_double_sided_backface_cull(material, dir_importer):
                 _write_socket_default(node, CI_BACKCULL_INPUT, 1.0)
     return True
 
-def link_CI_output(group_CI, node_output_EEVEE, node_output_Cycles, links):
+# ========== Cycles 剔除组（append.blend 的 Crafter-背面剔除） ==========
+# CI 的 Cycles-Surface 不再直连最终输出：中间插一层剔除组节点，默认静音（直通），
+# 声明了 Back Cull / Shadow Back Cull 标识时才解除静音并选对应输出。
+CULL_GROUP_NAME = "Crafter-背面剔除"
+CULL_GROUP_PROP = "crafter_cull_group"   # 标在材质里的剔除组节点上，便于重复加载时识别
+CULL_GROUP_X_STEP = 200.0                # 插入剔除组后 CI 及相关节点整体左移的步长
+
+def _cull_group_node_tree():
+    return bpy.data.node_groups.get(CULL_GROUP_NAME)
+
+def _find_cull_group_nodes(node_tree):
+    if node_tree is None:
+        return []
+    return [node for node in node_tree.nodes if node.get(CULL_GROUP_PROP)]
+
+def _cycles_output_node(node_tree):
+    if node_tree is None:
+        return None
+    for node in node_tree.nodes:
+        if node.type == "OUTPUT_MATERIAL" and getattr(node, "target", "") == "CYCLES":
+            return node
+    return None
+
+def _apply_cull_layout_shift(material, nodes, group_CI, shift):
+    '''把 CI 左侧的贴图/帧节点整体左移，给剔除组腾位置；按记录差值移动，重复加载不漂移。'''
+    if material is None:
+        return
+    try:
+        prev = float(material.get("Crafter_cull_shift", 0.0) or 0.0)
+    except Exception:
+        prev = 0.0
+    delta = shift - prev
+    if abs(delta) < 0.5:
+        return
+    threshold = group_CI.location.x + 0.5
+    for node in nodes:
+        if node.parent is not None:
+            continue
+        if node is group_CI or node.type == "OUTPUT_MATERIAL":
+            continue
+        if node.type == "GROUP" and node.node_tree is not None and (
+                node.node_tree.name.startswith("CI-") or
+                node.node_tree.name.startswith("C-PBR_Parser") or
+                node.node_tree.name.startswith("Crafter-biomeTex")):
+            continue
+        if node.bl_idname == "ShaderNodeMixShader":
+            continue
+        if node.location.x <= threshold:
+            node.location.x -= delta
+    material["Crafter_cull_shift"] = shift
+
+def _insert_cull_group(group_CI, node_output_Cycles, links, material=None):
+    '''
+    在 CI 的 Cycles 输出和最终 Cycles 输出之间插入剔除组节点（默认静音）。
+    组或接口不存在时退回直连。
+    '''
+    node_tree = group_CI.id_data
+    for old in _find_cull_group_nodes(node_tree):
+        node_tree.nodes.remove(old)
+    cull_tree = _cull_group_node_tree()
+    if cull_tree is None or "Cycles-Surface" not in group_CI.outputs:
+        if "Cycles-Surface" in group_CI.outputs:
+            links.new(group_CI.outputs["Cycles-Surface"], node_output_Cycles.inputs["Surface"])
+        return None
+    # CI 及其左侧的解析器/贴图链整体往左，给剔除组腾出位置
+    _apply_cull_layout_shift(material, node_tree.nodes, group_CI, CULL_GROUP_X_STEP)
+    group_CI.location.x -= CULL_GROUP_X_STEP
+    node = node_tree.nodes.new("ShaderNodeGroup")
+    node.node_tree = cull_tree
+    node.label = CULL_GROUP_NAME
+    node[CULL_GROUP_PROP] = True
+    node.mute = True
+    node.location = ((group_CI.location.x + node_output_Cycles.location.x) * 0.5,
+                     node_output_Cycles.location.y + 160.0)
+    cull_input = next((s for s in node.inputs if s.type == 'SHADER' and s.enabled), None)
+    # 默认连阴影剔除输出（静音时直通）；有标识时由 _sync_cull_group_output 切换
+    cull_output = node.outputs.get("Shadow Back Cull")
+    if cull_output is None:
+        cull_output = next((s for s in node.outputs if s.type == 'SHADER' and s.enabled), None)
+    if cull_input is None or cull_output is None:
+        # 接口不符合预期：删掉节点，退回直连
+        node_tree.nodes.remove(node)
+        links.new(group_CI.outputs["Cycles-Surface"], node_output_Cycles.inputs["Surface"])
+        return None
+    links.new(group_CI.outputs["Cycles-Surface"], cull_input)
+    links.new(cull_output, node_output_Cycles.inputs["Surface"])
+    return node
+
+def _sync_cull_group_output(material, render_on, shadow_on):
+    '''
+    按剔除标识切换剔除组节点的输出并解除/恢复静音：
+      - Shadow Back Cull → 用组的 Shadow Back Cull 输出；
+      - Back Cull        → 用组的 Back Cull 输出；
+      - 都没有           → 保持静音（直通）。
+    '''
+    node_tree = getattr(material, "node_tree", None)
+    out_node = _cycles_output_node(node_tree)
+    if out_node is None:
+        return
+    for node in _find_cull_group_nodes(node_tree):
+        out_socket = None
+        if shadow_on and "Shadow Back Cull" in node.outputs:
+            out_socket = node.outputs["Shadow Back Cull"]
+        elif render_on and "Back Cull" in node.outputs:
+            out_socket = node.outputs["Back Cull"]
+        if out_socket is None:
+            # 未开启任何剔除标识时也保持默认的 Shadow Back Cull 连接（静音时直通）
+            out_socket = node.outputs.get("Shadow Back Cull")
+        if out_socket is None:
+            out_socket = next((s for s in node.outputs if s.type == 'SHADER' and s.enabled), None)
+        if out_socket is not None:
+            for link in list(node_tree.links):
+                if link.from_node == node and link.to_node == out_node:
+                    node_tree.links.remove(link)
+            node_tree.links.new(out_socket, out_node.inputs["Surface"])
+        node.mute = not (render_on or shadow_on)
+
+def overlay_cull_input(material):
+    '''
+    overlay Mix 链的终点：材质里有 Cycles 剔除组时接到剔除组的 shader 输入，
+    并断开基础 CI 的直连（由 Mix 链接管）。没有剔除组时返回 None。
+    '''
+    node_tree = getattr(material, "node_tree", None)
+    for node in _find_cull_group_nodes(node_tree):
+        inp = next((s for s in node.inputs if s.type == 'SHADER' and s.enabled), None)
+        if inp is not None:
+            for link in list(inp.links):
+                node_tree.links.remove(link)
+            return inp
+    return None
+
+def link_CI_output(group_CI, node_output_EEVEE, node_output_Cycles, links, material=None):
     '''
     group_CI: 材质组节点
     node_output_EEVEE: EEVEE输出节点
@@ -1495,7 +1702,7 @@ def link_CI_output(group_CI, node_output_EEVEE, node_output_Cycles, links):
             links.new(group_CI.outputs["EEVEE-Thickness"], node_output_EEVEE.inputs["Thickness"])
         
     if "Cycles-Surface" in group_CI.outputs: 
-        links.new(group_CI.outputs["Cycles-Surface"], node_output_Cycles.inputs["Surface"])
+        _insert_cull_group(group_CI, node_output_Cycles, links, material)
     if "Cycles-Volume" in group_CI.outputs: 
         links.new(group_CI.outputs["Cycles-Volume"], node_output_Cycles.inputs["Volume"])
     if "Cycles-Displacement" in group_CI.outputs: 
