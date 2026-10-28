@@ -1308,11 +1308,14 @@ def find_CI_group(classification_list,real_block_name,group_CI):
 # ========== CI- 组输出接口 → 剔除开关 ==========
 # CI- 组声明了某个名字就打开对应的剔除；换名字只改这两行。
 # 两层含义：材质属性（EEVEE）与 Cycles 剔除组（见 CULL_GROUP_NAME）的输出选择。
-CI_CULL_OUTPUT_RENDER = "Back Cull"          # 声明 → 摄影机（渲染）背面剔除
-CI_CULL_OUTPUT_SHADOW = "Shadow Back Cull"   # 声明 → 摄影机 + 阴影背面剔除都开
-# 兼容材质库里还没改名的旧接口（BackCull / ShadowBackCull 等）
-CI_CULL_OUTPUT_RENDER_ALIASES = (CI_CULL_OUTPUT_RENDER, "BackCull", "BackfaceCull")
-CI_CULL_OUTPUT_SHADOW_ALIASES = (CI_CULL_OUTPUT_SHADOW, "ShadowBackCull", "ShadowBackfaceCull")
+CI_CULL_OUTPUT_RENDER = "BackCull"          # 声明 → 摄影机（渲染）背面剔除
+CI_CULL_OUTPUT_SHADOW = "ShadowBackCull"    # 声明 → 摄影机 + 阴影背面剔除都开
+# 兼容带空格的写法（Cycles 剔除组那边是 "Back Cull" / "Shadow Back Cull"）以及更早的 *BackfaceCull
+CI_CULL_OUTPUT_RENDER_ALIASES = (CI_CULL_OUTPUT_RENDER, "Back Cull", "BackfaceCull")
+CI_CULL_OUTPUT_SHADOW_ALIASES = (CI_CULL_OUTPUT_SHADOW, "Shadow Back Cull", "ShadowBackfaceCull")
+# 其它材质渲染开关（同样是 CI- 组输出接口名，声明即打开）：
+CI_RAYTRACE_TRANSMISSION = "RaytraceTrans"   # 声明 → 打开光线追踪透射
+CI_THICKNESS_SLAB = "SlabThickness"          # 声明 → 厚度模式改为厚板（无标识时保持默认球形）
 
 _ci_cull_stats = {"render": 0, "shadow": 0, "scanned": 0}
 
@@ -1340,13 +1343,14 @@ def query_CI_outputs(group_CI):
 
 def _material_CI_cull_flags(material):
     '''
-    扫描材质里所有 CI- 组节点，返回 (是否声明渲染侧接口, 是否声明阴影侧接口)。
+    扫描材质里所有 CI- 组节点，返回各标识是否声明：
+    (渲染侧剔除, 阴影侧剔除, 光线追踪透射, 厚度厚板)。
     叠加层帧里的 CI 节点也算，任一命中即视为声明。
     '''
     node_tree = getattr(material, "node_tree", None)
     if node_tree is None:
-        return (False, False)
-    render_on = shadow_on = False
+        return (False, False, False, False)
+    render_on = shadow_on = raytrace_on = slab_on = False
     for node in node_tree.nodes:
         if node.type != "GROUP" or getattr(node, "node_tree", None) is None:
             continue
@@ -1357,16 +1361,22 @@ def _material_CI_cull_flags(material):
             render_on = True
         if any(name in names for name in CI_CULL_OUTPUT_SHADOW_ALIASES):
             shadow_on = True
-        if render_on and shadow_on:
+        if CI_RAYTRACE_TRANSMISSION in names:
+            raytrace_on = True
+        if CI_THICKNESS_SLAB in names:
+            slab_on = True
+        if render_on and shadow_on and raytrace_on and slab_on:
             break
-    return (render_on, shadow_on)
+    return (render_on, shadow_on, raytrace_on, slab_on)
 
 def sync_CI_culling(material, count=False):
     '''
-    按 CI- 组的输出接口名决定一个材质的剔除开关（纯两向判断，无全局兜底）：
+    按 CI- 组的输出接口名决定一个材质的渲染开关（纯两向判断，无全局兜底）：
       - 声明 CI_CULL_OUTPUT_RENDER → 打开摄影机（渲染）背面剔除；
       - 声明 CI_CULL_OUTPUT_SHADOW → 摄影机和阴影的背面剔除都打开（阴影标识包含渲染侧）；
-      - 合并过的双面几何只剩一张面 → 两者都关闭，保持双面可见。
+      - 声明 CI_RAYTRACE_TRANSMISSION → 打开光线追踪透射；
+      - 声明 CI_THICKNESS_SLAB → 厚度模式改为厚板（未声明时保持默认球形）；
+      - 合并过的双面几何只剩一张面 → 背面剔除两者都关闭，保持双面可见。
     只在值不同时写入，避免无谓的属性写入。
     material: 目标材质
     count: 是否累加到 get_CI_cull_stats() 的统计里
@@ -1374,7 +1384,7 @@ def sync_CI_culling(material, count=False):
     '''
     if material is None or getattr(material, "library", None) is not None:
         return (False, False)   # 链接库材质只读，跳过
-    desired_render, desired_shadow = _material_CI_cull_flags(material)
+    desired_render, desired_shadow, desired_raytrace, desired_slab = _material_CI_cull_flags(material)
     # 阴影标识已经包含渲染侧：声明 Shadow Back Cull 时摄影机和阴影都剔除
     if desired_shadow:
         desired_render = True
@@ -1387,6 +1397,18 @@ def sync_CI_culling(material, count=False):
     if (hasattr(material, "use_backface_culling_shadow") and
             material.use_backface_culling_shadow != desired_shadow):
         material.use_backface_culling_shadow = desired_shadow
+    # 光线追踪透射（Blender 4.2 的属性名；旧版退回 use_screen_refraction）
+    if hasattr(material, "use_raytrace_refraction"):
+        if material.use_raytrace_refraction != desired_raytrace:
+            material.use_raytrace_refraction = desired_raytrace
+    elif hasattr(material, "use_screen_refraction"):
+        if material.use_screen_refraction != desired_raytrace:
+            material.use_screen_refraction = desired_raytrace
+    # 厚度模式：有标识改厚板，无标识恢复默认球形
+    if hasattr(material, "thickness_mode"):
+        desired_mode = 'SLAB' if desired_slab else 'SPHERE'
+        if material.thickness_mode != desired_mode:
+            material.thickness_mode = desired_mode
     _sync_cull_group_output(material, desired_render, desired_shadow)
     if count:
         _ci_cull_stats["scanned"] += 1
