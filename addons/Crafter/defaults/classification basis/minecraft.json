@@ -102,15 +102,7 @@
                 "twisting_vines_plant",
                 "weeping_vines",
                 "weeping_vines_plant",
-                "cave_vines_plant",
-                "potted_azalea_bush",
-                "potted_flowering_azalea_bush",
-                "potted_brown_mushroom",
-                "potted_red_mushroom",
-                "potted_crimson_fungus",
-                "potted_warped_fungus",
-                "potted_crimson_roots",
-                "potted_warped_roots"
+                "cave_vines_plant"
             ]
         },
         {
@@ -199,40 +191,76 @@
             "block": [
                 "potted_acacia_sapling",
                 "potted_allium",
+                "potted_azalea_bush",
                 "potted_azure_bluet",
+                "potted_bamboo",
                 "potted_birch_sapling",
                 "potted_blue_orchid",
+                "potted_brown_mushroom",
+                "potted_cactus",
                 "potted_cherry_sapling",
                 "potted_cornflower",
+                "potted_crimson_fungus",
+                "potted_crimson_roots",
                 "potted_dandelion",
                 "potted_dark_oak_sapling",
                 "potted_dead_bush",
+                "potted_fern",
+                "potted_flowering_azalea_bush",
                 "potted_jungle_sapling",
                 "potted_lily_of_the_valley",
+                "potted_mangrove_propagule",
                 "potted_oak_sapling",
                 "potted_orange_tulip",
                 "potted_oxeye_daisy",
                 "potted_pink_tulip",
                 "potted_poppy",
+                "potted_red_mushroom",
                 "potted_red_tulip",
                 "potted_spruce_sapling",
                 "potted_torchflower",
+                "potted_warped_fungus",
+                "potted_warped_roots",
                 "potted_white_tulip",
                 "potted_wither_rose"
             ],
-            "key": [
-                "plant"
-            ]
-        },
-        {
-            "namespace": [
-                "minecraft"
-            ],
-            "block": [
-                "potted_mangrove_propagule"
-            ],
-            "key": [
-                "sapling"
+            "texture": [
+                "acacia_sapling",
+                "allium",
+                "potted_azalea_bush_plant",
+                "azure_bluet",
+                "bamboo_stalk",
+                "bamboo_singleleaf",
+                "birch_sapling",
+                "blue_orchid",
+                "brown_mushroom",
+                "cactus_top",
+                "cactus_side",
+                "cherry_sapling",
+                "cornflower",
+                "crimson_fungus",
+                "crimson_roots_pot",
+                "dandelion",
+                "dark_oak_sapling",
+                "dead_bush",
+                "fern",
+                "potted_flowering_azalea_bush_plant",
+                "jungle_sapling",
+                "lily_of_the_valley",
+                "mangrove_propagule",
+                "oak_sapling",
+                "orange_tulip",
+                "oxeye_daisy",
+                "pink_tulip",
+                "poppy",
+                "red_mushroom",
+                "red_tulip",
+                "spruce_sapling",
+                "torchflower",
+                "warped_fungus",
+                "warped_roots_pot",
+                "white_tulip",
+                "wither_rose"
             ]
         }
     ],
@@ -254,17 +282,6 @@
                 "short_grass",
                 "tall_grass",
                 "vine"
-            ]
-        },
-        {
-            "namespace": [
-                "minecraft"
-            ],
-            "block": [
-                "potted_fern"
-            ],
-            "key": [
-                "plant"
             ]
         }
     ],
@@ -380,34 +397,11 @@
                 "minecraft"
             ],
             "block": [
-                "potted_bamboo"
-            ],
-            "key": [
-                "bamboo"
-            ]
-        },
-        {
-            "namespace": [
-                "minecraft"
-            ],
-            "block": [
                 "cactus"
             ],
             "key": [
                 "side",
                 "top"
-            ]
-        },
-        {
-            "namespace": [
-                "minecraft"
-            ],
-            "block": [
-                "potted_cactus"
-            ],
-            "key": [
-                "cactus",
-                "cactus_top"
             ]
         },
         {
