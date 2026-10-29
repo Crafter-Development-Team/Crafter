@@ -1178,9 +1178,10 @@ def add_to_crafter_mcmts_collection(object,context):
                 context.scene.Crafter_crafter_mcmts.remove(i)
                 
 # ========== 分类依据：结构化匹配 ==========
-# 规则格式：{组名: 条目 或 [条目...]}；条目 = {"block": [...], "key": [...], "texture": [...]}
+# 规则格式：{组名: 条目 或 [条目...]}；条目 = {"namespace": [...], "block": [...], "key": [...], "texture": [...]}
 # 语义：组内条目 OR；条目内维度 AND（出现过的维度都要命中）；维度内元素 OR（支持 fnmatch 通配）。
-_CLASSIFICATION_DIMS = ("block", "key", "texture")
+# namespace 是命名空间（缺省 minecraft），可以和 block/key/texture 任意组合，用来区分不同模组的同名贴图。
+_CLASSIFICATION_DIMS = ("namespace", "block", "key", "texture")
 
 def parse_material_name(name: str):
     '''
@@ -1188,7 +1189,8 @@ def parse_material_name(name: str):
     格式：[namespace:]block[#贴图键][~贴图名]（传入前需已去掉 tint/CTM 的 @ 后缀）
     缺省命名空间为 minecraft；无 ~ 时贴图名回退为方块名。
     color# 等特殊材质返回 None（不参与结构化匹配）。
-    return: {"block": "ns:方块id", "key": str|None, "texture": str|None} 或 None
+    block 是去掉命名空间后的裸方块 id，命名空间单独放在 namespace 里。
+    return: {"namespace": "ns", "block": "方块id", "key": str|None, "texture": str|None} 或 None
     '''
     if not name:
         return None
@@ -1215,7 +1217,12 @@ def parse_material_name(name: str):
         namespace = "minecraft"
     if not texture:
         texture = block
-    return {"block": namespace + ":" + block, "key": key or None, "texture": texture or None}
+    return {
+        "namespace": namespace,
+        "block": block,
+        "key": key or None,
+        "texture": texture or None,
+    }
 
 def _compile_classification_pattern(pattern: str):
     '''把一条匹配项编译为 ("exact", 字符串) 或 ("wild", 正则)（fnmatch 通配）'''
