@@ -93,8 +93,8 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         # 几何双面恒开，不再提供开关；这里只留两个合并档位（旧版 prefs 热更新后可能还没有）
         if hasattr(addon_prefs, "mergeSameDoubleSided"):
             col_surface_2.prop(addon_prefs, "mergeSameDoubleSided")
-        if hasattr(addon_prefs, "mergeAllDoubleSided"):
-            col_surface_2.prop(addon_prefs, "mergeAllDoubleSided")
+        if hasattr(addon_prefs, "mergeMirrorDoubleSided"):
+            col_surface_2.prop(addon_prefs, "mergeMirrorDoubleSided")
         col_surface_2.prop(addon_prefs, "cullCave")
 
         box_material = layout.box()
@@ -610,7 +610,7 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             "doubleSidedGeometry": True,
             # 旧版 prefs 热更新后可能还没有该属性：缺省按关闭处理
             "mergeSameDoubleSided":getattr(addon_prefs, "mergeSameDoubleSided", False),
-            "mergeAllDoubleSided":getattr(addon_prefs, "mergeAllDoubleSided", False),
+            "mergeMirrorDoubleSided":getattr(addon_prefs, "mergeMirrorDoubleSided", False),
             "doubleSidedFaceOffset":addon_prefs.doubleSidedFaceOffset,
             "overlayLayerStep":addon_prefs.overlayLayerStep,
             "mergeModTextures":addon_prefs.mergeModTextures,

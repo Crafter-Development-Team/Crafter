@@ -102,9 +102,9 @@ class CrafterAddonPreferences(AddonPreferences):
     mergeSameDoubleSided: BoolProperty(name="Merge Same Double-Sided",
                                        description="Let the exporter merge a double-sided pair into one face only when both faces share the same material and their UVs line up one-to-one (both sides show the same image in the same world direction). Mirror-UV pairs - the common case where both sides read left-to-right correctly in game - are always kept as two faces, so text or asymmetric art never flips on one side",
                                        default=True,)# type: ignore
-    mergeAllDoubleSided: BoolProperty(name="Merge All Same-Texture Double-Sided",
-                                      description="Even more aggressive: also merge mirror-UV pairs when both sides use the same texture and the same UV corners. This halves those faces too, but one side then shows a mirrored image (only use it when the art is symmetric or the flip is acceptable). Merged materials are excluded from backface culling so the remaining single face still shows from both sides",
-                                      default=True,)# type: ignore
+    mergeMirrorDoubleSided: BoolProperty(name="Merge Mirrored Double-Sided",
+                                         description="Merge only the double-sided pairs whose two sides use the same texture but are mirror-UV (the common case where both sides read left-to-right correctly in game). Same-direction pairs are controlled by Merge Same Double-Sided. This halves those faces too, but one side then shows a mirrored image; merged materials are excluded from backface culling so the remaining single face still shows from both sides",
+                                         default=True,)# type: ignore
     plantOffset: BoolProperty(name="Plant Offset",
                               description="Apply the vanilla random offset (BlockBehaviour.OffsetType) to plants and flowers: grass, ferns and flowers shift up to 0.25 blocks horizontally, grass-type plants also sink up to 0.2 blocks. The shift comes from the block position exactly like in game, so every export of the same world matches. Turn it off to keep every plant centred in its block",
                               default=True)# type: ignore
