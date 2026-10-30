@@ -101,7 +101,7 @@ class CrafterAddonPreferences(AddonPreferences):
                                           default=True,)# type: ignore
     mergeSameDoubleSided: BoolProperty(name="Merge Same Double-Sided",
                                        description="Let the exporter merge a double-sided pair into one face only when both faces share the same material and their UVs line up one-to-one (both sides show the same image in the same world direction). Mirror-UV pairs - the common case where both sides read left-to-right correctly in game - are always kept as two faces, so text or asymmetric art never flips on one side",
-                                       default=True,)# type: ignore
+                                       default=False,)# type: ignore
     mergeMirrorDoubleSided: BoolProperty(name="Merge Mirrored Double-Sided",
                                          description="Merge only the double-sided pairs whose two sides use the same texture but are mirror-UV (the common case where both sides read left-to-right correctly in game). Same-direction pairs are controlled by Merge Same Double-Sided. This halves those faces too, but one side then shows a mirrored image; merged materials are excluded from backface culling so the remaining single face still shows from both sides",
                                          default=False,)# type: ignore
