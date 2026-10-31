@@ -3,6 +3,8 @@ time-varying blocks (each interval imported through the normal Crafter/WI path).
 from __future__ import annotations
 
 import os
+import time
+from ..diagnostics import trace_operation, operation_scope, log_event, log_exception
 
 _state: dict = {}
 
@@ -28,6 +30,7 @@ def _frame_at(ft, t):
     return ft[-1][0] + 1
 
 
+@trace_operation("构建回放场景")
 def on_world_imported(info: dict, prefs, *, fps: int = 30, log=print):
     import bpy
     from .import_replay import apply_replay_camera
@@ -37,6 +40,7 @@ def on_world_imported(info: dict, prefs, *, fps: int = 30, log=print):
     ft = frame_times(info, fps)
     scene.render.fps = fps
     scene.frame_start, scene.frame_end = ft[0][0], ft[-1][0]
+    log_event("回放场景计划", "INFO", "构建回放场景", fps=fps, first_frame=ft[0][0], last_frame=ft[-1][0], groups=len(info.get("block_groups") or []))
     if info.get("timelines"):
         cam = apply_replay_camera(info, fps=fps)
         log(f"replay camera: {cam.name if cam else None}")
@@ -51,19 +55,25 @@ def on_world_imported(info: dict, prefs, *, fps: int = 30, log=print):
             os.path.join(info.get("work_root") or info["world"], "_textures"),
             resourcepacks=packs,
         )
-        roots = build_entities(ents, ft, tex, box=info.get("box"), log=log)
+        with operation_scope("回放实体构建", jar=jar, resourcepacks=len(packs)) as stats:
+            roots = build_entities(ents, ft, tex, box=info.get("box"), log=log)
+            stats["objects"] = len(roots)
         log(f"replay entities: {len(roots)}")
+    elif ents:
+        log_event("跳过回放实体：没有可用客户端 jar", "WARN", "构建回放场景", jar=jar)
     parts = info.get("particles")
     if parts and getattr(parts, "bursts", None):
         tex_root = os.path.join(os.path.dirname(__file__), "particle_tex")
         if not os.path.isdir(tex_root):
             alt = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..", "cache", "particle_tex"))
             tex_root = alt if os.path.isdir(alt) else None
-        proots = build_particles(
-            parts, ft, box=info.get("box"), log=log,
-            tex_root=tex_root, jar=jar if jar and os.path.isfile(jar) else None,
-            resourcepacks=packs,
-        )
+        with operation_scope("回放粒子构建", texture_root=tex_root) as stats:
+            proots = build_particles(
+                parts, ft, box=info.get("box"), log=log,
+                tex_root=tex_root, jar=jar if jar and os.path.isfile(jar) else None,
+                resourcepacks=packs,
+            )
+            stats["objects"] = len(proots)
         log(f"replay particles: {len(proots)} roots, {len(parts.bursts)} bursts")
     groups = info.get("block_groups") or []
     if groups:
@@ -78,10 +88,26 @@ def groups_pending() -> bool:
 
 
 def _tick_groups():
+    try:
+        return _tick_groups_impl()
+    except Exception:
+        log_exception("回放动态分组回调失败", "回放动态分组", index=_state.get("done"), current=_state.get("current"))
+        if _state.get("prefs") is not None and _state.get("saved"):
+            try:
+                _state["prefs"].XYZ_1, _state["prefs"].XYZ_2 = _state["saved"]
+            except Exception:
+                log_exception("恢复回放选区失败", "回放动态分组")
+        _state.clear()
+        raise
+
+
+def _tick_groups_impl():
     import bpy
     from importlib import import_module
     st = _state
     iw = import_module(__package__.rsplit(".", 1)[0] + ".operators.ImportWorld")
+    if not st:
+        return None
     if st.get("busy"):
         if getattr(iw, "import_running", False):
             return 0.5
@@ -103,6 +129,9 @@ def _tick_groups():
                 seq.append((off, False))
             bake_visibility(o, seq)
         st["log"](f"replay block group {st['done']}: {len(new)} objs t={g['t_from']}..{g['t_to']}")
+        log_event("回放动态分组结束", "INFO" if new else "WARN", "回放动态分组", index=st["done"],
+                  world=g["world"], objects=len(new), duration_ms=round((time.perf_counter() - st["started"]) * 1000, 3),
+                  outcome="objects_created" if new else "no_objects_check_import_log")
         st["busy"] = False
         st["done"] += 1
     if not st["queue"]:
@@ -117,6 +146,8 @@ def _tick_groups():
     st["before"] = {o.name for o in bpy.data.objects}
     st["current"] = g
     st["busy"] = True
+    st["started"] = time.perf_counter()
+    log_event("回放动态分组启动", "INFO", "回放动态分组", index=st["done"], world=g["world"], box=g["box"], t_from=g["t_from"], t_to=g["t_to"])
     win = bpy.context.window_manager.windows[0]
     area = next((a for a in win.screen.areas if a.type == "VIEW_3D"), win.screen.areas[0])
     with bpy.context.temp_override(window=win, screen=win.screen, area=area):
