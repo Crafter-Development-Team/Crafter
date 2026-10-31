@@ -19,6 +19,7 @@ if platform.system() == "Windows":
 
 
 from ..config import __addon_name__
+from ..animation_metadata import parse_animation_metadata
 from ....common.i18n.i18n import i18n
 from bpy.props import *
 from ..__init__ import dir_blend_append, dir_init_main
@@ -912,13 +913,23 @@ def add_node_moving_texture(node_tex, nodes, links, list_info_moving, parent=Non
     parent: 动态纹理帧要挂到的父帧（overlay 帧），None 表示不挂
     return:动态纹理节点信息
     '''
-    if node_tex.image.size[0] == 0:
+    image = getattr(node_tex, "image", None)
+    if image is None or image.size[0] <= 0 or image.size[1] <= 0:
         return None
-    else:
-        row = node_tex.image.size[1] / node_tex.image.size[0]
-
-    dir_image = os.path.dirname(node_tex.image.filepath)
-    dir_mcmeta = os.path.join(bpy.path.abspath(dir_image), fuq_bl_dot_number(node_tex.image.name) + ".mcmeta")
+    # Datablock names can be renamed/truncated; metadata belongs to the file.
+    image_path = bpy.path.abspath(image.filepath, library=image.library) if image.filepath else ""
+    dir_mcmeta = image_path + ".mcmeta" if image_path else ""
+    info = None
+    if dir_mcmeta and os.path.isfile(dir_mcmeta):
+        try:
+            with open(dir_mcmeta, 'r', encoding='utf-8-sig') as file:
+                info = parse_animation_metadata(json.load(file), int(image.size[0]), int(image.size[1]))
+        except (OSError, ValueError, TypeError) as error:
+            warn_log(f"动态纹理元数据无效，保留静态贴图: {error}", "动态纹理",
+                     image=image.name, path=dir_mcmeta)
+        if info is not None:
+            debug_log("动态纹理解析完成", "动态纹理", path=dir_mcmeta, rows=info[0],
+                      frametime=info[1], duration_units=info[2], interpolate=info[4])
 
     if len(list_info_moving) > 0:
         # list_info_moving[0][1] 是动画信息 [row, frametime, ...]；为 None 的条目（"复用某个
@@ -928,41 +939,8 @@ def add_node_moving_texture(node_tex, nodes, links, list_info_moving, parent=Non
     else:
         row_base = None
 
-    if os.path.exists(dir_mcmeta):
-
-        with open(dir_mcmeta, 'r', encoding='utf-8') as file:
-            mcmeta = json.load(file)
-        frametime = 1
-        interpolate = False
-        frames = row
-        list_frames = []
-        haveframe = True
-        if "animation" in mcmeta:
-            if "frametime" in mcmeta["animation"]:
-                frametime = mcmeta["animation"]["frametime"]
-            if "interpolate" in mcmeta["animation"]:
-                interpolate = mcmeta["animation"]["interpolate"]
-            if "height" in mcmeta["animation"] and "width" in mcmeta["animation"]:
-                row = mcmeta["animation"]["height"] / mcmeta["animation"]["width"]
-                frames = row
-            if "frames" in mcmeta["animation"]:
-                frames = 0
-                for frame in mcmeta["animation"]["frames"]:
-                    if type(frame) == int:
-                        frames += 1
-                        list_frames.append([frame,1])
-                    else:
-                        frames += frame["time"] / frametime
-                        list_frames.append([frame["index"],frame["time"] / frametime])
-            else:
-                haveframe = False
-        else:
-            haveframe = False
-        if not haveframe:
-            frames = row
-            for i in range(int(frames)):
-                list_frames.append([i,1])
-        info = [row, frametime, frames, list_frames, interpolate]
+    if info is not None:
+        row, frametime, frames, list_frames, interpolate = info
         for info_old in list_info_moving:
             if info_old == None or info_old[1] == None:
                 continue
@@ -1006,12 +984,6 @@ def add_node_moving_texture(node_tex, nodes, links, list_info_moving, parent=Non
         links.new(node_Moving_texture_end.outputs["Vector"], node_tex.inputs["Vector"])
         links.new(node_Moving_texture_start.outputs["Fac"], node_Fac.inputs["Fac"])
 
-        # 某些资源包的 .mcmeta 可能存在 animation.frames 为空、frames 为 0 等异常情况。
-        # 原逻辑在 list_frames 为空时不会创建 node_Mix，但结尾仍可能访问 node_Mix，
-        # 从而触发 “cannot access local variable 'node_Mix'” 异常。
-        if not list_frames or frames <= 0:
-            frames = 1
-            list_frames = [[0, 1]]
         node_Mix = None
         n = -1
         adding_frames = 0
@@ -2057,8 +2029,6 @@ def register_crafter_time_object(obj):
         _crafter_time_objects[obj.as_pointer()] = obj
     except ReferenceError:
         pass
-    # 材质刚加载/重载过，置换判定要重新问一次
-    _crafter_time_displacement_cache.clear()
 
 
 def unregister_crafter_time_object(obj):
@@ -2105,7 +2075,6 @@ def _crafter_time_rebuild_registry():
     except AttributeError:
         return
     _crafter_time_objects.clear()
-    _crafter_time_displacement_cache.clear()
     for obj in objects:
         try:
             if _crafter_time_has_driver(obj):
@@ -2115,18 +2084,12 @@ def _crafter_time_rebuild_registry():
     _crafter_time_registry_stale = False
 
 
-_crafter_time_displacement_cache = {}   # 材质名 -> 是否用真置换（需要重算几何）
-
-
 def _crafter_time_material_needs_geometry(material):
     '''材质是否用了"真置换"：Displacement 输出接了线，且 displacement_method 不是 BUMP。
 
     法线/Bump 是着色阶段算的，刷新物体数据就够；真置换要重新细分/位移几何，
     只刷物体数据不会变，必须连几何一起标记。
     '''
-    cached = _crafter_time_displacement_cache.get(material.name)
-    if cached is not None:
-        return cached
     needs = False
     try:
         if material.displacement_method != 'BUMP':
@@ -2138,16 +2101,21 @@ def _crafter_time_material_needs_geometry(material):
                         break
     except (AttributeError, KeyError):
         needs = False
-    _crafter_time_displacement_cache[material.name] = needs
     return needs
 
 
-def _crafter_time_object_uses_displacement(obj):
-    '''物体上有没有用真置换的材质（结果按材质名缓存）'''
+def _crafter_time_object_uses_displacement(obj, cache=None):
+    '''只在一次刷新内共享检查结果；下一帧重新检测节点和置换设置。'''
+    if cache is None:
+        cache = {}
     for slot in obj.material_slots:
         material = slot.material
-        if material is not None and _crafter_time_material_needs_geometry(material):
-            return True
+        if material is not None:
+            key = material.as_pointer()
+            if key not in cache:
+                cache[key] = _crafter_time_material_needs_geometry(material)
+            if cache[key]:
+                return True
     return False
 
 
@@ -2187,6 +2155,7 @@ def _crafter_time_refresh_for_cycles(scene):
     if not _crafter_time_objects or not _crafter_time_refresh_enabled():
         return
     stale = []
+    displacement_cache = {}
     for pointer, obj in _crafter_time_objects.items():
         try:
             if obj.name not in bpy.data.objects or not _crafter_time_has_driver(obj):
@@ -2194,7 +2163,7 @@ def _crafter_time_refresh_for_cycles(scene):
                 continue
             # OBJECT = ID_RECALC_TRANSFORM：Cycles 重新同步该物体（颜色/alpha 等对象数据）
             refresh = {'OBJECT'}
-            if _crafter_time_object_uses_displacement(obj):
+            if _crafter_time_object_uses_displacement(obj, displacement_cache):
                 # DATA = ID_RECALC_GEOMETRY：真置换要重算几何才会跟着时间变
                 refresh.add('DATA')
             obj.update_tag(refresh=refresh)
@@ -2240,7 +2209,6 @@ def remove_crafter_time_handlers():
             if getattr(existing, "__name__", "") == callback.__name__:
                 handlers.remove(existing)
     _crafter_time_objects.clear()
-    _crafter_time_displacement_cache.clear()
     _crafter_time_registry_stale = True
 
 
