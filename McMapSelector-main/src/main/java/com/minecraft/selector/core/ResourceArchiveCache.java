@@ -18,7 +18,8 @@ import javax.imageio.stream.MemoryCacheImageInputStream;
 /** Bounded, single-flight caches of immutable archive metadata and decoded asset colors. */
 final class ResourceArchiveCache {
     static final AtomicInteger INDEX_READS=new AtomicInteger(), PNG_DECODES=new AtomicInteger();
-    private static final ObjectMapper JSON=new ObjectMapper();
+    private static final ObjectMapper JSON=new ObjectMapper()
+        .enable(com.fasterxml.jackson.core.JsonParser.Feature.ALLOW_COMMENTS);
     private static final Map<String,FutureTask<Index>> INDEX=cache(512);
     private static final Map<String,FutureTask<Assets>> ASSETS=cache(256);
     private static final Map<String,FutureTask<Color>> PNG=cache(32768);
@@ -53,7 +54,7 @@ final class ResourceArchiveCache {
         catch(InterruptedException e) {Thread.currentThread().interrupt();throw new IOException("Resource loading interrupted",e);}
         catch(ExecutionException e) {
             synchronized(cache) {cache.remove(key,task);}
-            throw new IOException("Cannot read resource: "+key,e.getCause());
+            throw new IOException("Cannot read resource: "+key+": "+e.getCause().getMessage(),e.getCause());
         }
     }
     private static String fileKey(String path) throws IOException {
@@ -143,6 +144,8 @@ final class ResourceArchiveCache {
                             });
                             if(color!=null) result.textures.put(name,color);
                         } else result.json.put(name,JSON.readTree(in));
+                    } catch(IOException error) {
+                        throw new IOException("Cannot read asset "+index.path+"!"+name+": "+error.getMessage(),error);
                     }
                 }
             }
