@@ -42,7 +42,7 @@ public class MinecraftResourceExtractor {
             for(ResourceArchiveCache.Assets archive:ordered) assets.merge(archive);
             completed=true;
         } catch(InterruptedException e) {Thread.currentThread().interrupt();throw new IOException("Resource loading interrupted",e);}
-        catch(java.util.concurrent.ExecutionException e) {throw new IOException("Resource extraction failed",e.getCause());}
+        catch(java.util.concurrent.ExecutionException e) {throw new IOException("Resource extraction failed: "+e.getCause().getMessage(),e.getCause());}
         finally {workers.shutdownNow();}
     }
     public boolean extractColorsFromMinecraftJar(String path) {

@@ -14,11 +14,13 @@ final class BiomeColors {
     private BufferedImage grass,foliage;
     void merge(BiomeColors other) {definitions.putAll(other.definitions);if(other.grass!=null) grass=other.grass;if(other.foliage!=null) foliage=other.foliage;}
     void read(ZipFile zip) throws IOException {
-        Enumeration<? extends ZipEntry> entries=zip.entries();ObjectMapper json=new ObjectMapper();
+        Enumeration<? extends ZipEntry> entries=zip.entries();ObjectMapper json=new ObjectMapper()
+            .enable(com.fasterxml.jackson.core.JsonParser.Feature.ALLOW_COMMENTS);
         while(entries.hasMoreElements()) {
             ZipEntry e=entries.nextElement();String n=e.getName();
             if(n.matches("data/[^/]+/worldgen/biome/.+\\.json")) {
                 String[] parts=n.split("/",5);try(InputStream in=zip.getInputStream(e)) {definitions.put(parts[1]+":"+parts[4].substring(0,parts[4].length()-5),json.readTree(in));}
+                catch(IOException error) {throw new IOException("Cannot parse biome "+zip.getName()+"!"+n+": "+error.getMessage(),error);}
             } else if(n.equals("assets/minecraft/textures/colormap/grass.png")||n.equals("assets/minecraft/textures/colormap/foliage.png")) {
                 try(InputStream in=zip.getInputStream(e)) {BufferedImage image=ImageIO.read(in);if(n.endsWith("/grass.png")) grass=image;else foliage=image;}
             }

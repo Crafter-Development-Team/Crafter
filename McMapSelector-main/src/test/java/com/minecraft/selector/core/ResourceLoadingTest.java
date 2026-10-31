@@ -81,6 +81,32 @@ class ResourceLoadingTest {
         assertEquals(new Color(0x1234ab),again.getBlockColor("worldcache:block"));
         assertTrue(first.usageReport().isEmpty());
     }
+    @Test void commentedBiomeModelsAndBlockstatesLoadWithoutChangingStringValues() throws Exception {
+        Map<String,byte[]> entries=new HashMap<>();
+        entries.put("data/comments/worldgen/biome/grove.json",json("{\n// Nature Spirit-style comment\n\"effects\":{\"water_color\":1193046},/* block comment */\"temperature\":0.5,\"downfall\":0.5}"));
+        entries.put("assets/comments/models/block/test.json",json("{/* model */\"parent\":\"minecraft:block/cube_all\",\"note\":\"https://example.test/a//b\"}"));
+        entries.put("assets/comments/blockstates/test.json",json("{// state\n\"variants\":{\"\":{\"model\":\"comments:block/test\"}}}"));
+        Path file=archive("commented.jar",entries);
+        ResourceArchiveCache.Assets assets=ResourceArchiveCache.assets(ResourceArchiveCache.index(file.toString()));
+        assertEquals(new Color(0x123456),assets.biomes.tint("comments:grove","minecraft:water"));
+        assertEquals("https://example.test/a//b",assets.json.get("assets/comments/models/block/test.json").path("note").asText());
+        assertTrue(assets.json.containsKey("assets/comments/blockstates/test.json"));
+        new MinecraftResourceExtractor().addArchives(Collections.singletonList(file.toString()),(c,t,m)->{});
+    }
+    @Test void malformedBiomeStillFailsWithArchiveAndEntryInTopLevelMessage() throws Exception {
+        String entry="data/errors/worldgen/biome/broken.json";
+        Path file=archive("bad-biome.jar",Collections.singletonMap(entry,json("{ /* unterminated"))).toRealPath();
+        IOException error=assertThrows(IOException.class,()->new MinecraftResourceExtractor().addArchives(Collections.singletonList(file.toString()),(c,t,m)->{}));
+        assertTrue(error.getMessage().contains(file.toString()));
+        assertTrue(error.getMessage().contains(entry));
+    }
+    @Test void malformedModelStillFailsWithArchiveAndEntryInTopLevelMessage() throws Exception {
+        String entry="assets/errors/models/block/broken.json";
+        Path file=archive("bad-model.jar",Collections.singletonMap(entry,json("{ \"parent\": }"))).toRealPath();
+        IOException error=assertThrows(IOException.class,()->new MinecraftResourceExtractor().addArchives(Collections.singletonList(file.toString()),(c,t,m)->{}));
+        assertTrue(error.getMessage().contains(file.toString()));
+        assertTrue(error.getMessage().contains(entry));
+    }
     @Test void brokenArchiveFailsAndCanBeRetriedAfterRepair() throws Exception {
         Path file=directory.resolve("broken.zip");Files.write(file,new byte[]{1,2,3});
         MinecraftResourceExtractor extractor=new MinecraftResourceExtractor();
