@@ -7,7 +7,7 @@ import time
 _java_cache = {}
 
 
-def probe_java(exe_path):
+def probe_java(exe_path, runner=None):
     """Cache both successful and failed JVM probes (preferences draw is frequent)."""
     if not exe_path or not os.path.isfile(exe_path):
         return None
@@ -21,7 +21,7 @@ def probe_java(exe_path):
     valid = None
     try:
         flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
-        result = subprocess.run([path, "-version"], capture_output=True, timeout=5,
+        result = (runner or subprocess.run)([path, "-version"], capture_output=True, timeout=5,
                                 creationflags=flags)
         output = (result.stdout + result.stderr).decode("utf-8", errors="replace").lower()
         if result.returncode == 0 and not any(s in output for s in ("error:", "a fatal error", "32-bit")):

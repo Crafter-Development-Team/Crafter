@@ -19,6 +19,7 @@ if platform.system() == "Windows":
 
 
 from ..config import __addon_name__
+from ..animation_metadata import parse_animation_metadata
 from ....common.i18n.i18n import i18n
 from bpy.props import *
 from ..__init__ import dir_blend_append, dir_init_main
@@ -632,117 +633,90 @@ def run_as_admin_and_wait(exe_path, work_dir=None, shell=False):
 
 
 # ==================== 全局日志系统 ====================
-# 日志级别常量
+from ..diagnostics import (recent_log as import_log, log_event, log_exception,
+                           trace_operation, operation_scope, log_environment, log_file_path,
+                           process_started, process_finished, clear_recent_log,
+                           format_recent_log, output_level, run_logged_command)
 LOG_LEVEL_DEBUG = "DEBUG"
 LOG_LEVEL_INFO = "INFO"
 LOG_LEVEL_WARN = "WARN"
 LOG_LEVEL_ERROR = "ERROR"
-
-import_log = []          # [{"text": str, "level": str, "time": str, "stage": str}, ...]
 import_running = False
 import_progress = 0.0
-import_stage = ""        # 当前所处的环节名称
-MAX_LOG_LINES = 2000     # 日志上限，超过后从头部裁剪
-
-DEBUG_MODE = True  # 设为 False 可关闭详细调试日志
-
-# 阶段计时表：{stage_name: start_perf_counter}
+import_stage = ""
+MAX_LOG_LINES = 2000
+DEBUG_MODE = True
 _stage_timers = {}
-import time as _time  # 日志系统专用计时
-import datetime as _datetime  # 日志系统专用时间戳
-
-def _now_str():
-    """返回当前时间字符串 HH:MM:SS"""
-    return _datetime.datetime.now().strftime("%H:%M:%S")
+_stage_stack = []
+import time as _time
 
 def _format_dur(seconds):
-    """格式化耗时：小于1秒显示 ms，否则显示 s"""
-    if seconds is None:
-        return "?"
-    if seconds < 1.0:
-        return f"{seconds * 1000:.0f}ms"
-    return f"{seconds:.2f}s"
+    return "?" if seconds is None else (f"{seconds * 1000:.0f}ms" if seconds < 1 else f"{seconds:.2f}s")
 
-def debug_log(text, stage=None):
-    """调试日志，受 DEBUG_MODE 开关控制"""
+def debug_log(text, stage=None, **fields):
     if DEBUG_MODE:
-        push_log(text, LOG_LEVEL_DEBUG, stage)
+        push_log(text, LOG_LEVEL_DEBUG, stage, **fields)
 
-def info_log(text, stage=None):
-    push_log(text, LOG_LEVEL_INFO, stage)
+def info_log(text, stage=None, **fields):
+    push_log(text, LOG_LEVEL_INFO, stage, **fields)
 
-def warn_log(text, stage=None):
-    push_log(text, LOG_LEVEL_WARN, stage)
+def warn_log(text, stage=None, **fields):
+    import sys, traceback
+    if sys.exc_info()[0] is not None:
+        fields.setdefault("traceback", traceback.format_exc())
+    push_log(text, LOG_LEVEL_WARN, stage, **fields)
 
-def error_log(text, stage=None):
-    push_log(text, LOG_LEVEL_ERROR, stage)
+def error_log(text, stage=None, **fields):
+    import sys
+    if sys.exc_info()[0] is not None:
+        log_exception(text, stage if stage is not None else import_stage, **fields)
+    else:
+        push_log(text, LOG_LEVEL_ERROR, stage, **fields)
 
-def push_log(text, level=LOG_LEVEL_INFO, stage=None):
-    """追加一条日志。level 为日志级别，stage 为所处环节（缺省取全局 import_stage）。
-    向后兼容：text/level 字段保持不变，新增 time/stage 字段。
-    """
-    import_log.append({
-        "text": str(text),
-        "level": level,
-        "time": _now_str(),
-        "stage": stage if stage is not None else import_stage,
-    })
-    if len(import_log) > MAX_LOG_LINES:
-        del import_log[:100]
+def push_log(text, level=LOG_LEVEL_INFO, stage=None, **fields):
+    log_event(text, level, stage if stage is not None else import_stage, **fields)
 
 def log_stage(stage_name):
-    """仅设置当前环节名称（不输出日志），后续 push_log 会自动带上该环节"""
     global import_stage
     import_stage = stage_name
 
 def log_stage_begin(stage_name, detail=""):
-    """开始一个计时环节：设置当前环节、记录起始时间、输出开始日志"""
-    global import_stage, _stage_timers
+    global import_stage
+    _stage_stack.append((stage_name, import_stage))
     import_stage = stage_name
-    _stage_timers[stage_name] = _time.perf_counter()
-    msg = f"▶ {stage_name}"
-    if detail:
-        msg += f" - {detail}"
-    push_log(msg, LOG_LEVEL_INFO, stage_name)
+    _stage_timers.setdefault(stage_name, []).append(_time.perf_counter())
+    push_log(f"▶ {stage_name}" + (f" - {detail}" if detail else ""), stage=stage_name, status="running")
 
-def log_stage_end(stage_name, extra=""):
-    """结束一个计时环节：输出完成日志并附带耗时"""
-    global _stage_timers
-    t0 = _stage_timers.pop(stage_name, None)
-    dur = _format_dur(_time.perf_counter() - t0 if t0 is not None else None)
-    msg = f"■ {stage_name} 完成 ({dur})"
-    if extra:
-        msg += f" - {extra}"
-    push_log(msg, LOG_LEVEL_INFO, stage_name)
+def log_stage_end(stage_name, extra="", success=None):
+    global import_stage
+    timers = _stage_timers.get(stage_name, [])
+    t0 = timers.pop() if timers else None
+    if not timers:
+        _stage_timers.pop(stage_name, None)
+    duration = _time.perf_counter() - t0 if t0 is not None else None
+    if success is None:
+        success = not any(word in extra for word in ("失败", "异常", "取消"))
+    status = "success" if success else "error"
+    push_log(f"■ {stage_name} {'完成' if success else '失败'} ({_format_dur(duration)})" +
+             (f" - {extra}" if extra else ""), LOG_LEVEL_INFO if success else LOG_LEVEL_ERROR,
+             stage_name, duration_ms=round(duration * 1000, 3) if duration is not None else None, status=status)
+    if _stage_stack and _stage_stack[-1][0] == stage_name:
+        _, import_stage = _stage_stack.pop()
 
 def log_step(text, stage=None):
-    """在当前环节内输出一条步骤日志（不计时）"""
     push_log(f"  · {text}", LOG_LEVEL_INFO, stage)
 
 def clear_import_log():
-    """清空日志并重置进度/阶段状态"""
     global import_running, import_progress, import_stage
-    import_log.clear()
+    clear_recent_log()
     import_running = False
     import_progress = 0.0
     import_stage = ""
     _stage_timers.clear()
+    _stage_stack.clear()
 
 def format_log_text(include_meta=True):
-    """将 import_log 格式化为可读文本。
-    include_meta=True 时带 [时间][级别] 前缀，便于复制/导出排查问题。
-    """
-    if not import_log:
-        return ""
-    lines = []
-    for e in import_log:
-        if include_meta:
-            stage = e.get("stage", "")
-            stage_str = f"[{stage}]" if stage else ""
-            lines.append(f"[{e.get('time','')}] [{e.get('level','INFO')}] {stage_str} {e['text']}")
-        else:
-            lines.append(e["text"])
-    return "\n".join(lines)
+    return format_recent_log(include_meta)
 
 def parse_progress(text):
     import re as _re
@@ -939,13 +913,23 @@ def add_node_moving_texture(node_tex, nodes, links, list_info_moving, parent=Non
     parent: 动态纹理帧要挂到的父帧（overlay 帧），None 表示不挂
     return:动态纹理节点信息
     '''
-    if node_tex.image.size[0] == 0:
+    image = getattr(node_tex, "image", None)
+    if image is None or image.size[0] <= 0 or image.size[1] <= 0:
         return None
-    else:
-        row = node_tex.image.size[1] / node_tex.image.size[0]
-
-    dir_image = os.path.dirname(node_tex.image.filepath)
-    dir_mcmeta = os.path.join(bpy.path.abspath(dir_image), fuq_bl_dot_number(node_tex.image.name) + ".mcmeta")
+    # Datablock names can be renamed/truncated; metadata belongs to the file.
+    image_path = bpy.path.abspath(image.filepath, library=image.library) if image.filepath else ""
+    dir_mcmeta = image_path + ".mcmeta" if image_path else ""
+    info = None
+    if dir_mcmeta and os.path.isfile(dir_mcmeta):
+        try:
+            with open(dir_mcmeta, 'r', encoding='utf-8-sig') as file:
+                info = parse_animation_metadata(json.load(file), int(image.size[0]), int(image.size[1]))
+        except (OSError, ValueError, TypeError) as error:
+            warn_log(f"动态纹理元数据无效，保留静态贴图: {error}", "动态纹理",
+                     image=image.name, path=dir_mcmeta)
+        if info is not None:
+            debug_log("动态纹理解析完成", "动态纹理", path=dir_mcmeta, rows=info[0],
+                      frametime=info[1], duration_units=info[2], interpolate=info[4])
 
     if len(list_info_moving) > 0:
         # list_info_moving[0][1] 是动画信息 [row, frametime, ...]；为 None 的条目（"复用某个
@@ -955,41 +939,8 @@ def add_node_moving_texture(node_tex, nodes, links, list_info_moving, parent=Non
     else:
         row_base = None
 
-    if os.path.exists(dir_mcmeta):
-
-        with open(dir_mcmeta, 'r', encoding='utf-8') as file:
-            mcmeta = json.load(file)
-        frametime = 1
-        interpolate = False
-        frames = row
-        list_frames = []
-        haveframe = True
-        if "animation" in mcmeta:
-            if "frametime" in mcmeta["animation"]:
-                frametime = mcmeta["animation"]["frametime"]
-            if "interpolate" in mcmeta["animation"]:
-                interpolate = mcmeta["animation"]["interpolate"]
-            if "height" in mcmeta["animation"] and "width" in mcmeta["animation"]:
-                row = mcmeta["animation"]["height"] / mcmeta["animation"]["width"]
-                frames = row
-            if "frames" in mcmeta["animation"]:
-                frames = 0
-                for frame in mcmeta["animation"]["frames"]:
-                    if type(frame) == int:
-                        frames += 1
-                        list_frames.append([frame,1])
-                    else:
-                        frames += frame["time"] / frametime
-                        list_frames.append([frame["index"],frame["time"] / frametime])
-            else:
-                haveframe = False
-        else:
-            haveframe = False
-        if not haveframe:
-            frames = row
-            for i in range(int(frames)):
-                list_frames.append([i,1])
-        info = [row, frametime, frames, list_frames, interpolate]
+    if info is not None:
+        row, frametime, frames, list_frames, interpolate = info
         for info_old in list_info_moving:
             if info_old == None or info_old[1] == None:
                 continue
@@ -1033,12 +984,6 @@ def add_node_moving_texture(node_tex, nodes, links, list_info_moving, parent=Non
         links.new(node_Moving_texture_end.outputs["Vector"], node_tex.inputs["Vector"])
         links.new(node_Moving_texture_start.outputs["Fac"], node_Fac.inputs["Fac"])
 
-        # 某些资源包的 .mcmeta 可能存在 animation.frames 为空、frames 为 0 等异常情况。
-        # 原逻辑在 list_frames 为空时不会创建 node_Mix，但结尾仍可能访问 node_Mix，
-        # 从而触发 “cannot access local variable 'node_Mix'” 异常。
-        if not list_frames or frames <= 0:
-            frames = 1
-            list_frames = [[0, 1]]
         node_Mix = None
         n = -1
         adding_frames = 0
@@ -2084,8 +2029,6 @@ def register_crafter_time_object(obj):
         _crafter_time_objects[obj.as_pointer()] = obj
     except ReferenceError:
         pass
-    # 材质刚加载/重载过，置换判定要重新问一次
-    _crafter_time_displacement_cache.clear()
 
 
 def unregister_crafter_time_object(obj):
@@ -2132,7 +2075,6 @@ def _crafter_time_rebuild_registry():
     except AttributeError:
         return
     _crafter_time_objects.clear()
-    _crafter_time_displacement_cache.clear()
     for obj in objects:
         try:
             if _crafter_time_has_driver(obj):
@@ -2142,18 +2084,12 @@ def _crafter_time_rebuild_registry():
     _crafter_time_registry_stale = False
 
 
-_crafter_time_displacement_cache = {}   # 材质名 -> 是否用真置换（需要重算几何）
-
-
 def _crafter_time_material_needs_geometry(material):
     '''材质是否用了"真置换"：Displacement 输出接了线，且 displacement_method 不是 BUMP。
 
     法线/Bump 是着色阶段算的，刷新物体数据就够；真置换要重新细分/位移几何，
     只刷物体数据不会变，必须连几何一起标记。
     '''
-    cached = _crafter_time_displacement_cache.get(material.name)
-    if cached is not None:
-        return cached
     needs = False
     try:
         if material.displacement_method != 'BUMP':
@@ -2165,16 +2101,21 @@ def _crafter_time_material_needs_geometry(material):
                         break
     except (AttributeError, KeyError):
         needs = False
-    _crafter_time_displacement_cache[material.name] = needs
     return needs
 
 
-def _crafter_time_object_uses_displacement(obj):
-    '''物体上有没有用真置换的材质（结果按材质名缓存）'''
+def _crafter_time_object_uses_displacement(obj, cache=None):
+    '''只在一次刷新内共享检查结果；下一帧重新检测节点和置换设置。'''
+    if cache is None:
+        cache = {}
     for slot in obj.material_slots:
         material = slot.material
-        if material is not None and _crafter_time_material_needs_geometry(material):
-            return True
+        if material is not None:
+            key = material.as_pointer()
+            if key not in cache:
+                cache[key] = _crafter_time_material_needs_geometry(material)
+            if cache[key]:
+                return True
     return False
 
 
@@ -2214,6 +2155,7 @@ def _crafter_time_refresh_for_cycles(scene):
     if not _crafter_time_objects or not _crafter_time_refresh_enabled():
         return
     stale = []
+    displacement_cache = {}
     for pointer, obj in _crafter_time_objects.items():
         try:
             if obj.name not in bpy.data.objects or not _crafter_time_has_driver(obj):
@@ -2221,7 +2163,7 @@ def _crafter_time_refresh_for_cycles(scene):
                 continue
             # OBJECT = ID_RECALC_TRANSFORM：Cycles 重新同步该物体（颜色/alpha 等对象数据）
             refresh = {'OBJECT'}
-            if _crafter_time_object_uses_displacement(obj):
+            if _crafter_time_object_uses_displacement(obj, displacement_cache):
                 # DATA = ID_RECALC_GEOMETRY：真置换要重算几何才会跟着时间变
                 refresh.add('DATA')
             obj.update_tag(refresh=refresh)
@@ -2267,7 +2209,6 @@ def remove_crafter_time_handlers():
             if getattr(existing, "__name__", "") == callback.__name__:
                 handlers.remove(existing)
     _crafter_time_objects.clear()
-    _crafter_time_displacement_cache.clear()
     _crafter_time_registry_stale = True
 
 
@@ -2869,37 +2810,40 @@ def start_importer_async(exe_path, work_dir=None):
         return _start_unix_async(exe_path, work_dir)
 
 
-def _start_pipe_reader(proc):
-    """启动后台线程持续读取 stdout，防止管道积压阻塞 exe。
-    返回 (buffer, poll_fn)，buffer 是线程安全的列表，poll_fn 供定时器调用。
-    """
+def _start_pipe_reader(proc, command=None, work_dir=None):
+    """Drain output off the UI thread; persist every line, bound pending UI output."""
     import threading
-    buffer = []
+    from collections import deque
+    buffer = deque(maxlen=2000)
     lock = threading.Lock()
-    stop = threading.Event()
+    reader_failed = threading.Event()
+    started = process_started(command or getattr(proc, "args", None), work_dir, proc.pid)
+    finished = False
+    exit_observed = None
 
     def _reader():
         try:
             for line in iter(proc.stdout.readline, ''):
-                if stop.is_set():
-                    break
                 stripped = line.rstrip('\n\r')
                 if stripped:
+                    log_event(stripped, output_level(stripped), "运行 WorldImporter",
+                              child_pid=proc.pid, stream="stdout+stderr", source="child:WorldImporter")
                     with lock:
                         buffer.append(stripped)
-        except:
-            pass
+        except Exception:
+            reader_failed.set()
+            log_exception("读取子进程输出失败", "子进程", child_pid=proc.pid)
         finally:
             try:
                 proc.stdout.close()
-            except:
-                pass
+            except Exception:
+                log_exception("关闭子进程输出失败", "子进程", child_pid=proc.pid)
 
-    thread = threading.Thread(target=_reader, daemon=True)
+    thread = threading.Thread(target=_reader, name=f"Crafter-process-{proc.pid}", daemon=True)
     thread.start()
 
     def poll():
-        nonlocal buffer
+        nonlocal finished, exit_observed
         with lock:
             if buffer:
                 lines = list(buffer)
@@ -2908,14 +2852,23 @@ def _start_pipe_reader(proc):
         ret = proc.poll()
         if ret is None:
             return None
-        # 等 reader 线程读完剩余内容
-        thread.join(timeout=2)
+        # Never block Blender's UI while a descendant still holds stdout open.
+        if thread.is_alive():
+            if exit_observed is None:
+                exit_observed = _time.perf_counter()
+            if _time.perf_counter() - exit_observed < 2:
+                return None
+            if not finished:
+                warn_log("子进程已退出，但输出管道仍被其他进程持有；停止 UI 等待", "子进程", child_pid=proc.pid)
         with lock:
             if buffer:
                 lines = list(buffer)
                 buffer.clear()
                 return '\n'.join(lines)
-        return ret == 0
+        if not finished:
+            process_finished(started, proc.pid, ret, output_read_error=reader_failed.is_set())
+            finished = True
+        return ret == 0 and not reader_failed.is_set()
 
     return poll
 
@@ -2932,11 +2885,12 @@ def _start_windows_async(exe_path, work_dir=None):
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             universal_newlines=True,
+            encoding="utf-8", errors="replace",
             bufsize=1,
         )
-        return _start_pipe_reader(proc)
+        return _start_pipe_reader(proc, [exe_path], work_dir)
     except Exception as e:
-        print(f"Popen failed, fallback to ShellExecuteExW: {e}")
+        log_exception("Popen 启动失败，尝试 Windows 提权启动", "子进程", command=[exe_path], cwd=work_dir)
 
     # 回退：ShellExecuteExW（无日志捕获）
     try:
@@ -2966,9 +2920,23 @@ def _start_windows_async(exe_path, work_dir=None):
         sei.lpDirectory = work_dir
         sei.nShow = 1
         if not ctypes.windll.shell32.ShellExecuteExW(ctypes.byref(sei)):
+            error_log("提权启动失败", "子进程", command=[exe_path], winerror=ctypes.GetLastError())
             return None
         hProcess = sei.hProcess
+        kernel = ctypes.windll.kernel32
+        kernel.GetProcessId.argtypes = [wintypes.HANDLE]
+        kernel.GetProcessId.restype = wintypes.DWORD
+        kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+        kernel.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+        kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+        pid = kernel.GetProcessId(hProcess)
+        started = process_started([exe_path], work_dir, pid, elevated=True, output_capture=False)
+        warn_log("提权启动无法捕获 stdout/stderr；请查看 WorldImporter 磁盘日志", "子进程", child_pid=pid)
+        result = None
         def poll():
+            nonlocal result
+            if result is not None:
+                return result
             if hProcess is None:
                 return False
             wr = ctypes.windll.kernel32.WaitForSingleObject(hProcess, 0)
@@ -2976,15 +2944,20 @@ def _start_windows_async(exe_path, work_dir=None):
                 ec = wintypes.DWORD()
                 ctypes.windll.kernel32.GetExitCodeProcess(hProcess, ctypes.byref(ec))
                 ctypes.windll.kernel32.CloseHandle(hProcess)
-                return ec.value == 0
+                process_finished(started, pid, ec.value, elevated=True)
+                result = ec.value == 0
+                return result
             elif wr == 0x00000102:
                 return None
             else:
+                error_log("等待提权子进程失败", "子进程", child_pid=pid, wait_result=wr)
                 ctypes.windll.kernel32.CloseHandle(hProcess)
-                return False
+                process_finished(started, pid, -1, elevated=True)
+                result = False
+                return result
         return poll
     except Exception as e:
-        print(f"Windows async start error: {e}")
+        log_exception("Windows 子进程启动失败", "子进程", command=[exe_path], cwd=work_dir)
         return None
 
 
@@ -3004,12 +2977,13 @@ def _start_unix_async(exe_path, work_dir=None):
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             universal_newlines=True,
+            encoding="utf-8", errors="replace",
             bufsize=1,
         )
 
-        return _start_pipe_reader(process)
+        return _start_pipe_reader(process, [actual_exe], work_dir)
 
     except Exception as e:
-        print(f"Unix async start error: {e}")
+        log_exception("Unix 子进程启动失败", "子进程", command=[exe_path], cwd=work_dir)
         return None
 

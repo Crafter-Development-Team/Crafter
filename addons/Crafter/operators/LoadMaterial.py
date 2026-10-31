@@ -146,6 +146,7 @@ def material_settings_object_for_panel(context):
     return obj
 
 
+@trace_operation("重载材质库", detail=lambda context, library_name, **kwargs: dict(library=library_name, directory=dir_materials))
 def reload_material_setup(context, library_name, include_settings=False):
     '''
     全量重加载材质节点组：删掉工程里旧的 CO-/CI-/C- 节点组与材质设置物体，
@@ -212,6 +213,7 @@ def get_double_sided_cull_setting(context):
     return (bool(getattr(addon_prefs, "doubleSidedBackfaceCull", True)), dir_importer)
 
 # ========== 提取的分类数据加载函数 ==========
+@trace_operation("load_classification_data")
 def load_classification_data(addon_prefs):
     '''
     从分类基础目录加载所有 JSON 分类文件，规范化合并并编译为结构化分类规则。
@@ -233,11 +235,13 @@ def load_classification_data(addon_prefs):
                         for entry in entries:
                             if isinstance(entry, dict):
                                 classification_raw.setdefault(group_name, []).append(entry)
-            except:
-                pass
+            except Exception:
+                log_exception("分类规则读取失败，跳过文件", "加载分类规则", path=file_path)
+    debug_log("分类规则加载完成", "加载分类规则", directory=classification_folder_dir, groups=len(classification_raw))
     return compile_classification_list(classification_raw)
 
 # ========== 提取的单材质处理函数 ==========
+@trace_operation("处理单个材质", level="DEBUG", detail=lambda material, *args, **kwargs: dict(material=material.name))
 def process_single_material(material, context, classification_list, imported_by_crafter=False, folder_search=None,
                             addon_prefs=None):
     '''
@@ -686,14 +690,16 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):
         return True
         return any(obj.type == "MESH" for obj in context.selected_objects)
 
+    @trace_operation("加载材质", detail=lambda self, context: dict(from_import=self.from_import, force_reload=self.force_reload, selected_objects=len(context.selected_objects)))
     def execute(self, context: bpy.types.Context):
 
-        push_log('[unknown] 加载材质', 'INFO')
+        info_log("准备加载材质", "加载材质")
         addon_prefs = context.preferences.addons[__addon_name__].preferences
         reset_CI_cull_stats()
 
         bpy.ops.crafter.reload_all()
         if not (-1 < addon_prefs.Materials_List_index and addon_prefs.Materials_List_index < len(addon_prefs.Materials_List)):
+            warn_log("取消加载：未选择有效材质库", "加载材质", library_index=addon_prefs.Materials_List_index)
             return {"CANCELLED"}
         make_true_object_mode(context)
         # finish_import already applies world transforms. Item/manual imports
@@ -713,12 +719,12 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):
                 reason = f"强制重加载材质节点组（{library_name}）"
             elif needs_settings and reusable:
                 reason = f"补载材质设置物体（{library_name}）"
-            push_log(f'[unknown] 重加载材质节点组：{reason}', 'INFO')
+            info_log(f'重加载材质节点组：{reason}', '加载材质', library=library_name, action='reload')
             # include_settings 恒为 True：设置物体必须和 CI/CO 同一次 load，避免生成 CI-*.001
             reload_material_setup(context, library_name, include_settings=True)
             set_loaded_material_library(context, library_name)
         else:
-            push_log(f'[unknown] {reason}', 'INFO')
+            info_log(reason, '加载材质', library=library_name, action='reuse')
             ensure_material_settings_object(context)
         # 获取分类依据规则
         classification_list = load_classification_data(addon_prefs)
@@ -732,10 +738,11 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):
         for obj in context.selected_objects:
             if obj.type == "MESH":
                 for mat in obj.data.materials:
-                    if mat.name not in for_collection:
+                    if mat is not None and mat.name not in for_collection:
                         for_collection.append(mat.name)
         # 面板按钮路径按"查找PBR贴图"开关决定要不要去文件夹补缺；导入路径的判据保持不变
         folder_search = None if self.from_import else bool(addon_prefs.Search_PBR_On_Load)
+        info_log("材质处理计划", "加载材质", count=len(for_collection), library=library_name, folder_search=folder_search)
         # 遍历材质合集
         for name_material in for_collection:
             imported_by_crafter = False
@@ -808,7 +815,7 @@ class VIEW3D_OT_CrafterLoadParallax(bpy.types.Operator):
             row5.prop(addon_prefs,"Parallax_Guess_Height_Scale")
     def execute(self, context: bpy.types.Context):
 
-        push_log('[unknown] 加载视差', 'INFO')
+        info_log('加载视差', '加载视差')
         addon_prefs = context.preferences.addons[__addon_name__].preferences
 
         bpy.ops.crafter.remove_parallax()
@@ -966,7 +973,7 @@ class VIEW3D_OT_CrafterRemoveParallax(bpy.types.Operator):
 
     def execute(self, context: bpy.types.Context):
 
-        push_log('[unknown] 移除视差', 'INFO')
+        info_log('移除视差', '移除视差')
         addon_prefs = context.preferences.addons[__addon_name__].preferences
         
         bpy.ops.crafter.reload_all()

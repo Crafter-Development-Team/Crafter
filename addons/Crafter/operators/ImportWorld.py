@@ -257,6 +257,7 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
 
         # 进入导入流程，重置日志状态
         clear_import_log()
+        log_environment(bpy, addon_path=dir_init_main)
         log_stage_begin("准备导入", "检查世界路径")
 
         #获取世界路径，检测路径合法性
@@ -748,7 +749,7 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         if isinstance(r, str):
             for line in r.split(chr(10)):
                 if not line: continue
-                push_log(line, _classify_importer_line(line), "运行 WorldImporter")
+                # Reader thread has already persisted and displayed this line.
                 p = parse_progress(line)
                 if p is not None: import_progress = p
             self._wm.progress_update(import_progress)
@@ -774,6 +775,7 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             except Exception as _ex:
                 error_log(f"finish_import 异常: {_ex}")
                 import traceback; traceback.print_exc()
+                return {'CANCELLED'}
             # ReplayMod: camera path, animated players/mobs, then time-varying blocks
             replay_info = getattr(self, "_replay_info", None)
             if replay_info:
@@ -792,6 +794,7 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
     def cancel(self, context):
         global import_running
         import_running = False
+        warn_log("用户取消导入 UI 等待；已启动的导出进程可能仍在运行", "世界导入")
         if getattr(self, "_timer", None):
             context.window_manager.event_timer_remove(self._timer)
             self._timer = None
@@ -803,14 +806,8 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
 
 def _classify_importer_line(line):
     """根据 WorldImporter 输出内容粗略判断日志级别"""
-    low = line.lower()
-    if line.startswith("■") or line.startswith("▶"):
-        return LOG_LEVEL_INFO
-    if "error" in low or "错误" in line or "failed" in low:
-        return LOG_LEVEL_ERROR
-    if "warn" in low or "警告" in line:
-        return LOG_LEVEL_WARN
-    return LOG_LEVEL_INFO
+    from ..diagnostics import output_level
+    return output_level(line)
 
 
 def biome_texture_bounds(worldconfig):
@@ -844,6 +841,7 @@ def tint_map_needs_biome(tint_map):
     return any(tint_value_needs_biome(v) for v in tint_map.values())
 
 
+@trace_operation("世界导入后处理")
 def finish_import(ctx, prefs, imported_time, worldconfig, prepared_time,
                   save, version, dot_minecraftPath, worldPath, undivided, is_custom,
                   _ctx_win=None, _ctx_area=None):
@@ -899,6 +897,7 @@ def finish_import(ctx, prefs, imported_time, worldconfig, prepared_time,
     try:
         importer_files = os.listdir(dir_importer)
     except (FileNotFoundError, PermissionError):
+        log_exception("无法列举导出目录", "列举导出文件", path=dir_importer)
         importer_files = []
     obj_files = select_obj_files(importer_files, use_entities)
     skipped_entities = [f for f in importer_files
@@ -1254,6 +1253,7 @@ class VIEW3D_OT_CrafterReimportSurfaceWorld(bpy.types.Operator):# 重导入表�
         
         prepared_time = time.perf_counter()
         clear_import_log()
+        log_environment(bpy, addon_path=dir_init_main)
         log_stage_begin("重新导入", "读取已有 config.json")
 
         # 根据平台选择配置目录和可执行文件
@@ -2059,11 +2059,13 @@ class VIEW3D_OT_CrafterExportImportLog(bpy.types.Operator):
             self.report({'INFO'}, "No log to export")
             return {'CANCELLED'}
         try:
-            with open(self.filepath, 'w', encoding='utf-8') as f:
-                f.write(text + "\n")
+            from ..diagnostics import export_session
+            export_session(self.filepath, "=== Crafter Diagnostic Log ===")
             self.report({'INFO'}, f"Log saved: {self.filepath}")
         except Exception as e:
+            log_exception("日志导出失败", "日志", path=self.filepath)
             self.report({'ERROR'}, f"Save failed: {e}")
+            return {'CANCELLED'}
         return {'FINISHED'}
 
 
@@ -2086,7 +2088,8 @@ class VIEW3D_OT_CrafterExportSessionLog(bpy.types.Operator):
         lines = []
         lines.append("=== Crafter Session Log ===")
         lines.append(f"Generated: {datetime.datetime.now():%Y-%m-%d %H:%M:%S}")
-        lines.append(f"Plugin Version: 0.8.0")
+        from .. import bl_info
+        lines.append("Plugin Version: " + ".".join(map(str, bl_info["version"])))
         lines.append(f"Import Count: {context.scene.Crafter_import_time}")
         lines.append("")
         lines.append("--- Import Log ---")
@@ -2100,10 +2103,12 @@ class VIEW3D_OT_CrafterExportSessionLog(bpy.types.Operator):
             self.report({'INFO'}, "No log to export")
             return {'CANCELLED'}
         try:
-            with open(self.filepath, 'w', encoding='utf-8') as f:
-                f.write(text + "\n")
+            from ..diagnostics import export_session
+            export_session(self.filepath, "\n".join(lines[:5]))
             self.report({'INFO'}, f"Session log saved: {self.filepath}")
         except Exception as e:
+            log_exception("会话日志导出失败", "日志", path=self.filepath)
             self.report({'ERROR'}, f"Save failed: {e}")
+            return {'CANCELLED'}
         return {'FINISHED'}
 

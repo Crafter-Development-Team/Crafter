@@ -13,7 +13,7 @@ from bpy.props import *
 from .Defs import *
 
 def try_java(exe_path):
-    return probe_java(exe_path)
+    return probe_java(exe_path, runner=run_logged_command)
 
 def search_java_in_dir(dir_java, java_exe_name):
     """在目录及其子目录中查找第一个可用的Java，找到即返回"""
@@ -147,7 +147,7 @@ class VIEW3D_OT_CrafterMapSelector(bpy.types.Operator):
 
     def execute(self, context):
 
-        push_log('[unknown] 地图选择器', 'INFO')
+        info_log('准备启动地图选择器', '地图选择器')
         self.report({'INFO'}, "启动地图选择器...")
         
         addon_prefs = context.preferences.addons[__addon_name__].preferences
@@ -256,12 +256,44 @@ class VIEW3D_OT_CrafterMapSelector(bpy.types.Operator):
             with open(log_path, "wb") as log:
                 popen_kwargs["stdout"] = log
                 process = subprocess.Popen(cmd, **popen_kwargs)
-            print(f"Map selector PID={process.pid} log={log_path}")
+            started = process_started(cmd, popen_kwargs["cwd"], process.pid, output_log=log_path)
+            log_offset = 0
+            log_pending = b""
+
+            def drain_output(final=False):
+                nonlocal log_offset, log_pending
+                try:
+                    with open(log_path, "rb") as output:
+                        output.seek(log_offset)
+                        # Bounded work per timer tick; final drain continues on later ticks.
+                        chunk = output.read(64 * 1024)
+                        log_offset = output.tell()
+                    log_pending += chunk
+                    lines = log_pending.split(b"\n")
+                    log_pending = lines.pop()
+                    for raw in lines:
+                        line = raw.decode("utf-8", "replace").rstrip("\r")
+                        if line:
+                            from ..diagnostics import output_level
+                            log_event(line, output_level(line), "地图选择器", child_pid=process.pid,
+                                      stream="stdout+stderr", source="child:MapSelector")
+                    # Bound unterminated lines too.
+                    if len(log_pending) >= 64 * 1024 or (final and not chunk):
+                        if log_pending:
+                            log_event(log_pending.decode("utf-8", "replace"), "INFO", "地图选择器", child_pid=process.pid)
+                        log_pending = b""
+                    return bool(chunk)
+                except OSError:
+                    log_exception("读取地图选择器输出失败", "地图选择器", child_pid=process.pid)
+                    return False
             push_log(f"地图选择器已启动 PID={process.pid}", "INFO")
 
             def poll_selector():
-                if process.poll() is None:
+                running = process.poll() is None
+                more = drain_output(final=not running)
+                if running or more:
                     return 0.25
+                process_finished(started, process.pid, process.returncode)
                 try:
                     if process.returncode == 0 and os.path.isfile(coord_file):
                         first, second, import_lod = read_coordinates(coord_file)
@@ -275,7 +307,7 @@ class VIEW3D_OT_CrafterMapSelector(bpy.types.Operator):
                             for area in window.screen.areas:
                                 if area.type in {'PREFERENCES', 'VIEW_3D'}:
                                     area.tag_redraw()
-                        push_log("地图选择坐标已更新", "INFO")
+                        info_log("地图选择坐标已更新", "地图选择器", first=first, second=second, import_lod=import_lod)
                     elif process.returncode != 0:
                         detail = ""
                         try:
@@ -295,7 +327,7 @@ class VIEW3D_OT_CrafterMapSelector(bpy.types.Operator):
                         # User closed without confirming — not an error.
                         push_log("地图选择器已关闭（未回传坐标）", "INFO")
                 except Exception as error:
-                    push_log("地图坐标回传失败: " + str(error), "ERROR")
+                    log_exception("地图坐标回传失败: " + str(error), "地图选择器")
                 finally:
                     shutil.rmtree(temp_dir, ignore_errors=True)
                 return None
@@ -305,6 +337,7 @@ class VIEW3D_OT_CrafterMapSelector(bpy.types.Operator):
             return {'FINISHED'}
             
         except Exception as e:
+            log_exception("启动地图选择器失败", "地图选择器")
             shutil.rmtree(temp_dir, ignore_errors=True)
             self.report({'ERROR'}, f"启动地图选择器失败: {str(e)}")
             return {'CANCELLED'}

@@ -40,9 +40,16 @@ def get_memory_info():
                 return int(status.ullTotalPhys), int(status.ullAvailPhys)
 
         if platform.system() == "Darwin":
-            total = int(subprocess.check_output(["sysctl", "-n", "hw.memsize"], text=True).strip())
-            page_size = int(subprocess.check_output(["sysctl", "-n", "hw.pagesize"], text=True).strip())
-            vm_stat = subprocess.check_output(["vm_stat"], text=True)
+            # Keep helpers importable without Blender in standalone tests.
+            if __package__:
+                from ..diagnostics import run_logged_command
+            else:
+                run_logged_command = subprocess.run
+            def output(command):
+                return run_logged_command(command, capture_output=True, text=True, check=True, timeout=5).stdout
+            total = int(output(["sysctl", "-n", "hw.memsize"]).strip())
+            page_size = int(output(["sysctl", "-n", "hw.pagesize"]).strip())
+            vm_stat = output(["vm_stat"])
             pages = 0
             for line in vm_stat.splitlines():
                 if line.startswith(("Pages free", "Pages inactive", "Pages speculative")):
