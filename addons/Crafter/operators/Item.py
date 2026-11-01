@@ -12,7 +12,7 @@ from ..__init__ import dir_cafter_data, dir_resourcepacks_plans, dir_materials, 
 from ..config import __addon_name__
 from ....common.i18n.i18n import i18n
 from bpy.props import *
-from .Defs import warn_log
+from .Defs import warn_log, info_log, debug_log, trace_operation
 
 
 def _run_load_material(from_import=True):
@@ -332,6 +332,7 @@ class VIEW3D_OT_CrafterImportItem(bpy.types.Operator):#导入物体
             layout.label(text=f"细分尺寸: {base_width // divisor} x {base_height // divisor}")
         # 厚度（像素）放在约数下面：它的最终厚度取决于细分后的短边像素量
         layout.prop(self, "thickness")
+    @trace_operation("导入物品", detail=lambda self, context: dict(path=self.filepath, thickness=self.thickness, load_material=self.load_material))
     def execute(self, context: bpy.types.Context):
         dir_item = self.filepath
         addon_prefs = context.preferences.addons[__addon_name__].preferences
@@ -339,6 +340,7 @@ class VIEW3D_OT_CrafterImportItem(bpy.types.Operator):#导入物体
         if context.active_object:
             bpy.ops.object.mode_set(mode='OBJECT')
         if not os.path.exists(dir_item):
+            warn_log('物品贴图不存在', '导入物品', path=dir_item)
             return {'CANCELLED'}
         pre_import_objects = set(bpy.data.objects)#记录当前场景中的所有对象
 
@@ -353,6 +355,7 @@ class VIEW3D_OT_CrafterImportItem(bpy.types.Operator):#导入物体
         context.view_layer.update()
         # ========== 加载贴图 ==========
         image_item = bpy.data.images.load(dir_item)# 从用户选择的文件加载贴图
+        debug_log("物品贴图已加载", "导入物品", path=dir_item, width=image_item.size[0], height=image_item.size[1])
         # 赋值给修改器中的 IMAGE_TEXTURE 节点（C-item 节点组内的占位贴图）
         for mod in object_item.modifiers:
             if mod.type == 'NODES':
@@ -379,6 +382,7 @@ class VIEW3D_OT_CrafterImportItem(bpy.types.Operator):#导入物体
         divisor = item_current_divisor(self)
         width = max(1, int(base_width) // divisor)
         height = max(1, int(base_height) // divisor)
+        info_log("物品网格计划", "导入物品", width=width, height=height, divisor=divisor, base_width=base_width, base_height=base_height)
         cuts_x = width - 1
         cuts_y = height - 1
         # 挤出厚度：厚度（像素）交给 Offset Scale，短边像素量交给 Pxel Min，
@@ -424,12 +428,14 @@ class VIEW3D_OT_CrafterImportItem(bpy.types.Operator):#导入物体
             # （load_material_for_object 会在同目录查找 _n.png / _s.png / _a.png 作为 PBR 贴图）
             from .LoadMaterial import can_reuse_material_setup, load_material_for_object
             reusable, _reason = can_reuse_material_setup(context)
+            info_log("物品材质策略", "导入物品", reuse=reusable, reason=_reason, object=object_item.name)
             if reusable:
                 load_material_for_object(context, object_item)
             else:
                 # 没加载过 / 换了材质库 / 缺件 → 走操作符，那里重加载后再统一加载
                 _run_load_material(from_import=True)
 
+        info_log("物品导入结果", "导入物品", object=object_item.name, vertices=len(object_item.data.vertices), polygons=len(object_item.data.polygons))
         return  {'FINISHED'}
         
 

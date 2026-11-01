@@ -21,18 +21,22 @@ class VIEW3D_OT_CrafterReplaceResources(bpy.types.Operator):
         return True
         return any(obj.type == "MESH" for obj in context.selected_objects)
 
+    @trace_operation("替换资源包", detail=lambda self, context: dict(selected_objects=len(context.selected_objects)))
     def execute(self, context: bpy.types.Context):
 
-        push_log('[unknown] 替换资源包', 'INFO')
+        info_log("准备替换资源包", "替换资源包")
         addon_prefs = context.preferences.addons[__addon_name__].preferences
         
         bpy.ops.crafter.reload_all()
         bpy.ops.crafter.reload_resources()
         if not (-1 < addon_prefs.Resources_Plans_List_index and addon_prefs.Resources_Plans_List_index < len(addon_prefs.Resources_Plans_List)):
+            warn_log('未选择有效资源包方案', '替换资源包', index=addon_prefs.Resources_Plans_List_index)
             return {'CANCELLED'}
         bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
         plan = addon_prefs.Resources_Plans_List[addon_prefs.Resources_Plans_List_index]
         dir_resourcepacks = os.path.join(dir_resourcepacks_plans, plan.name)
+        info_log("资源包方案", "替换资源包", plan=plan.name, directory=dir_resourcepacks, vanilla=plan.is_Vanilla)
+        stats = dict(materials=0, replaced=0, unmatched=0, scanned_files=0)
         crafter_json = []
         if not plan.is_Vanilla:
             dir_crafter_json = os.path.join(dir_resourcepacks, "crafter.json")
@@ -46,8 +50,10 @@ class VIEW3D_OT_CrafterReplaceResources(bpy.types.Operator):
                 try:
                     unzip(dir_resourcepack + ".zip", dir_resourcepack)
                 except Exception as e:
-                    print(e)
+                    log_exception("资源包解压失败", "替换资源包", archive=dir_resourcepack + ".zip", destination=dir_resourcepack)
             dir_assets = os.path.join(dir_resourcepack, "assets")
+            if not os.path.isdir(dir_assets):
+                warn_log("资源包缺少 assets 目录，扫描结果将为空", "替换资源包", path=dir_assets)
             files_list = []
             for root, dirs, files in os.walk(dir_assets):
                 for file in files:
@@ -55,6 +61,8 @@ class VIEW3D_OT_CrafterReplaceResources(bpy.types.Operator):
                         file_path = os.path.join(root, file)
                         files_list.append((file, file_path))
             images.append(files_list)
+            stats["scanned_files"] += len(files_list)
+            debug_log("资源包扫描完成", "替换资源包", directory=dir_assets, count=len(files_list))
         is_Vanilla = False
         if len(crafter_json) == 0:
             is_Vanilla = True
@@ -65,7 +73,9 @@ class VIEW3D_OT_CrafterReplaceResources(bpy.types.Operator):
                 if addon_prefs.Add_Crafter_time_On_Import:
                     add_Crafter_time(obj=obj)
         for name_material in context.scene.Crafter_mcmts:
+            debug_log("处理资源包材质", "替换资源包", material=name_material.name)
             material = bpy.data.materials[name_material.name]
+            stats["materials"] += 1
             node_tree_material = material.node_tree
             nodes = node_tree_material.nodes
             links = node_tree_material.links
@@ -97,9 +107,14 @@ class VIEW3D_OT_CrafterReplaceResources(bpy.types.Operator):
                                     while j < len(images[i]) and not found_texture:
                                         if name_image == images[i][j][0]:
                                             node.image = bpy.data.images.load(images[i][j][1])
+                                            stats["replaced"] += 1
+                                            debug_log("替换贴图", "替换资源包", material=material.name, image=name_image, path=images[i][j][1])
                                             found_texture = True
                                         j += 1
                                     i += 1
+                                if not found_texture:
+                                    stats["unmatched"] += 1
+                                    debug_log("没有匹配贴图，保留原图", "替换资源包", material=material.name, image=name_image)
                             base_texture_nodes.append(node)
                 elif node.type == 'GROUP':
                     if node.node_tree != None:
@@ -111,8 +126,8 @@ class VIEW3D_OT_CrafterReplaceResources(bpy.types.Operator):
             for node in nodes_wait_remove:
                 try:
                     nodes.remove(node)
-                except:
-                    pass
+                except Exception:
+                    log_exception("清理旧贴图节点失败", "替换资源包", material=material.name)
             if is_materialed and (not is_Vanilla):
                 # 逐层重建 PBR/法向：基础层接基础 CI/Parser；overlay 帧内的层重建后
                 # 接回帧内的 overlay Parser/CI（Alpha 不接），避免换包后断链。
@@ -133,6 +148,7 @@ class VIEW3D_OT_CrafterReplaceResources(bpy.types.Operator):
             if obj.type == "MESH":
                 add_to_crafter_mcmts_collection(object=obj,context=context)
 
+        info_log("资源包替换统计", "替换资源包", **stats)
         return {'FINISHED'}
 
 # ==================== UI切换至替换资源包 ====================

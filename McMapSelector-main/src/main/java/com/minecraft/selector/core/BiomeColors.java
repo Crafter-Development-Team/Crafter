@@ -17,10 +17,14 @@ final class BiomeColors {
         Enumeration<? extends ZipEntry> entries=zip.entries();ObjectMapper json=new ObjectMapper();
         while(entries.hasMoreElements()) {
             ZipEntry e=entries.nextElement();String n=e.getName();
-            if(n.matches("data/[^/]+/worldgen/biome/.+\\.json")) {
-                String[] parts=n.split("/",5);try(InputStream in=zip.getInputStream(e)) {definitions.put(parts[1]+":"+parts[4].substring(0,parts[4].length()-5),json.readTree(in));}
-            } else if(n.equals("assets/minecraft/textures/colormap/grass.png")||n.equals("assets/minecraft/textures/colormap/foliage.png")) {
-                try(InputStream in=zip.getInputStream(e)) {BufferedImage image=ImageIO.read(in);if(n.endsWith("/grass.png")) grass=image;else foliage=image;}
+            try {
+                if(n.matches("data/[^/]+/worldgen/biome/.+\\.json")) {
+                    String[] parts=n.split("/",5);try(InputStream in=zip.getInputStream(e)) {definitions.put(parts[1]+":"+parts[4].substring(0,parts[4].length()-5),json.readTree(in));}
+                } else if(n.equals("assets/minecraft/textures/colormap/grass.png")||n.equals("assets/minecraft/textures/colormap/foliage.png")) {
+                    try(InputStream in=zip.getInputStream(e)) {BufferedImage image=ImageIO.read(in);if(n.endsWith("/grass.png")) grass=image;else foliage=image;}
+                }
+            } catch(IOException | RuntimeException error) {
+                throw new IOException("Cannot decode biome resource: archive="+zip.getName()+" entry="+n,error);
             }
         }
     }

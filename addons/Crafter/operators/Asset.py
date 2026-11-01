@@ -48,17 +48,21 @@ class VIEW3D_OT_CrafterBuildAssetLibrary(bpy.types.Operator):
     def poll(cls, context: bpy.types.Context):
         return True
 
+    @trace_operation("构建资产库")
     def execute(self, context: bpy.types.Context):
 
-        push_log('[unknown] 构建资产库', 'INFO')
+        info_log("准备构建资产库", "构建资产库")
         addon_prefs = context.preferences.addons[__addon_name__].preferences
         libraries = bpy.context.preferences.filepaths.asset_libraries
 
         for lib in libraries:
             if lib.name == name_library:
+                info_log("资产库已存在，跳过注册", "构建资产库", library=lib.name, path=lib.path)
                 return {'FINISHED'}
         dir_asset = os.path.normpath(addon_prefs.Asset_Path)
+        info_log("资产库目录", "构建资产库", source=dir_default_Asset, destination=dir_asset)
         if not os.path.exists(dir_asset):
+            warn_log("资产库路径不存在", "构建资产库", path=dir_asset)
             self.report({'ERROR'}, "Path does not exist")
             return {'CANCELLED'}
         lib_crafter = libraries.new(name=name_library, directory=dir_asset)
@@ -67,13 +71,15 @@ class VIEW3D_OT_CrafterBuildAssetLibrary(bpy.types.Operator):
         for file in os.listdir(dir_default_Asset):
             if os.path.isfile(os.path.join(dir_default_Asset, file)):
                 if file.endswith(".blend"):
+                    debug_log("复制资产文件", "构建资产库", file=file, destination=dir_asset)
                     shutil.copy(os.path.join(dir_default_Asset, file), os.path.join(dir_asset, file))
         
         if len(list_asset_files) == 0:
             for file in os.listdir(dir_default_Asset):
                 if os.path.isfile(os.path.join(dir_default_Asset, file)):
                     if file.endswith(".txt"):
-                        shutil.copy(os.path.join(dir_default_Asset, file), os.path.join(dir_asset, file))
+                        debug_log("复制资产文件", "构建资产库", file=file, destination=dir_asset)
+                    shutil.copy(os.path.join(dir_default_Asset, file), os.path.join(dir_asset, file))
 
 
         return {'FINISHED'}

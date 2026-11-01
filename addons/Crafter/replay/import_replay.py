@@ -10,6 +10,7 @@ from .mcpr import open_mcpr, read_meta, read_timelines_raw, iter_play_packets
 from .particles import ParticleStore
 from .timelines import parse_timelines
 from .anvil import write_level_dat
+from ..diagnostics import trace_operation, operation_scope, log_event
 
 
 def is_mcpr_path(path: str) -> bool:
@@ -17,6 +18,7 @@ def is_mcpr_path(path: str) -> bool:
     return p.lower().endswith(".mcpr") and os.path.isfile(p)
 
 
+@trace_operation("解析回放", detail=lambda mcpr_path, dest_dir=None: dict(path=str(mcpr_path), destination=dest_dir))
 def materialize_world_from_mcpr(mcpr_path: str, dest_dir: str | None = None) -> tuple[str, dict]:
     """Parse .mcpr and write a temp Anvil world. Returns (world_dir, info).
 
@@ -36,17 +38,20 @@ def materialize_world_from_mcpr(mcpr_path: str, dest_dir: str | None = None) -> 
             "protocol": meta.protocol,
             "duration_ms": meta.duration_ms,
         }
+        log_event("回放版本元数据", "INFO", "解析回放", **info["meta"])
         raw_tl = read_timelines_raw(zf)
         if raw_tl:
             info["timelines"] = parse_timelines(raw_tl)
         from .entities import EntityStore
         ents = EntityStore()
         parts = ParticleStore()
-        for pkt in iter_play_packets(zf):
-            info["packets"] += 1
-            store.handle_packet(pkt.packet_id, pkt.payload, pkt.timestamp_ms)
-            ents.handle(pkt.packet_id, pkt.payload, pkt.timestamp_ms)
-            parts.handle(pkt.packet_id, pkt.payload, pkt.timestamp_ms)
+        with operation_scope("读取回放数据包") as packet_stats:
+            for pkt in iter_play_packets(zf):
+                info["packets"] += 1
+                store.handle_packet(pkt.packet_id, pkt.payload, pkt.timestamp_ms)
+                ents.handle(pkt.packet_id, pkt.payload, pkt.timestamp_ms)
+                parts.handle(pkt.packet_id, pkt.payload, pkt.timestamp_ms)
+            packet_stats["packets"] = info["packets"]
         info["particles"] = parts
         info["entities"] = ents
         info["block_segments"] = store.block_segments()
@@ -75,10 +80,13 @@ def materialize_world_from_mcpr(mcpr_path: str, dest_dir: str | None = None) -> 
                 break
 
     if store.map_chunks:
-        n = store.write_anvil_world(Path(dest_dir))
+        with operation_scope("回放写入 Anvil 世界", destination=str(dest_dir)) as write_stats:
+            n = store.write_anvil_world(Path(dest_dir))
+            write_stats["chunks"] = n
         info["chunks"] = n
         info["map_chunks"] = store.map_chunks
     else:
+        log_event("未解码到区块，尝试备用世界", "WARN", "解析回放", packets=info["packets"], protocol=info["meta"]["protocol"])
         write_level_dat(Path(dest_dir), data_version=data_version, name="replay_import")
         fallback = os.environ.get("CRAFTER_REPLAY_FALLBACK_WORLD")
         if not fallback:
@@ -91,21 +99,29 @@ def materialize_world_from_mcpr(mcpr_path: str, dest_dir: str | None = None) -> 
                 dst_region = Path(dest_dir) / "region"
                 if dst_region.exists():
                     shutil.rmtree(dst_region)
-                shutil.copytree(src_region, dst_region)
+                with operation_scope("复制备用世界", source_world=str(fallback), destination=str(dst_region)):
+                    shutil.copytree(src_region, dst_region)
                 info["chunks"] = len(list(dst_region.glob("*.mca")))
                 info["fallback_world"] = fallback
+    log_event("回放解析统计", "INFO", "解析回放", packets=info["packets"], chunks=info["chunks"],
+              timeline_count=len(info["timelines"]), destination=str(dest_dir), fallback=info.get("fallback_world"))
+    if not info["chunks"]:
+        log_event("回放没有生成区块数据", "WARN", "解析回放", path=mcpr_path)
     return dest_dir, info
 
 
+@trace_operation("回放相机动画")
 def apply_replay_camera(info: dict, *, fps: int = 30, fov_degrees: float = 70.0):
     """After world import, apply first timeline's camera path in the current Blender scene."""
     tls = info.get("timelines") or []
     if not tls:
+        log_event("无相机时间线，跳过相机动画", "DEBUG", "回放相机动画")
         return None
     from .camera_blender import apply_camera_timeline
     return apply_camera_timeline(tls[0], fps=fps, fov_degrees=fov_degrees)
 
 
+@trace_operation("回放动态方块拆分")
 def write_time_varying_worlds(info: dict, base_dir: str, box=None, min_t: int = 0, quantum_ms: int = 500,
                               quantize=None):
     """Split the reconstructed world into a static base + small per-interval block worlds.
@@ -133,9 +149,12 @@ def write_time_varying_worlds(info: dict, base_dir: str, box=None, min_t: int = 
     final_backup = {p: store.get_block(*p) for p in segs}
     for p in segs:
         store.set_block(*p, 0)
-    store.write_anvil_world(Path(base))
-    for p, st in final_backup.items():
-        store.set_block(*p, st)
+    try:
+        with operation_scope("写入静态回放快照", destination=base, changed_positions=len(segs)):
+            store.write_anvil_world(Path(base))
+    finally:
+        for p, st in final_backup.items():
+            store.set_block(*p, st)
     groups: dict = {}
     q = quantize or (lambda t: None if t is None else (0 if t == 0 else max(1, int(round(t / quantum_ms)) * quantum_ms)))
     for p, v in segs.items():
@@ -156,10 +175,12 @@ def write_time_varying_worlds(info: dict, base_dir: str, box=None, min_t: int = 
                                      for i in range(NUM_SECTIONS)]
             mini.set_block(x, y, z, st)
         d = os.path.join(base_dir, f"blocks_{gi:02d}")
-        mini.write_anvil_world(Path(d))
+        with operation_scope("写入动态方块分组", level="DEBUG", index=gi, destination=d, blocks=len(blocks), t_from=t0, t_to=t1):
+            mini.write_anvil_world(Path(d))
         xs = [b[0][0] for b in blocks]; ys = [b[0][1] for b in blocks]; zs = [b[0][2] for b in blocks]
         out.append({"world": d, "t_from": t0, "t_to": t1, "count": len(blocks),
                     "box": (min(xs), min(ys), min(zs), max(xs), max(ys), max(zs))})
+    log_event("动态方块拆分统计", "INFO", "回放动态方块拆分", changed_positions=len(segs), groups=len(out), box=box, quantum_ms=quantum_ms)
     return base, out
 
 
@@ -187,6 +208,7 @@ def frame_quantizer(info: dict, fps: int = 30, max_groups: int = 96):
     return q if len(keys) <= max_groups else None
 
 
+@trace_operation("准备回放世界", detail=lambda mcpr_path, box, **kwargs: dict(path=str(mcpr_path), box=box, fps=kwargs.get("fps", 30)))
 def prepare_replay_world(mcpr_path: str, box, work_root: str | None = None, focus=None, focus_radius: float = 0,
                          fps: int = 30, game_roots: list[str] | None = None):
     """Full replay preparation used by Crafter: parse, split static/time-varying, return info.
@@ -228,4 +250,5 @@ def prepare_replay_world(mcpr_path: str, box, work_root: str | None = None, focu
     info["block_groups"] = groups
     info["box"] = box
     info["work_root"] = work_root
+    log_event("回放准备完成", "INFO", "准备回放世界", world=base, groups=len(groups), jar=info.get("suggest_jar"), work_root=work_root)
     return base, info

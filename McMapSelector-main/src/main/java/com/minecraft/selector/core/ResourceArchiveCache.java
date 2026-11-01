@@ -125,7 +125,7 @@ final class ResourceArchiveCache {
                 for(String name:index.entries) {
                     if(Thread.currentThread().isInterrupted()) throw new IOException("Resource loading interrupted");
                     ZipEntry entry=zip.getEntry(name);
-                    if(entry==null) throw new IOException("Resource changed: "+index.path);
+                    if(entry==null) throw new IOException("Resource changed: archive="+index.path+" entry="+name);
                     try(InputStream in=zip.getInputStream(entry)) {
                         if(name.endsWith(".png")) {
                             ByteArrayOutputStream bytes=new ByteArrayOutputStream();byte[] buffer=new byte[8192];int n;
@@ -143,6 +143,8 @@ final class ResourceArchiveCache {
                             });
                             if(color!=null) result.textures.put(name,color);
                         } else result.json.put(name,JSON.readTree(in));
+                    } catch(IOException | RuntimeException error) {
+                        throw new IOException("Cannot decode resource entry: archive="+index.path+" entry="+name,error);
                     }
                 }
             }

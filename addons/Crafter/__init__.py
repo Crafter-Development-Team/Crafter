@@ -80,7 +80,10 @@ dir_classification_basis_default = os.path.join(dir_classification_basis, "defau
 dir_blend_append = os.path.join(dir_defaults,"append.blend")
 dir_no_lod_blocks = os.path.join(dir_cafter_data, "no_lod_blocks")
 # ========== 注册 ==========
+from .diagnostics import trace_operation, log_environment, log_event, log_exception
+@trace_operation("插件注册")
 def register():
+    log_environment(bpy, bl_info["version"], __file__)
     # Register classes
     auto_load.init()
     auto_load.register()
@@ -97,6 +100,7 @@ def register():
     except Exception:
         import traceback
         traceback.print_exc()
+        log_exception("辅助注册/卸载失败")
         print("[Crafter] 时间驱动/迁移注册失败（已跳过，不影响其他功能）")
     # Internationalization
     load_dictionary(dictionary)
@@ -131,6 +135,7 @@ def register():
     print("{} addon is installed.".format(__addon_name__))
 
 # ========== 注销 ==========
+@trace_operation("插件卸载")
 def unregister():
     # 注销图标预览资源，但先检查它们是否已经被正确加载
         # if hasattr(...) | 检查该图标对象是否具有 _uuid 属性（表示它曾被初始化） 
@@ -155,6 +160,7 @@ def unregister():
     except Exception:
         import traceback
         traceback.print_exc()
+        log_exception("辅助注册/卸载失败")
     # unRegister classes
     auto_load.unregister()
     remove_properties(_addon_properties)
