@@ -361,8 +361,9 @@ class VIEW3D_UL_CrafterResourcesInfo(bpy.types.UIList):# 资源包 预设详情 
                 item_name += item.name[i]
             i+=1
         name_icon = "plan_resource_icon_"+ str(index)
-        icon = icons_plan_resource[name_icon]
-        layout.label(text=item_name,icon_value=icon.icon_id)
+        preview = icons_plan_resource.get(name_icon)
+        icon_id = preview.icon_id if preview is not None else 0
+        layout.label(text=item_name,icon_value=icon_id)
 
 
 

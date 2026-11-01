@@ -132,6 +132,16 @@ def register():
     # ========== 添加至原有ui ==========
     bpy.types.VIEW3D_MT_image_add.append(ui_item)
 
+    # 偏好里保存了资源包列表，但预览图标集合不持久化；启动后补一次重载，
+    # 避免 UIList 绘制时因为图标缺失报 KeyError（Blender 5.1 等版本重启后尤其明显）。
+    def _reload_resource_icons_once():
+        try:
+            bpy.ops.crafter.reload_resources()
+        except Exception:
+            pass
+        return None
+    bpy.app.timers.register(_reload_resource_icons_once, first_interval=0.5)
+
     print("{} addon is installed.".format(__addon_name__))
 
 # ========== 注销 ==========

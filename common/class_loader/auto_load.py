@@ -35,13 +35,24 @@ def init():
 
 def register():
     for cls in ordered_classes:
-        bpy.utils.register_class(cls)
+        try:
+            bpy.utils.register_class(cls)
+        except Exception as error:
+            # 单个类注册失败不能拖垮整个插件：打印出类名和原因，继续注册其余类。
+            import traceback
+            print(f"[Crafter] 注册类失败 {getattr(cls, '__name__', cls)}: {error}")
+            traceback.print_exc()
 
     for module in modules:
         if module.__name__ == __name__:
             continue
         if hasattr(module, "register"):
-            module.register()
+            try:
+                module.register()
+            except Exception as error:
+                import traceback
+                print(f"[Crafter] 模块注册失败 {module.__name__}: {error}")
+                traceback.print_exc()
 
     for cls in frame_work_classes:
         register_framework_class(cls)

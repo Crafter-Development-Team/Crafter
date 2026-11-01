@@ -203,8 +203,7 @@ def operation_scope(name, level="INFO", **fields):
 def trace_operation(name, detail=None, level="INFO"):
     """Time success/cancellation/failure without touching operator annotations."""
     def decorate(function):
-        @wraps(function)
-        def traced(*args, **kwargs):
+        def run(args, kwargs):
             fields = {"source": f"{function.__code__.co_filename}:{function.__code__.co_firstlineno}",
                       "function": function.__qualname__}
             # Resolve Blender context only on the caller's thread.
@@ -218,6 +217,18 @@ def trace_operation(name, detail=None, level="INFO"):
                 if isinstance(result, set) and "CANCELLED" in result:
                     outcome["status"] = "cancelled"
                 return result
+
+        # Blender 5.x 注册 operator 时会直接读 execute 的 __code__.co_argcount，
+        # functools.wraps 的 (*args, **kwargs) 会被当成 0 参数而报错；这里给
+        # operator 的 execute 生成显式的 (self, context) 包装，其他函数保持原样。
+        if function.__name__ == "execute" and function.__code__.co_argcount >= 2:
+            @wraps(function)
+            def traced(self, context, *args, **kwargs):
+                return run((self, context) + args, kwargs)
+        else:
+            @wraps(function)
+            def traced(*args, **kwargs):
+                return run(args, kwargs)
         return traced
     return decorate
 
