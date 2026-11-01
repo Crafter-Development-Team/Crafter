@@ -45,7 +45,7 @@ public class MinecraftResourceExtractor {
                         return new AbstractMap.SimpleImmutableEntry<>(index,decoded);
                     } catch(Exception error) {
                         throw new IOException("Resource archive failed: index="+index+" path="+path+
-                            " elapsed_ms="+(System.nanoTime()-archiveStart)/1_000_000,error);
+                            " elapsed_ms="+(System.nanoTime()-archiveStart)/1_000_000+": "+error.getMessage(),error);
                     }
                 });
             }
