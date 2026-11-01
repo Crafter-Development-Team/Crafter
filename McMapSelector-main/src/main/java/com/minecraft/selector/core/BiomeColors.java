@@ -14,7 +14,8 @@ final class BiomeColors {
     private BufferedImage grass,foliage;
     void merge(BiomeColors other) {definitions.putAll(other.definitions);if(other.grass!=null) grass=other.grass;if(other.foliage!=null) foliage=other.foliage;}
     void read(ZipFile zip) throws IOException {
-        Enumeration<? extends ZipEntry> entries=zip.entries();ObjectMapper json=new ObjectMapper();
+        Enumeration<? extends ZipEntry> entries=zip.entries();ObjectMapper json=new ObjectMapper()
+            .enable(com.fasterxml.jackson.core.JsonParser.Feature.ALLOW_COMMENTS);
         while(entries.hasMoreElements()) {
             ZipEntry e=entries.nextElement();String n=e.getName();
             try {
@@ -24,7 +25,7 @@ final class BiomeColors {
                     try(InputStream in=zip.getInputStream(e)) {BufferedImage image=ImageIO.read(in);if(n.endsWith("/grass.png")) grass=image;else foliage=image;}
                 }
             } catch(IOException | RuntimeException error) {
-                throw new IOException("Cannot decode biome resource: archive="+zip.getName()+" entry="+n,error);
+                throw new IOException("Cannot decode biome resource: archive="+zip.getName()+" entry="+n+": "+error.getMessage(),error);
             }
         }
     }
