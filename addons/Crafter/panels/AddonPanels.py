@@ -261,3 +261,177 @@ class VIEW3D_PT_CrafterOthers(bpy.types.Panel):
 class VIEW3D_UL_CrafterDimensionsList(bpy.types.UIList):# 历史世界 存档 列表
      def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
         layout.label(text=item.name)
+
+
+# ==================== 材质节点：切换 CI 节点 ====================
+
+def _selected_ci_node(context):
+    '''从当前选中的节点里找 CI 组节点（切换后活动节点可能是基础色贴图，仍靠选中状态找到 CI）。'''
+    for node in getattr(context, "selected_nodes", None) or []:
+        if (node.type == "GROUP" and node.node_tree is not None and
+                node.node_tree.name.startswith("CI-")):
+            return node
+    return None
+
+
+def _ci_group_items(self, context):
+    '''枚举当前文件里可切换的 CI- 组（排除当前节点正在用的那个）。'''
+    node = _selected_ci_node(context)
+    current = node.node_tree.name if node is not None else None
+    items = []
+    for group in sorted(bpy.data.node_groups, key=lambda g: g.name):
+        if group.name.startswith("CI-") and group.name != current:
+            items.append((group.name, group.name, ""))
+    return items or [("NONE", "没有其他 CI 组", "")]
+
+
+class VIEW3D_OT_CrafterSwitchCINode(bpy.types.Operator):
+    bl_label = "Switch CI Node"
+    bl_idname = "crafter.switch_ci_node"
+    bl_description = "把选中的 CI 节点换成另一个 CI 组，并按接口名重连 PBR 解析器等上下游节点"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    target_group: EnumProperty(name="CI Group", items=_ci_group_items)  # type: ignore
+
+    @classmethod
+    def poll(cls, context):
+        return _selected_ci_node(context) is not None
+
+    def execute(self, context):
+        node = _selected_ci_node(context)
+        if node is None or node.node_tree is None:
+            return {'CANCELLED'}
+        target = bpy.data.node_groups.get(self.target_group)
+        if target is None or not target.name.startswith("CI-"):
+            self.report({'ERROR'}, "目标 CI 组不存在")
+            return {'CANCELLED'}
+        tree = node.id_data
+        if tree is None or getattr(tree, "is_editmode", False):
+            return {'CANCELLED'}
+        material = getattr(tree, "id_data", None)
+
+        # 材质输出节点：加载材质时建好的 EEVEE/Cycles 输出，输出侧直接复用 link_CI_output。
+        node_output_EEVEE = None
+        node_output_Cycles = None
+        for other in tree.nodes:
+            if other.type == "OUTPUT_MATERIAL":
+                if other.target == "EEVEE":
+                    node_output_EEVEE = other
+                elif other.target == "CYCLES":
+                    node_output_Cycles = other
+
+        # 记录旧 CI 的输入连接（按 socket 名），换节点后按名字重连。
+        input_links = {}
+        for socket in node.inputs:
+            if socket.is_linked:
+                link = socket.links[0]
+                input_links[socket.name] = (link.from_node, link.from_socket)
+
+        # 记录旧布局：link_CI_output 会为了插入剔除组把 CI 及左侧节点左移，切换后要还原。
+        positions = {other.name: (other.location.x, other.location.y) for other in tree.nodes}
+
+        new_node = tree.nodes.new("ShaderNodeGroup")
+        new_node.node_tree = target
+        new_node.location = node.location
+        new_node.width = node.width
+        new_node.height = node.height
+        new_node.label = node.label
+        new_node.name = target.name
+
+        # 输出：和加载材质一样走 link_CI_output（EEVEE/Cycles 全部接口 + 剔除组插入）。
+        if node_output_EEVEE is not None and node_output_Cycles is not None:
+            link_CI_output(group_CI=new_node, node_output_EEVEE=node_output_EEVEE,
+                           node_output_Cycles=node_output_Cycles, links=tree.links,
+                           material=material)
+
+        # 输入：按 socket 名字把 PBR 解析器/贴图/群系颜色接回新 CI。
+        for name, (from_node, from_socket) in input_links.items():
+            if name in new_node.inputs and from_node.name in tree.nodes:
+                tree.links.new(from_socket, new_node.inputs[name])
+
+        # 再按“距离最近的节点 + 同名接口”补一轮：纹理连 Color/Alpha，PBR/biome 按输出名同名连。
+        def _nearest(predicate):
+            found = []
+            for other in tree.nodes:
+                if other == new_node or other == node or not predicate(other):
+                    continue
+                found.append(((other.location - node.location).length, other))
+            found.sort(key=lambda item: item[0])
+            return [item[1] for item in found]
+
+        tex_nodes = _nearest(lambda n: n.type == "TEX_IMAGE")
+        tex_roles = texture_node_roles(tex_nodes)
+        base_tex = next((n for n in tex_nodes if tex_roles.get(n) == TEX_ROLE_BASE), None)
+        if base_tex is not None:
+            if "Color" in base_tex.outputs:
+                for in_name in ("Base Color", "基础色"):
+                    if in_name in new_node.inputs:
+                        tree.links.new(base_tex.outputs["Color"], new_node.inputs[in_name])
+                        break
+            if "Alpha" in base_tex.outputs and "Alpha" in new_node.inputs:
+                tree.links.new(base_tex.outputs["Alpha"], new_node.inputs["Alpha"])
+
+        for prefix in ("C-PBR_Parser", "Crafter-biomeTex"):
+            for source in _nearest(
+                    lambda n, p=prefix: n.type == "GROUP" and n.node_tree is not None and
+                    n.node_tree.name.startswith(p))[:1]:
+                for output in source.outputs:
+                    if output.name in new_node.inputs:
+                        tree.links.new(output, new_node.inputs[output.name])
+
+        # 和加载材质一样：按 tint 元数据补群系颜色，再按新 CI 的接口同步剔除。
+        if material is not None and getattr(material, "node_tree", None) is tree:
+            tint = get_material_tint(material)
+            try:
+                # tint 为 None 也要调用：apply_tint 会先把 CI 暴露的命名群系输入接上 biomeTex。
+                apply_tint(new_node, tree.nodes, tree.links, tint)
+            except Exception as ex:
+                warn_log(f"apply_tint 失败 [{material.name}]: {ex}")
+            sync_CI_culling(material)
+
+        # 还原旧布局：新 CI 回到旧 CI 的位置，剔除组和左侧节点回到原坐标。
+        for other in tree.nodes:
+            if other.name in positions:
+                other.location = positions[other.name]
+        new_node.location = (node.location.x, node.location.y)
+        # 首次切换时旧树里没有剔除组，按恢复后的 CI/输出位置重新摆一次，避免残留左移坐标。
+        if node_output_Cycles is not None:
+            for other in tree.nodes:
+                if other.get(CULL_GROUP_PROP):
+                    other.location = ((new_node.location.x + node_output_Cycles.location.x) * 0.5,
+                                      node_output_Cycles.location.y + 160.0)
+
+        tree.nodes.remove(node)
+        for other in tree.nodes:
+            other.select = False
+        new_node.select = True
+        # 和加载材质一样：把基础色贴图设为活动节点，实体模式预览才正常。
+        if base_tex is not None:
+            tree.nodes.active = base_tex
+        else:
+            tree.nodes.active = new_node
+        if context.area is not None:
+            context.area.tag_redraw()
+        return {'FINISHED'}
+
+
+class VIEW3D_PT_CrafterCINode(bpy.types.Panel):
+    bl_label = "CI Node"
+    bl_space_type = "NODE_EDITOR"
+    bl_region_type = "UI"
+    bl_category = "Crafter"
+
+    @classmethod
+    def poll(cls, context):
+        space = context.space_data
+        return (space is not None and space.type == "NODE_EDITOR" and
+                space.tree_type == "ShaderNodeTree")
+
+    def draw(self, context):
+        layout = self.layout
+        node = _selected_ci_node(context)
+        if node is None:
+            layout.label(text="选中一个 CI 节点", icon="INFO")
+            return
+        layout.label(text="当前: " + node.node_tree.name)
+        layout.operator_menu_enum("crafter.switch_ci_node", "target_group", text="切换到…", icon="NODETREE")
