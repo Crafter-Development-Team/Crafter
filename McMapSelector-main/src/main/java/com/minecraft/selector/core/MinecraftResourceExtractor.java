@@ -20,31 +20,59 @@ public class MinecraftResourceExtractor {
     public interface ProgressListener {void onProgress(int completed,int total,String message);}
     /** Decode independently; merge in original override order, never completion order. */
     public void addArchives(List<String> paths,ProgressListener progress) throws IOException {
+        final long started=System.nanoTime();
+        final com.minecraft.selector.utils.LogManager logs=com.minecraft.selector.utils.LogManager.getInstance();
         if(paths.isEmpty()) {progress.onProgress(0,0,"No resource archives found");return;}
-        java.util.concurrent.ExecutorService workers=java.util.concurrent.Executors.newFixedThreadPool(
-            Math.min(paths.size(),Math.min(4,Math.max(1,Runtime.getRuntime().availableProcessors()))));
+        int workerCount=Math.min(paths.size(),Math.min(4,Math.max(1,Runtime.getRuntime().availableProcessors())));
+        logs.info("Resource extraction started: archives="+paths.size()+" workers="+workerCount,"Resources");
+        java.util.concurrent.ExecutorService workers=java.util.concurrent.Executors.newFixedThreadPool(workerCount);
         java.util.concurrent.CompletionService<Map.Entry<Integer,ResourceArchiveCache.Assets>> done=
             new java.util.concurrent.ExecutorCompletionService<>(workers);
         ResourceArchiveCache.Assets[] ordered=new ResourceArchiveCache.Assets[paths.size()];
+        int extracted=0;
         try {
             for(int i=0;i<paths.size();i++) {
                 final int index=i;
-                done.submit(() -> new AbstractMap.SimpleImmutableEntry<>(index,
-                    ResourceArchiveCache.assets(ResourceArchiveCache.index(paths.get(index)))));
+                final String path=paths.get(index);
+                done.submit(() -> {
+                    long archiveStart=System.nanoTime();
+                    logs.debug("Resource archive started: index="+index+" path="+path,"Resources");
+                    try {
+                        ResourceArchiveCache.Assets decoded=ResourceArchiveCache.assets(ResourceArchiveCache.index(path));
+                        logs.debug("Resource archive ready: index="+index+" path="+path+
+                            " textures="+decoded.textures.size()+" json="+decoded.json.size()+
+                            " elapsed_ms="+(System.nanoTime()-archiveStart)/1_000_000,"Resources");
+                        return new AbstractMap.SimpleImmutableEntry<>(index,decoded);
+                    } catch(Exception error) {
+                        throw new IOException("Resource archive failed: index="+index+" path="+path+
+                            " elapsed_ms="+(System.nanoTime()-archiveStart)/1_000_000,error);
+                    }
+                });
             }
             for(int i=1;i<=paths.size();i++) {
                 Map.Entry<Integer,ResourceArchiveCache.Assets> result=done.take().get();
-                ordered[result.getKey()]=result.getValue();
+                ordered[result.getKey()]=result.getValue();extracted=i;
                 String message="Extracted resources "+i+"/"+paths.size()+": "+new File(paths.get(result.getKey())).getName();
-                com.minecraft.selector.utils.LogManager.getInstance().info(message,"Resources");
+                logs.info(message,"Resources");
                 progress.onProgress(i,paths.size(),message);
             }
+            // Publish only after all workers succeed, preserving original override order.
             for(ResourceArchiveCache.Assets archive:ordered) assets.merge(archive);
             completed=true;
-        } catch(InterruptedException e) {Thread.currentThread().interrupt();throw new IOException("Resource loading interrupted",e);}
-        catch(java.util.concurrent.ExecutionException e) {throw new IOException("Resource extraction failed",e.getCause());}
-        finally {workers.shutdownNow();}
+            logs.info("Resource extraction completed: archives="+extracted+" elapsed_ms="+(System.nanoTime()-started)/1_000_000,"Resources");
+        } catch(InterruptedException e) {
+            Thread.currentThread().interrupt();
+            logs.warn("Resource extraction interrupted: completed="+extracted+"/"+paths.size(),"Resources");
+            throw new IOException("Resource loading interrupted",e);
+        } catch(java.util.concurrent.ExecutionException e) {
+            Throwable cause=e.getCause();
+            String message="Resource extraction failed: completed="+extracted+"/"+paths.size()+
+                " elapsed_ms="+(System.nanoTime()-started)/1_000_000+"; "+cause;
+            logs.error(message,"Resources",cause);
+            throw new IOException(message,cause);
+        } finally {workers.shutdownNow();}
     }
+
     public boolean extractColorsFromMinecraftJar(String path) {
         try { addArchive(path); return true; }
         catch(IOException e) { System.err.println("Cannot load resources: " + path + ": " + e.getMessage()); return false; }

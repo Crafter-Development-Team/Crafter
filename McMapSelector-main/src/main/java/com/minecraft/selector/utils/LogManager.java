@@ -1,7 +1,11 @@
 package com.minecraft.selector.utils;
 
 import javax.swing.*;
-import java.io.FileWriter;
+import java.io.Writer;
+import java.io.BufferedWriter;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.text.SimpleDateFormat;
@@ -33,7 +37,9 @@ public class LogManager {
 
     private final Deque<LogEntry> logEntries = new ArrayDeque<>();
     private final List<LogListener> listeners = new ArrayList<>();
-    private final SimpleDateFormat dateFormat;
+    private static final int MAX_EXCEPTION_CHARS = 32768;
+    private static final int NOTIFICATION_BATCH_SIZE = 256;
+    private long droppedNotifications;
 
     /** 各级别条数，增量维护，避免 getLogStats() 全表扫描。 */
     private final int[] levelCounts = new int[LogLevel.values().length];
@@ -50,12 +56,14 @@ public class LogManager {
         private final LogLevel level;
         private final String message;
         private final String source;
+        private final String threadName;
 
         public LogEntry(LogLevel level, String message, String source) {
             this.timestamp = new Date();
             this.level = level;
             this.message = message;
             this.source = source;
+            this.threadName = Thread.currentThread().getName();
         }
 
         public Date getTimestamp() { return timestamp; }
@@ -66,8 +74,8 @@ public class LogManager {
         @Override
         public String toString() {
             SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS");
-            return String.format("[%s] [%s] [%s] %s",
-                sdf.format(timestamp), level, source, message);
+            return String.format("[%s] [%s] [%s] [thread=%s] %s",
+                sdf.format(timestamp), level, source, threadName, message);
         }
     }
 
@@ -100,7 +108,6 @@ public class LogManager {
     }
 
     private LogManager() {
-        this.dateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS");
         log(LogLevel.INFO, "日志管理器已初始化", "LogManager");
     }
 
@@ -120,6 +127,7 @@ public class LogManager {
     public void log(LogLevel level, String message, String source) {
         LogEntry entry = new LogEntry(level, message, source);
 
+        boolean schedule = false;
         synchronized (this) {
             logEntries.addLast(entry);
             levelCounts[level.ordinal()]++;
@@ -128,29 +136,32 @@ public class LogManager {
                 levelCounts[evicted.getLevel().ordinal()]--;
             }
             // 没有监听器时不必排队通知（例如纯 CLI 运行）。
-            if (!listeners.isEmpty()) pendingNotifications.addLast(entry);
+            if (!listeners.isEmpty()) {
+                pendingNotifications.addLast(entry);
+                while (pendingNotifications.size() > MAX_ENTRIES) {
+                    pendingNotifications.removeFirst();
+                    droppedNotifications++;
+                }
+                schedule = notificationScheduled.compareAndSet(false, true);
+            }
         }
 
         // 同时输出到控制台
         System.out.println(entry.toString());
 
         // 合并通知：无论这一瞬间来了多少条日志，只排一次 EDT 任务。
-        if (!listeners.isEmpty() && notificationScheduled.compareAndSet(false, true)) {
+        if (schedule) {
             SwingUtilities.invokeLater(this::drainNotifications);
         }
     }
 
-    /** 在 EDT 上把累积的待通知条目一次性发给所有监听器。 */
+    /** 分批通知监听器，每批最多 256 条，让 EDT 有机会处理输入/重绘。 */
     private void drainNotifications() {
-        LogEntry[] batch;
-        synchronized (this) {
-            batch = pendingNotifications.toArray(new LogEntry[0]);
-            pendingNotifications.clear();
-            notificationScheduled.set(false);
-        }
-        if (batch.length == 0) return;
+        List<LogEntry> batch = new ArrayList<>(NOTIFICATION_BATCH_SIZE);
         LogListener[] current;
         synchronized (this) {
+            for (int i = 0; i < NOTIFICATION_BATCH_SIZE && !pendingNotifications.isEmpty(); i++)
+                batch.add(pendingNotifications.removeFirst());
             current = listeners.toArray(new LogListener[0]);
         }
         for (LogEntry entry : batch) {
@@ -161,6 +172,10 @@ public class LogManager {
                     System.err.println("日志监听器出错: " + e.getMessage());
                 }
             }
+        }
+        synchronized (this) {
+            if (pendingNotifications.isEmpty()) notificationScheduled.set(false);
+            else SwingUtilities.invokeLater(this::drainNotifications);
         }
     }
 
@@ -196,12 +211,25 @@ public class LogManager {
      * 便捷方法：记录异常
      */
     public void error(String message, String source, Throwable throwable) {
-        StringBuilder sb = new StringBuilder(message);
-        if (throwable != null) {
-            sb.append(" - ").append(throwable.getClass().getSimpleName())
-              .append(": ").append(throwable.getMessage());
+        if (throwable == null) {
+            log(LogLevel.ERROR, message, source);
+            return;
         }
-        log(LogLevel.ERROR, sb.toString(), source);
+        // Keep causes/suppressed exceptions/locations, but bound retained payloads.
+        final StringBuilder details = new StringBuilder();
+        final boolean[] truncated = {false};
+        Writer bounded = new Writer() {
+            @Override public void write(char[] chars, int offset, int length) {
+                int keep = Math.min(length, MAX_EXCEPTION_CHARS - details.length());
+                if (keep > 0) details.append(chars, offset, keep);
+                if (keep < length) truncated[0] = true;
+            }
+            @Override public void flush() {}
+            @Override public void close() {}
+        };
+        throwable.printStackTrace(new PrintWriter(bounded));
+        if (truncated[0]) details.append("\n[exception details truncated at " + MAX_EXCEPTION_CHARS + " characters]");
+        log(LogLevel.ERROR, message + "\n" + details, source);
     }
 
     /**
@@ -231,6 +259,7 @@ public class LogManager {
         synchronized (this) {
             logEntries.clear();
             pendingNotifications.clear();
+            droppedNotifications = 0;
             java.util.Arrays.fill(levelCounts, 0);
         }
         log(LogLevel.INFO, "日志已清空", "LogManager");
@@ -240,18 +269,26 @@ public class LogManager {
      * 导出日志到文件
      */
     public void exportToFile(String filePath) throws IOException {
-        List<LogEntry> snapshot = getAllLogs();
-        try (PrintWriter writer = new PrintWriter(new FileWriter(filePath))) {
-            writer.println("# Minecraft Map Selector 日志文件");
-            writer.println("# 导出时间: " + dateFormat.format(new Date()));
-            writer.println("# 总条目数: " + snapshot.size());
-            writer.println();
-
-            for (LogEntry entry : snapshot) {
-                writer.println(entry.toString());
-            }
+        // BufferedWriter propagates write/flush/close failures; PrintWriter hides them.
+        try (BufferedWriter writer = Files.newBufferedWriter(Paths.get(filePath), StandardCharsets.UTF_8)) {
+            writeExport(writer);
         }
         log(LogLevel.INFO, "日志已导出到: " + filePath, "LogManager");
+    }
+
+    void writeExport(Writer writer) throws IOException {
+        List<LogEntry> snapshot;
+        long dropped;
+        synchronized (this) {
+            snapshot = new ArrayList<>(logEntries);
+            dropped = droppedNotifications;
+        }
+        writer.write("# Minecraft Map Selector 日志文件\n");
+        writer.write("# 导出时间: " + new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS").format(new Date()) + "\n");
+        writer.write("# 总条目数: " + snapshot.size() + "\n");
+        writer.write("# UI 通知丢弃数（队列超限）: " + dropped + "\n\n");
+        for (LogEntry entry : snapshot) writer.write(entry.toString() + "\n");
+        writer.flush();
     }
 
     /**

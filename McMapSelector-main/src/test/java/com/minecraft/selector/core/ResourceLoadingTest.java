@@ -89,4 +89,28 @@ class ResourceLoadingTest {
         extractor.addArchives(Collections.singletonList(file.toString()),(c,t,m)->{});
         assertEquals(new Color(0xcb12ad),extractor.getExtractedColor("retry:block"));
     }
+
+    @Test void failedAssetReportsArchiveEntryAndRootCauseWithoutPublishingPartialAssets() throws Exception {
+        String entry="assets/broken/models/block/fault.json";
+        Path file=archive("中文 broken.zip",Collections.singletonMap(entry,json("{ not-json")));
+        MinecraftResourceExtractor extractor=new MinecraftResourceExtractor();
+        IOException failure=assertThrows(IOException.class,()->extractor.addArchives(Collections.singletonList(file.toString()),(c,t,m)->{}));
+        assertTrue(failure.getMessage().contains(file.toString()),failure.toString());
+        StringWriter stack=new StringWriter();failure.printStackTrace(new PrintWriter(stack));
+        assertTrue(stack.toString().contains(entry),stack.toString());
+        assertTrue(stack.toString().contains("JsonParseException"),stack.toString());
+        assertFalse(extractor.isExtractionCompleted());
+        assertTrue(extractor.getAllExtractedColors().isEmpty());
+        archive("中文 broken.zip",Collections.singletonMap("assets/repaired/textures/block/block.png",png(0xff45ab23)));
+        extractor.addArchives(Collections.singletonList(file.toString()),(c,t,m)->{});
+        assertEquals(new Color(0x45ab23),extractor.getExtractedColor("repaired:block"));
+    }
+
+    @Test void malformedBiomeReportsZipEntry() throws Exception {
+        String entry="data/broken/worldgen/biome/test.json";
+        Path file=archive("bad-biome.zip",Collections.singletonMap(entry,json("{ bad")));
+        IOException failure=assertThrows(IOException.class,()->new MinecraftResourceExtractor().addArchive(file.toString()));
+        StringWriter stack=new StringWriter();failure.printStackTrace(new PrintWriter(stack));
+        assertTrue(stack.toString().contains(entry),stack.toString());
+    }
 }
