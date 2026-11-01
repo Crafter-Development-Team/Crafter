@@ -1786,6 +1786,12 @@ def add_node_parser(group_CI, nodes, links, parent=None, addon_prefs=None,
     for output in node_C_PBR_Parser.outputs:
         if output.name in group_CI.inputs:
             links.new(output, group_CI.inputs[output.name])
+    # biomeTex 和解析器对齐到同一 x 列（导入时 biomeTex 先建，解析器后建，这里补一次）。
+    for node in nodes:
+        if (node.type == "GROUP" and node.node_tree is not None and
+                node.node_tree.name.startswith("Crafter-biomeTex") and node.parent == parent):
+            node.location.x = node_C_PBR_Parser.location.x
+            break
     return node_C_PBR_Parser
 
 def add_node_pbr(location_base_tex, y_subtract, dir, nodes, links, list_info_moving, parent=None):
@@ -2258,14 +2264,28 @@ def ensure_biome_tex_node(nodes, group_CI, group=None):
             out_ev = nd
             break
 
-    # Parser 列的 x: 基础 CI 在输出左侧 (层数+1)*step(无 overlay 为 200)，Parser 再左移 parser_offset_x
+    # Parser 列的 x: 和 add_node_parser 用同一个初始位移（CI.x - parser_offset_x）；
+    # 没有 CI 时才退回已有 Parser / 输出节点推算。
     target_x = None
-    if out_ev is not None:
-        overlay_count = len(find_overlay_frames(nodes))
-        ci_offset = overlay_mix_step * (overlay_count + 1) if overlay_count > 0 else 200.0
-        target_x = out_ev.location.x - ci_offset - parser_offset_x
+    if group_CI is not None:
+        target_x = group_CI.location.x - parser_offset_x
+    else:
+        parser = None
+        for nd in nodes:
+            if nd.type == "GROUP" and nd.node_tree is not None and nd.node_tree.name == "C-PBR_Parser":
+                parser = nd
+                break
+        if parser is not None:
+            target_x = parser.location.x
+        elif out_ev is not None:
+            overlay_count = len(find_overlay_frames(nodes))
+            ci_offset = overlay_mix_step * (overlay_count + 1) if overlay_count > 0 else 200.0
+            target_x = out_ev.location.x - ci_offset - parser_offset_x
 
     if node_biome is not None:
+        # overlay 帧内的 biome 节点要跟着 CI 挂同一个父帧，否则相对坐标会被当成绝对坐标放到很远。
+        if group_CI is not None and group_CI.parent is not None and node_biome.parent != group_CI.parent:
+            node_biome.parent = group_CI.parent
         if target_x is not None:
             node_biome.location = (target_x, node_biome.location.y)
         return node_biome
@@ -2276,8 +2296,15 @@ def ensure_biome_tex_node(nodes, group_CI, group=None):
         return None
     node_biome = nodes.new(type="ShaderNodeGroup")
     node_biome.node_tree = group
+    # 先挂父帧再设 location（node.location 是父帧相对坐标）。
+    if group_CI is not None and group_CI.parent is not None:
+        node_biome.parent = group_CI.parent
     if target_x is not None:
-        node_biome.location = (target_x, out_ev.location.y - 550)
+        if group_CI is not None:
+            # 参考普通材质（无 overlay）的数值：与解析器同列，纵向比 CI 低 550。
+            node_biome.location = (target_x, group_CI.location.y - 550)
+        else:
+            node_biome.location = (target_x, out_ev.location.y - 550)
     elif group_CI is not None:
         node_biome.location = (group_CI.location.x - 600, group_CI.location.y - 400)
     return node_biome
