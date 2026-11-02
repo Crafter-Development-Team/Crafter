@@ -349,17 +349,28 @@ class VIEW3D_OT_CrafterSwitchCINode(bpy.types.Operator):
             if name in new_node.inputs and from_node.name in tree.nodes:
                 tree.links.new(from_socket, new_node.inputs[name])
 
+        # 距离按世界坐标算：帧内节点的 location 是相对帧的，直接和帧外节点相减不可靠。
+        def _world_location(target):
+            loc = target.location.copy()
+            parent = target.parent
+            while parent is not None:
+                loc = loc + parent.location
+                parent = parent.parent
+            return loc
+
         # 再按“距离最近的节点 + 同名接口”补一轮：纹理连 Color/Alpha，PBR/biome 按输出名同名连。
         def _nearest(predicate):
             found = []
+            origin = _world_location(node)
             for other in tree.nodes:
                 if other == new_node or other == node or not predicate(other):
                     continue
-                found.append(((other.location - node.location).length, other))
+                found.append(((_world_location(other) - origin).length, other))
             found.sort(key=lambda item: item[0])
             return [item[1] for item in found]
 
-        tex_nodes = _nearest(lambda n: n.type == "TEX_IMAGE")
+        # 只找基础层（帧外）的贴图，否则 overlay 帧内的贴图更近会抢先接上。
+        tex_nodes = _nearest(lambda n: n.type == "TEX_IMAGE" and n.parent is None)
         tex_roles = texture_node_roles(tex_nodes)
         base_tex = next((n for n in tex_nodes if tex_roles.get(n) == TEX_ROLE_BASE), None)
         if base_tex is not None:
@@ -373,8 +384,8 @@ class VIEW3D_OT_CrafterSwitchCINode(bpy.types.Operator):
 
         for prefix in ("C-PBR_Parser", "Crafter-biomeTex"):
             for source in _nearest(
-                    lambda n, p=prefix: n.type == "GROUP" and n.node_tree is not None and
-                    n.node_tree.name.startswith(p))[:1]:
+                    lambda n, p=prefix: n.type == "GROUP" and n.parent is None and
+                    n.node_tree is not None and n.node_tree.name.startswith(p))[:1]:
                 for output in source.outputs:
                     if output.name in new_node.inputs:
                         tree.links.new(output, new_node.inputs[output.name])
