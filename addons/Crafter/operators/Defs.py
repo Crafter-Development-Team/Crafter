@@ -719,12 +719,18 @@ def format_log_text(include_meta=True):
     return format_recent_log(include_meta)
 
 def parse_progress(text):
+    '''
+    WorldImporter 有两层进度：总体进度（全局 cur/total）和批次进度（当前批次 cur/total），
+    共四个数。进度条按总体进度换算百分制；没有总体进度时才退回批次进度。
+    忽略“批次 1/1 完成”“处理批次 1/4”等非进度片段。
+    '''
     import re as _re
-    m = _re.search(r'(\d+)\s*/\s*(\d+)', text)
-    if m:
-        cur, total = int(m.group(1)), int(m.group(2))
-        if total > 0:
-            return min(100.0, cur / total * 100)
+    for label in ("总体进度", "批次进度"):
+        m = _re.search(r'进度[:：]\s*' + label + r'\s*(\d+)\s*/\s*(\d+)', text)
+        if m:
+            cur, total = int(m.group(1)), int(m.group(2))
+            if total > 0:
+                return min(100.0, cur / total * 100)
     return None
 
 def _run_windows_admin(exe_path, work_dir=None, shell=False):

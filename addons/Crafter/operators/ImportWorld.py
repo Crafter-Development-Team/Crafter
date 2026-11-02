@@ -751,7 +751,8 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
                 if not line: continue
                 # Reader thread has already persisted and displayed this line.
                 p = parse_progress(line)
-                if p is not None: import_progress = p
+                # 阶段切换时进度只能前进，避免进度条回退“跳来跳去”
+                if p is not None: import_progress = max(import_progress, p)
             self._wm.progress_update(import_progress)
             for w in bpy.context.window_manager.windows:
                 for a in w.screen.areas:
