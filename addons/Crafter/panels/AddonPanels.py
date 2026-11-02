@@ -265,13 +265,60 @@ class VIEW3D_UL_CrafterDimensionsList(bpy.types.UIList):# 历史世界 存档 �
 
 # ==================== 材质节点：切换 CI 节点 ====================
 
+def _repair_overlay_links(tree, old_node, new_node, node_output_EEVEE, node_output_Cycles):
+    '''切换 CI 后恢复 overlay Mix 链：链头 A 输入改接新 CI，链尾重新接回输出/剔除组。'''
+    mix_nodes = [n for n in tree.nodes
+                 if n.bl_idname == "ShaderNodeMixShader" and n.get("Crafter_overlay_mix")]
+    if not mix_nodes:
+        return
+    # 链头 A 输入来自旧 CI 的，改接新 CI 同名输出（旧节点删除后链接会自动断）
+    for mix in mix_nodes:
+        a_input = mix.inputs[1]
+        if not a_input.is_linked:
+            continue
+        from_socket = a_input.links[0].from_socket
+        if from_socket.node == old_node and from_socket.name in new_node.outputs:
+            tree.links.new(new_node.outputs[from_socket.name], a_input)
+    # 按 B 输入（overlay 层 CI 的 Surface）分组，每组最后一个 Mix 是链尾
+    groups = {}
+    for mix in mix_nodes:
+        b_input = mix.inputs[2]
+        surface = b_input.links[0].from_socket.name if b_input.is_linked else None
+        groups.setdefault(surface, []).append(mix)
+    cull_input = None
+    for cull in tree.nodes:
+        if cull.get(CULL_GROUP_PROP):
+            cull_input = next((s for s in cull.inputs if s.type == 'SHADER' and s.enabled), None)
+            break
+    for surface, mixes in groups.items():
+        # 链尾 = 输出还没接任何节点的那个（被 link_CI_output 直连断开的就是它）；
+        # 已连的要保持链内连接，不能覆盖。
+        tail = None
+        for mix in mixes:
+            if not mix.outputs[0].is_linked:
+                tail = mix
+                break
+        if tail is None:
+            continue
+        if surface == "Cycles-Surface":
+            if cull_input is not None:
+                tree.links.new(tail.outputs[0], cull_input)
+            elif node_output_Cycles is not None:
+                tree.links.new(tail.outputs[0], node_output_Cycles.inputs["Surface"])
+        elif surface == "EEVEE-Surface" and node_output_EEVEE is not None:
+            tree.links.new(tail.outputs[0], node_output_EEVEE.inputs["Surface"])
+
+
 def _selected_ci_node(context):
-    '''从当前选中的节点里找 CI 组节点（切换后活动节点可能是基础色贴图，仍靠选中状态找到 CI）。'''
-    for node in getattr(context, "selected_nodes", None) or []:
-        if (node.type == "GROUP" and node.node_tree is not None and
-                node.node_tree.name.startswith("CI-")):
-            return node
-    return None
+    '''只认唯一目标：活动节点是 CI 就用它；否则仅在恰好选中一个 CI 时才认，多选返回 None。'''
+    node = getattr(context, "active_node", None)
+    if (node is not None and node.type == "GROUP" and node.node_tree is not None and
+            node.node_tree.name.startswith("CI-")):
+        return node
+    ci_nodes = [n for n in (getattr(context, "selected_nodes", None) or [])
+                if n.type == "GROUP" and n.node_tree is not None and
+                n.node_tree.name.startswith("CI-")]
+    return ci_nodes[0] if len(ci_nodes) == 1 else None
 
 
 def _ci_group_items(self, context):
@@ -308,7 +355,14 @@ class VIEW3D_OT_CrafterSwitchCINode(bpy.types.Operator):
         tree = node.id_data
         if tree is None or getattr(tree, "is_editmode", False):
             return {'CANCELLED'}
-        material = getattr(tree, "id_data", None)
+        # node.id_data 是 ShaderNodeTree，tree.id_data 也指向自己，不是 Material；
+        # sync_CI_culling 需要真正的 Material，所以按节点树名字反查。
+        material = None
+        for mat in bpy.data.materials:
+            node_tree = getattr(mat, "node_tree", None)
+            if node_tree is not None and node_tree.name == tree.name:
+                material = mat
+                break
 
         # 材质输出节点：加载材质时建好的 EEVEE/Cycles 输出，输出侧直接复用 link_CI_output。
         node_output_EEVEE = None
@@ -391,7 +445,8 @@ class VIEW3D_OT_CrafterSwitchCINode(bpy.types.Operator):
                         tree.links.new(output, new_node.inputs[output.name])
 
         # 和加载材质一样：按 tint 元数据补群系颜色，再按新 CI 的接口同步剔除。
-        if material is not None and getattr(material, "node_tree", None) is tree:
+        # 注意：不能用 `material.node_tree is tree` 判断——Blender RNA 每次访问可能返回不同 wrapper。
+        if material is not None:
             tint = get_material_tint(material)
             try:
                 # tint 为 None 也要调用：apply_tint 会先把 CI 暴露的命名群系输入接上 biomeTex。
@@ -399,13 +454,15 @@ class VIEW3D_OT_CrafterSwitchCINode(bpy.types.Operator):
             except Exception as ex:
                 warn_log(f"apply_tint 失败 [{material.name}]: {ex}")
             sync_CI_culling(material)
+            # overlay 材质：link_CI_output 会把新 CI 直连剔除组/输出，这里改回经 Mix 链。
+            _repair_overlay_links(tree, node, new_node, node_output_EEVEE, node_output_Cycles)
 
         # 还原旧布局后交给统一布局函数（和加载材质同一套规则）。
         for other in tree.nodes:
             if other.name in positions:
                 other.location = positions[other.name]
         new_node.location = (node.location.x, node.location.y)
-        if material is not None and getattr(material, "node_tree", None) is tree:
+        if material is not None:
             layout_material_nodes(material, tree.nodes, new_node, node_output_Cycles)
 
         tree.nodes.remove(node)
