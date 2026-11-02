@@ -552,6 +552,9 @@ def _apply_overlay_layout_shift(material, nodes, new_shift):
                 continue
             if node.bl_idname == "ShaderNodeMixShader":
                 continue
+            # 剔除组的位置由 _insert_cull_group 单独决定，不能被 overlay 布局左移。
+            if node.get(CULL_GROUP_PROP):
+                continue
             node.location = (node.location.x - delta, node.location.y)
     material["Crafter_overlay_shift"] = new_shift
 
@@ -647,6 +650,8 @@ def process_overlay_frames(material, nodes, links, group_CI,
                 links.remove(old_link)
             links.new(mix_node.outputs[0], end_socket)
             chain[surface_name] = mix_node.outputs[0]
+    # Mix 链建好后重新布局一次（剔除组要放到 Mix 下方，避免连线交叉）。
+    layout_material_nodes(material, nodes, group_CI, node_output_Cycles)
 
 # ========== 提取的为物体加载材质的函数（供外部调用，假设 C-PBR_Parser 已存在）==========
 def load_material_for_object(context, obj):

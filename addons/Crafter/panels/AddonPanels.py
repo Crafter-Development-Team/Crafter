@@ -389,17 +389,13 @@ class VIEW3D_OT_CrafterSwitchCINode(bpy.types.Operator):
                 warn_log(f"apply_tint 失败 [{material.name}]: {ex}")
             sync_CI_culling(material)
 
-        # 还原旧布局：新 CI 回到旧 CI 的位置，剔除组和左侧节点回到原坐标。
+        # 还原旧布局后交给统一布局函数（和加载材质同一套规则）。
         for other in tree.nodes:
             if other.name in positions:
                 other.location = positions[other.name]
         new_node.location = (node.location.x, node.location.y)
-        # 首次切换时旧树里没有剔除组，按恢复后的 CI/输出位置重新摆一次，避免残留左移坐标。
-        if node_output_Cycles is not None:
-            for other in tree.nodes:
-                if other.get(CULL_GROUP_PROP):
-                    other.location = ((new_node.location.x + node_output_Cycles.location.x) * 0.5,
-                                      node_output_Cycles.location.y + 160.0)
+        if material is not None and getattr(material, "node_tree", None) is tree:
+            layout_material_nodes(material, tree.nodes, new_node, node_output_Cycles)
 
         tree.nodes.remove(node)
         for other in tree.nodes:

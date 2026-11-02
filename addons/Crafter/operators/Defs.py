@@ -1549,33 +1549,61 @@ def _cycles_output_node(node_tree):
             return node
     return None
 
-def _apply_cull_layout_shift(material, nodes, group_CI, shift):
-    '''把 CI 左侧的贴图/帧节点整体左移，给剔除组腾位置；按记录差值移动，重复加载不漂移。'''
-    if material is None:
+def layout_material_nodes(material, nodes, group_CI, node_output_Cycles):
+    '''
+    统一布局（输出节点不动）：
+      贴图/帧 → PBR 解析器/biome → CI → 剔除组 → 输出
+    - 普通材质：以输出为基准从右往左倒推固定间距（重复加载不会漂移）；
+    - overlay 材质：帧内 CI 不动，剔除组挂同一父帧放 CI 右侧。
+    只摆位置，不创建/删除节点。
+    '''
+    if group_CI is None or node_output_Cycles is None:
         return
-    try:
-        prev = float(material.get("Crafter_cull_shift", 0.0) or 0.0)
-    except Exception:
-        prev = 0.0
-    delta = shift - prev
-    if abs(delta) < 0.5:
-        return
-    threshold = group_CI.location.x + 0.5
+    cull = None
     for node in nodes:
-        if node.parent is not None:
-            continue
-        if node is group_CI or node.type == "OUTPUT_MATERIAL":
-            continue
-        if node.type == "GROUP" and node.node_tree is not None and (
-                node.node_tree.name.startswith("CI-") or
-                node.node_tree.name.startswith("C-PBR_Parser") or
-                node.node_tree.name.startswith("Crafter-biomeTex")):
-            continue
-        if node.bl_idname == "ShaderNodeMixShader":
-            continue
-        if node.location.x <= threshold:
-            node.location.x -= delta
-    material["Crafter_cull_shift"] = shift
+        if node.get(CULL_GROUP_PROP):
+            cull = node
+            break
+    # 有 overlay 帧的材质，帧内/帧外节点位置由 process_overlay_frames 决定，
+    # 这里只摆剔除组，避免重排和 overlay 布局互相打乱（普通动态纹理帧不算 overlay）。
+    has_overlay = bool(find_overlay_frames(nodes, material))
+    if group_CI.parent is None and not has_overlay:
+        out_x = node_output_Cycles.location.x
+        cull_x = out_x - 220.0
+        ci_x = cull_x - 220.0
+        parser_x = ci_x - parser_offset_x
+        group_CI.location.x = ci_x
+        if cull is not None:
+            cull.location = (cull_x, group_CI.location.y - 160.0)
+        for node in nodes:
+            if node.parent is not None:
+                continue
+            if node.type == "GROUP" and node.node_tree is not None:
+                if node.node_tree.name == "C-PBR_Parser":
+                    node.location.x = parser_x
+                elif node.node_tree.name.startswith("Crafter-biomeTex"):
+                    node.location.x = parser_x
+                    node.location.y = group_CI.location.y - 550.0
+            elif node.type == "TEX_IMAGE" or node.bl_idname == "NodeFrame":
+                node.location.x = parser_x - 280.0
+    elif cull is not None:
+        cull.parent = group_CI.parent
+        # overlay 材质的 Mix 链占输出左侧空间：基础 CI 及 overlay 帧要退到 Mix 左侧，
+        # 否则帧内 CI 会和 Mix 节点叠在一起。
+        mix_left = None
+        for node in nodes:
+            if node.bl_idname == "ShaderNodeMixShader" and node.parent is None:
+                mix_left = node.location.x if mix_left is None else min(mix_left, node.location.x)
+        if mix_left is not None:
+            target_ci_x = mix_left - 220.0
+            if group_CI.location.x > target_ci_x:
+                shift = group_CI.location.x - target_ci_x
+                group_CI.location.x -= shift
+                for frame in find_overlay_frames(nodes, material):
+                    frame.location.x -= shift
+        # overlay 材质 x 方向没位置了：剔除组放到 Mix 正下方，连线最短、不交叉。
+        cull_x = mix_left if mix_left is not None else group_CI.location.x + 220.0
+        cull.location = (cull_x, group_CI.location.y - 320.0)
 
 def _insert_cull_group(group_CI, node_output_Cycles, links, material=None):
     '''
@@ -1590,16 +1618,14 @@ def _insert_cull_group(group_CI, node_output_Cycles, links, material=None):
         if "Cycles-Surface" in group_CI.outputs:
             links.new(group_CI.outputs["Cycles-Surface"], node_output_Cycles.inputs["Surface"])
         return None
-    # CI 及其左侧的解析器/贴图链整体往左，给剔除组腾出位置
-    _apply_cull_layout_shift(material, node_tree.nodes, group_CI, CULL_GROUP_X_STEP)
-    group_CI.location.x -= CULL_GROUP_X_STEP
     node = node_tree.nodes.new("ShaderNodeGroup")
     node.node_tree = cull_tree
     node.label = CULL_GROUP_NAME
     node[CULL_GROUP_PROP] = True
     node.mute = True
-    node.location = ((group_CI.location.x + node_output_Cycles.location.x) * 0.5,
-                     node_output_Cycles.location.y + 160.0)
+    if group_CI.parent is not None:
+        node.parent = group_CI.parent
+    node.location = (group_CI.location.x + 220.0, group_CI.location.y - 160.0)
     cull_input = next((s for s in node.inputs if s.type == 'SHADER' and s.enabled), None)
     # 默认连阴影剔除输出（静音时直通）；有标识时由 _sync_cull_group_output 切换
     cull_output = node.outputs.get("Shadow Back Cull")
@@ -1612,6 +1638,8 @@ def _insert_cull_group(group_CI, node_output_Cycles, links, material=None):
         return None
     links.new(group_CI.outputs["Cycles-Surface"], cull_input)
     links.new(cull_output, node_output_Cycles.inputs["Surface"])
+    # 创建/连接完成后统一布局（输出不动，剔除组固定在输出左侧）。
+    layout_material_nodes(material, node_tree.nodes, group_CI, node_output_Cycles)
     return node
 
 def _sync_cull_group_output(material, render_on, shadow_on):
