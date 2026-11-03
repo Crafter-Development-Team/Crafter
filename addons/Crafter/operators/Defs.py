@@ -2548,7 +2548,8 @@ def creat_parallax_node(node_tex_height, iterations, smooth, info_moving_normal,
 
         i += 1
 
-        links.new(node_final_parallax.outputs["UV"], node_tex_height.inputs["Vector"])
+    # 循环内每轮都连同一个输入，最后一条生效——移出循环只连一次
+    links.new(node_final_parallax.outputs["UV"], node_tex_height.inputs["Vector"])
 
     return node_final_parallax, node_frame
 
@@ -2574,28 +2575,60 @@ def create_parallax_final(node, node_final_depth, info_height, info_moving, node
 
     return node_final
 
+_alpha_all_one_cache = {}
+
+
+def clear_alpha_all_one_cache():
+    """重新加载视差前清空贴图判断缓存（贴图可能刚解码/替换）。"""
+    _alpha_all_one_cache.clear()
+
+
 def is_alpha_channel_all_one(image_node):
     """
     判断图像纹理节点的图像纹理的alpha通道是否全部为1。
-    
+
     参数:
         image_node (ShaderNodeTexImage): 图像纹理节点对象。
-        
+
     返回:
         bool: 如果所有alpha通道值都为1，则返回True；否则返回False。
+
+    性能：用 foreach_get 批量取像素、只扫 alpha 通道，并按图像名缓存结果
+    （同一张贴图常被多个材质共用）。
     """
     if not image_node or image_node.type != 'TEX_IMAGE' or not image_node.image:
         return False  # 确保提供了有效的图像纹理节点
-    
+
     image = image_node.image
-    pixels = image.pixels[:]  # 获取像素数据（RGBA格式）
+    cache_key = image.name
+    cached = _alpha_all_one_cache.get(cache_key)
+    if cached is not None:
+        return cached
 
+    result = None
+    try:
+        import numpy as np
+        # 贴图未解码时 foreach_get 可能返回默认全 1，必须先触发加载再批量取
+        if not image.has_data:
+            image.pixels[0]
+        width, height = image.size
+        if width > 0 and height > 0 and image.has_data:
+            buffer = np.empty(width * height * 4, dtype=np.float32)
+            image.pixels.foreach_get(buffer)
+            result = bool(np.all(buffer[3::4] >= 1.0 - 1e-6))
+    except Exception:
+        result = None
+    if result is not None:
+        # 只在真的批量读到像素时缓存（贴图未解码时 size 为 0，不能当 alpha 全 1）
+        _alpha_all_one_cache[cache_key] = result
+        return result
+    # 回退原逻辑：pixels[:] 会触发贴图加载；此路径不缓存，避免缓存未加载完的中间状态
+    pixels = image.pixels[:]
     for i in range(0, len(pixels), 4):
-        alpha = pixels[i + 3]  # 提取alpha通道的值
-        if alpha < 1.0 - 1e-6:  # 使用一个小的容差来处理浮点精度问题
-            return False  # 发现非1的alpha值，直接返回False
+        if pixels[i + 3] < 1.0 - 1e-6:
+            return False
+    return True
 
-    return True  # 所有alpha值都是1
 
 def copy_node_tree_recursive(source_node, nodes, links, node_mapping=None, to_location=[0,0], parent=None):
     """

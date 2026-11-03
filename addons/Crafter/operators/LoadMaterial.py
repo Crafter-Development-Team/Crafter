@@ -822,6 +822,8 @@ class VIEW3D_OT_CrafterLoadParallax(bpy.types.Operator):
 
         info_log('加载视差', '加载视差')
         addon_prefs = context.preferences.addons[__addon_name__].preferences
+        # 贴图可能刚解码/替换过，清掉上一次的 alpha 判断缓存
+        clear_alpha_all_one_cache()
 
         bpy.ops.crafter.remove_parallax()
         if context.active_object:
@@ -955,8 +957,9 @@ class VIEW3D_OT_CrafterLoadParallax(bpy.types.Operator):
                         if addon_prefs.Parallax_Based_on_Parsed_Normal and node_C_PBR_Parser is not None:
                             links.new(node_C_PBR_Parser.outputs["Parsed Normal"], node_bump.inputs["Normal"])
                         break
-                
-            bpy.ops.crafter.set_parallax_depth()
+
+        # Depth 是全局节点组参数，循环外设一次即可（原来每个材质都调一次 operator）
+        bpy.ops.crafter.set_parallax_depth()
         for node in bpy.data.node_groups["CP-1 / Iterations"].nodes:
             if node.type == "GROUP_OUTPUT":
                 node_output = node
