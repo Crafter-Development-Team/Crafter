@@ -2651,17 +2651,34 @@ def _creat_parallax_repeat_zone(node_tex_height, iterations, smooth, info_moving
 
     return repeat_out, node_frame
 
+def _parallax_frame_alpha(source_info):
+    '''取动态纹理源节点的帧驱动 Alpha 输出；没有 row 输入或没有上游连接时返回 None。'''
+    if not source_info[0] or source_info[1] is None:
+        return None
+    source = source_info[1]
+    if "row" not in source.inputs:
+        return None
+    frame_input = source.inputs.get("frame / row")
+    if frame_input is None or not frame_input.is_linked:
+        return None
+    return frame_input.links[0].from_node.outputs.get("Alpha")
+
+
 def create_parallax_final(node, node_final_depth, info_height, info_moving, nodes, links, node_frame=None):
     node_final = nodes.new("ShaderNodeGroup")
     node_final.node_tree = bpy.data.node_groups["CP-视差转换"]
     Scale = 1
-    if info_height[0]:
+    if info_height[0] and "row" in info_height[1].inputs:
         Scale = info_height[1].inputs["row"].default_value
-        links.new(info_height[1].inputs["frame / row"].links[0].from_node.outputs["Alpha"], node_final.inputs["old move"])
+        alpha = _parallax_frame_alpha(info_height)
+        if alpha is not None:
+            links.new(alpha, node_final.inputs["old move"])
 
-    if info_moving[0]:
+    if info_moving[0] and "row" in info_moving[1].inputs:
         Scale /= info_moving[1].inputs["row"].default_value
-        links.new(info_moving[1].inputs["frame / row"].links[0].from_node.outputs["Alpha"], node_final.inputs["new move"])
+        alpha = _parallax_frame_alpha(info_moving)
+        if alpha is not None:
+            links.new(alpha, node_final.inputs["new move"])
 
     node_final.location = node.location.x - 1400, node.location.y
     node_final.inputs["Scale"].default_value = Scale
