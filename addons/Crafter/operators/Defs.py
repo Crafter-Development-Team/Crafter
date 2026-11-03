@@ -2477,7 +2477,7 @@ def node_moving_tex_info(node):
 
     return info
 
-def creat_parallax_node(node_tex_height, iterations, smooth, info_moving_normal, nodes, links, height_output="Alpha", gusess_scale=1):
+def creat_parallax_node(node_tex_height, iterations, smooth, info_moving_normal, nodes, links, height_output="Alpha", gusess_scale=1, use_repeat_zone=False):
     # 创建框，方便清除
     node_frame = nodes.new(type="NodeFrame")
     location = [node_tex_height.location.x - 1500, node_tex_height.location.y]
@@ -2491,6 +2491,15 @@ def creat_parallax_node(node_tex_height, iterations, smooth, info_moving_normal,
         row_dao = 1 / info_moving_normal[1].inputs["row"].default_value
     else:
         row_dao = 1
+
+    # Blender 5.0+ 可以用着色器 Repeat Zone 把迭代收进一个循环区；失败时回退手动展开
+    if use_repeat_zone and bpy.app.version >= (5, 0, 0):
+        try:
+            return _creat_parallax_repeat_zone(
+                node_tex_height, iterations, smooth, info_moving_normal, nodes, links,
+                height_output, gusess_scale, node_frame, location, row_dao)
+        except Exception as ex:
+            warn_log(f"Repeat Zone 视差失败，回退手动展开: {ex}")
 
     i = 1
     while iterations >= i:
@@ -2552,6 +2561,95 @@ def creat_parallax_node(node_tex_height, iterations, smooth, info_moving_normal,
     links.new(node_final_parallax.outputs["UV"], node_tex_height.inputs["Vector"])
 
     return node_final_parallax, node_frame
+
+def _creat_parallax_repeat_zone(node_tex_height, iterations, smooth, info_moving_normal,
+                                nodes, links, height_output, gusess_scale,
+                                node_frame, location, row_dao):
+    '''
+    Blender 5.0+ 着色器 Repeat Zone 版视差（实验性）。
+    节点类型/接口在 5.x 小版本可能变化，任何不符合预期都抛异常，由调用方回退手动展开。
+    '''
+    # 着色器 Repeat Zone 复用几何节点的类型（Blender 5.2 实测）
+    repeat_out_type = "GeometryNodeRepeatOutput" if hasattr(bpy.types, "GeometryNodeRepeatOutput") else None
+    repeat_in_type = "GeometryNodeRepeatInput" if hasattr(bpy.types, "GeometryNodeRepeatInput") else None
+    if repeat_out_type is None or repeat_in_type is None:
+        raise RuntimeError("当前 Blender 版本没有 Repeat Zone 节点")
+
+    repeat_out = nodes.new(repeat_out_type)
+    repeat_out.location = [location[0] + 900, location[1]]
+    repeat_out.parent = node_frame
+    for item_name, item_type in (("UV", "VECTOR"), ("Current Depth", "FLOAT"), ("Next Start", "FLOAT")):
+        repeat_out.repeat_items.new(item_type, item_name)
+
+    repeat_in = nodes.new(repeat_in_type)
+    repeat_in.location = location
+    repeat_in.parent = node_frame
+    repeat_in.pair_with_output(repeat_out)
+    repeat_in.inputs["Iterations"].default_value = iterations
+    # 初始值：Current Depth / Next Start 从 0 开始，UV 由贴图 UV 来源提供
+    if "Current Depth" in repeat_in.inputs:
+        repeat_in.inputs["Current Depth"].default_value = 0.0
+    if "Next Start" in repeat_in.inputs:
+        repeat_in.inputs["Next Start"].default_value = 0.0
+
+    # 和手动展开一致：纹理在左、CP-视差在右
+    node_height = nodes.new("ShaderNodeTexImage")
+    node_height.image = node_tex_height.image
+    node_height.location = [location[0] + 300, location[1]]
+    node_height.parent = node_frame
+    node_height.interpolation = "Linear" if smooth else "Closest"
+
+    node_parallax = nodes.new("ShaderNodeGroup")
+    node_parallax.node_tree = bpy.data.node_groups["CP-视差"]
+    node_parallax.inputs["1 / row"].default_value = row_dao
+    node_parallax.location = [location[0] + 550, location[1]]
+    node_parallax.parent = node_frame
+
+    # 循环值 UV → CP-视差的 UV 输入 + 高度贴图的 Vector
+    links.new(repeat_in.outputs["UV"], node_parallax.inputs["UV"])
+    links.new(repeat_in.outputs["UV"], node_height.inputs["Vector"])
+    # 循环值 Current Depth → CP-视差的 Current Depth 输入
+    links.new(repeat_in.outputs["Current Depth"], node_parallax.inputs["Current Depth"])
+    # 循环值 Next Start → CP-视差的 Start 输入
+    start_input = node_parallax.inputs.get("Start") or node_parallax.inputs.get("起始")
+    if start_input is not None:
+        links.new(repeat_in.outputs["Next Start"], start_input)
+    # 高度采样结果 → CP-视差的深度输入
+    depth_input = node_parallax.inputs.get("Depth") or node_parallax.inputs.get("深度")
+    if gusess_scale == 1:
+        if depth_input is not None:
+            links.new(node_height.outputs[height_output], depth_input)
+    else:
+        node_math = nodes.new("ShaderNodeMath")
+        node_math.operation = "MULTIPLY_ADD"
+        node_math.location = [location[0] + 550, location[1] - 200]
+        node_math.parent = node_frame
+        node_math.inputs["Value_001"].default_value = gusess_scale
+        node_math.inputs["Value_002"].default_value = 1 - gusess_scale
+        links.new(node_height.outputs[height_output], node_math.inputs["Value"])
+        if depth_input is not None:
+            links.new(node_math.outputs["Value"], depth_input)
+    # CP-视差的输出 → Repeat Output 的对应循环变量
+    links.new(node_parallax.outputs["UV"], repeat_out.inputs["UV"])
+    links.new(node_parallax.outputs["Current Depth"], repeat_out.inputs["Current Depth"])
+    links.new(node_parallax.outputs["Next Start"], repeat_out.inputs["Next Start"])
+
+    # 循环的 UV 起点：动态纹理或 Texture Coordinate（放在 Repeat Input 左侧）
+    if info_moving_normal[0]:
+        node_moving = copy_node_tree_recursive(source_node=info_moving_normal[1], nodes=nodes, links=links,
+                                               to_location=[location[0] - 600, location[1]], parent=node_frame)
+        uv_source = node_moving.outputs["Vector"]
+    else:
+        node_TexCoord = nodes.new("ShaderNodeTexCoord")
+        node_TexCoord.location = [location[0] - 600, location[1]]
+        node_TexCoord.parent = node_frame
+        uv_source = node_TexCoord.outputs["UV"]
+    links.new(uv_source, repeat_in.inputs["UV"])
+
+    # 循环结束后的 UV 接回高度贴图（法向贴图）的 Vector，和手动展开一致
+    links.new(repeat_out.outputs["UV"], node_tex_height.inputs["Vector"])
+
+    return repeat_out, node_frame
 
 def create_parallax_final(node, node_final_depth, info_height, info_moving, nodes, links, node_frame=None):
     node_final = nodes.new("ShaderNodeGroup")

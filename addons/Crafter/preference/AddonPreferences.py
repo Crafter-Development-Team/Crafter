@@ -294,6 +294,9 @@ class CrafterAddonPreferences(AddonPreferences):
                                              default=0.5,
                                              max=1,
                                              min=0)# type: ignore
+    Parallax_Use_Repeat_Zone: BoolProperty(name="Use Repeat Zone",
+                                           description="Use the shader Repeat Zone (Blender 5.0+) instead of manually expanded iterations",
+                                           default=False)# type: ignore
     
 # ========== 其他功能属性 ==========
     Other_index: IntProperty(name="Other Function's Index",

@@ -818,6 +818,10 @@ class VIEW3D_OT_CrafterLoadParallax(bpy.types.Operator):
         row5.prop(addon_prefs,"Parallax_Guess_Height")
         if addon_prefs.Parallax_Guess_Height:
             row5.prop(addon_prefs,"Parallax_Guess_Height_Scale")
+        # Repeat Zone 是 Blender 5.0 才有的着色器循环，低版本不显示
+        if bpy.app.version >= (5, 0, 0):
+            row6 = layout.row()
+            row6.prop(addon_prefs, "Parallax_Use_Repeat_Zone")
     def execute(self, context: bpy.types.Context):
 
         info_log('加载视差', '加载视差')
@@ -913,13 +917,13 @@ class VIEW3D_OT_CrafterLoadParallax(bpy.types.Operator):
                 node_tex = node_tex_normal
                 info_height = info_base
                 info_tex = info_normal
-                node_final_depth, node_frame = creat_parallax_node(node_tex_height=node_tex_height, iterations=iterations, smooth=smooth, info_moving_normal=info_normal, nodes=nodes, links=links, height_output="Color", gusess_scale=addon_prefs.Parallax_Guess_Height_Scale)
+                node_final_depth, node_frame = creat_parallax_node(node_tex_height=node_tex_height, iterations=iterations, smooth=smooth, info_moving_normal=info_normal, nodes=nodes, links=links, height_output="Color", gusess_scale=addon_prefs.Parallax_Guess_Height_Scale, use_repeat_zone=addon_prefs.Parallax_Use_Repeat_Zone)
             else:
                 node_tex_height = node_tex_normal
                 node_tex = node_tex_base
                 info_height = info_normal
                 info_tex = info_base
-                node_final_depth, node_frame = creat_parallax_node(node_tex_height=node_tex_height, iterations=iterations, smooth=smooth, info_moving_normal=info_normal, nodes=nodes, links=links, height_output="Alpha", gusess_scale=1)
+                node_final_depth, node_frame = creat_parallax_node(node_tex_height=node_tex_height, iterations=iterations, smooth=smooth, info_moving_normal=info_normal, nodes=nodes, links=links, height_output="Alpha", gusess_scale=1, use_repeat_zone=addon_prefs.Parallax_Use_Repeat_Zone)
 
             node_final = None
             if is_moving_same(info_tex=info_tex, info_height=info_height):
