@@ -337,12 +337,23 @@ public class BlockColors {
         try {
             // World scope keeps palettes isolated; ordered fingerprints include texture-only overlays.
             StringBuilder key=new StringBuilder(new java.io.File(savePath==null?System.getProperty("user.dir"):savePath).getCanonicalPath());
-            for(String path:paths) key.append('\n').append(ResourceArchiveCache.index(path).fingerprint);
+            boolean indexFailed=false;
+            for(String path:paths) {
+                if(Thread.currentThread().isInterrupted()) throw new java.io.InterruptedIOException("Resource loading interrupted");
+                try {key.append('\n').append(ResourceArchiveCache.index(path).fingerprint);}
+                catch(java.io.IOException e) {
+                    if(Thread.currentThread().isInterrupted() || e instanceof java.io.InterruptedIOException) throw e;
+                    indexFailed=true;
+                    key.append("\nfailed:").append(path);
+                    com.minecraft.selector.utils.LogManager.getInstance().warn("Cannot index resource archive; skipping: "+path+": "+e,"Resources");
+                }
+            }
             MinecraftResourceExtractor extractor;
-            synchronized(preparedResources) {extractor=preparedResources.get(key.toString());}
+            synchronized(preparedResources) {extractor=indexFailed?null:preparedResources.get(key.toString());}
             if(extractor==null) {
                 extractor=new MinecraftResourceExtractor();extractor.addArchives(paths,progress);
-                synchronized(preparedResources) {preparedResources.put(key.toString(),extractor);}
+                if(!indexFailed && extractor.getArchiveFailures().isEmpty())
+                    synchronized(preparedResources) {preparedResources.put(key.toString(),extractor);}
             } else progress.onProgress(paths.size(),paths.size(),"Reusing resource colors (unchanged resource fingerprints)");
             Palette loaded=new Palette(java.util.Collections.emptyMap(),paths.isEmpty()?null:extractor);
             try {byte[] digest=java.security.MessageDigest.getInstance("SHA-256").digest(key.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));StringBuilder hex=new StringBuilder();for(byte b:digest) hex.append(String.format(java.util.Locale.ROOT,"%02x",b&255));loaded.fingerprint=hex.toString();}catch(java.security.NoSuchAlgorithmException e) {throw new IllegalStateException(e);}

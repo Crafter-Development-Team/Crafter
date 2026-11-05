@@ -16,10 +16,13 @@ public class MinecraftResourceExtractor {
     MinecraftResourceExtractor snapshot() {return new MinecraftResourceExtractor(this);}
     private final Map<String,Color> imported = new HashMap<>();
     private boolean completed;
+    private final Map<String,String> archiveFailures = new LinkedHashMap<>();
+    public Map<String,String> getArchiveFailures() {return Collections.unmodifiableMap(new LinkedHashMap<>(archiveFailures));}
     public void addArchive(String path) throws IOException { assets.addArchive(path); completed=true; }
     public interface ProgressListener {void onProgress(int completed,int total,String message);}
     /** Decode independently; merge in original override order, never completion order. */
     public void addArchives(List<String> paths,ProgressListener progress) throws IOException {
+        archiveFailures.clear();
         final long started=System.nanoTime();
         final com.minecraft.selector.utils.LogManager logs=com.minecraft.selector.utils.LogManager.getInstance();
         if(paths.isEmpty()) {progress.onProgress(0,0,"No resource archives found");return;}
@@ -44,22 +47,27 @@ public class MinecraftResourceExtractor {
                             " elapsed_ms="+(System.nanoTime()-archiveStart)/1_000_000,"Resources");
                         return new AbstractMap.SimpleImmutableEntry<>(index,decoded);
                     } catch(Exception error) {
-                        throw new IOException("Resource archive failed: index="+index+" path="+path+
-                            " elapsed_ms="+(System.nanoTime()-archiveStart)/1_000_000+": "+error.getMessage(),error);
+                        if(Thread.currentThread().isInterrupted() || error instanceof java.io.InterruptedIOException)
+                            throw error;
+                        String message="Skipped resource archive: index="+index+" path="+path+
+                            " elapsed_ms="+(System.nanoTime()-archiveStart)/1_000_000+": "+error;
+                        synchronized(archiveFailures) {archiveFailures.put(path,message);}
+                        logs.error(message,"Resources",error);
+                        return new AbstractMap.SimpleImmutableEntry<Integer,ResourceArchiveCache.Assets>(index,null);
                     }
                 });
             }
             for(int i=1;i<=paths.size();i++) {
                 Map.Entry<Integer,ResourceArchiveCache.Assets> result=done.take().get();
                 ordered[result.getKey()]=result.getValue();extracted=i;
-                String message="Extracted resources "+i+"/"+paths.size()+": "+new File(paths.get(result.getKey())).getName();
+                String message=(result.getValue()==null?"Skipped resource archive ":"Extracted resources ")+i+"/"+paths.size()+": "+new File(paths.get(result.getKey())).getName();
                 logs.info(message,"Resources");
                 progress.onProgress(i,paths.size(),message);
             }
-            // Publish only after all workers succeed, preserving original override order.
-            for(ResourceArchiveCache.Assets archive:ordered) assets.merge(archive);
+            // Skip failed archives; preserve override order among successful archives.
+            for(ResourceArchiveCache.Assets archive:ordered) if(archive!=null) assets.merge(archive);
             completed=true;
-            logs.info("Resource extraction completed: archives="+extracted+" elapsed_ms="+(System.nanoTime()-started)/1_000_000,"Resources");
+            logs.info("Resource extraction completed: skipped="+archiveFailures.size()+" archives="+extracted+" elapsed_ms="+(System.nanoTime()-started)/1_000_000,"Resources");
         } catch(InterruptedException e) {
             Thread.currentThread().interrupt();
             logs.warn("Resource extraction interrupted: completed="+extracted+"/"+paths.size(),"Resources");
