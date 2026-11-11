@@ -2808,6 +2808,20 @@ def _parallax_dynamic_uv(nodes, links, uv_socket, frame_offset, scale_y, parent,
     return node.outputs["UV"]
 
 
+def parallax_map_uv(nodes, links, uv_socket, info, base_row, parent, location):
+    '''把统一局部 UV 映射到目标贴图的 UV；不需要变换时直接返回原 socket。'''
+    dynamic = bool(info and info[0])
+    frame_offset, row = _parallax_frame_info(info)
+    scale_y = float(base_row) / float(max(row if dynamic else 1, 1))
+    if not dynamic and base_row <= 1:
+        return uv_socket
+    if dynamic and frame_offset is None and abs(scale_y - 1.0) < 1e-6:
+        return uv_socket
+    return _parallax_dynamic_uv(
+        nodes, links, uv_socket, frame_offset if dynamic else None,
+        scale_y, parent, location)
+
+
 def _parallax_scale_uv(nodes, links, uv_socket, row, parent, location):
     '''只做 Y 方向缩放，不加帧偏移：用于基础色精灵布局下的静态法线/高度。'''
     row = max(1, int(row))
@@ -3014,9 +3028,6 @@ def creat_normal_parallax_new(node_tex_height, iterations, refine_steps, smooth,
                 b_uv_mid = binary.outputs["UV_中"]
                 b_uv_mid_dyn = binary.outputs["UV_中_动态纹理"]
 
-    final_uv = _parallax_dynamic_uv(
-        nodes, links, final_uv, target_frame, target_scale_y, node_frame, local_location(cp_slot))
-
     # 从右往左排：最后一颗固定，前面依次往左
     layout_nodes = [n for n in nodes if n.parent == node_frame]
     layout_nodes = [n for n in layout_nodes if n.bl_idname not in (
@@ -3029,7 +3040,7 @@ def creat_normal_parallax_new(node_tex_height, iterations, refine_steps, smooth,
         node.location = (cursor - width, 0.0)
         cursor = node.location.x - gap
 
-    return final_uv, node_frame
+    return final_uv, node_frame, layout_row
 
 
 def create_parallax_final(node, node_final_depth, info_height, info_moving, nodes, links, node_frame=None):

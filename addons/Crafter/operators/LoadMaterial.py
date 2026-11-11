@@ -9,8 +9,40 @@ from bpy.props import *
 from ..__init__ import dir_cafter_data, dir_resourcepacks_plans, dir_materials, dir_classification_basis, dir_blend_append, dir_init_main
 from .Defs import *
 
-# 现阶段只对法线贴图做无 Repeat 视差；基色 / PBR / Bump 的视差后面再逐步接。
-PARALLAX_NORMAL_ONLY = True
+# 无 Repeat 手动视差：基础色/PBR/法线分别按自己的帧信息转换 UV。
+PARALLAX_NEW_MANUAL = True
+PARALLAX_VECTOR_PREFIX = "Crafter_parallax_vector_"
+
+
+def remember_parallax_vector(material, node):
+    key = PARALLAX_VECTOR_PREFIX + node.name
+    if key in material:
+        return
+    if node.inputs["Vector"].is_linked:
+        link = node.inputs["Vector"].links[0]
+        material[key] = link.from_node.name + "|" + link.from_socket.name
+    else:
+        material[key] = ""
+
+
+def restore_parallax_vectors(material, nodes, links):
+    for key in [k for k in material.keys() if k.startswith(PARALLAX_VECTOR_PREFIX)]:
+        node_name = key[len(PARALLAX_VECTOR_PREFIX):]
+        node = nodes.get(node_name)
+        if node is not None:
+            for link in list(node.inputs["Vector"].links):
+                links.remove(link)
+            source = material[key]
+            if source:
+                parts = source.split("|", 1)
+                if len(parts) == 2:
+                    source_node = nodes.get(parts[0])
+                    if source_node is not None and parts[1] in source_node.outputs:
+                        links.new(source_node.outputs[parts[1]], node.inputs["Vector"])
+        try:
+            del material[key]
+        except Exception:
+            pass
 
 lang = bpy.context.preferences.view.language
 is_chinese = lang in ("zh_HANS", "zh_HANT")
@@ -827,8 +859,8 @@ class VIEW3D_OT_CrafterLoadParallax(bpy.types.Operator):
 
         info_log('加载视差', '加载视差')
         addon_prefs = context.preferences.addons[__addon_name__].preferences
-        if PARALLAX_NORMAL_ONLY:
-            # 这些开关在“仅法线贴图”路径里没有作用，强制关掉，避免面板残留旧状态。
+        if PARALLAX_NEW_MANUAL:
+            # 这些开关在当前无 Repeat 路径里没有作用，强制关掉，避免面板残留旧状态。
             addon_prefs.Parallax_Use_Repeat_Zone = False
             addon_prefs.Parallax_Calculate_Normal = False
             addon_prefs.Parallax_Based_on_Parsed_Normal = False
@@ -918,13 +950,13 @@ class VIEW3D_OT_CrafterLoadParallax(bpy.types.Operator):
             info_normal = node_moving_tex_info(node_tex_normal)
             info_PBR = node_moving_tex_info(node_tex_PBR)
 
-            if PARALLAX_NORMAL_ONLY:
+            if PARALLAX_NEW_MANUAL:
                 height_tex = node_tex_base if base_as_height else node_tex_normal
                 height_info = info_base if base_as_height else info_normal
                 height_out = "Color" if base_as_height else "Alpha"
                 height_scale = addon_prefs.Parallax_Guess_Height_Scale if base_as_height else 1
                 refine_steps = addon_prefs.Parallax_Refine_Steps if addon_prefs.Parallax_Use_POM else 0
-                final_uv, node_frame = creat_normal_parallax_new(
+                final_uv, node_frame, base_row = creat_normal_parallax_new(
                     node_tex_height=height_tex,
                     iterations=iterations,
                     refine_steps=refine_steps,
@@ -939,7 +971,20 @@ class VIEW3D_OT_CrafterLoadParallax(bpy.types.Operator):
                     layout_info=info_base,
                 )
                 if final_uv is not None:
-                    links.new(final_uv, node_tex_normal.inputs["Vector"])
+                    targets = [
+                        (node_tex_base, info_base),
+                        (node_tex_normal, info_normal),
+                    ]
+                    if node_tex_PBR is not None:
+                        targets.append((node_tex_PBR, info_PBR))
+                    for index, (target, target_info) in enumerate(targets):
+                        remember_parallax_vector(material, target)
+                        uv = parallax_map_uv(
+                            nodes, links, final_uv, target_info, base_row, node_frame,
+                            (height_tex.location.x - 1700 + index * 180,
+                             height_tex.location.y - 220),
+                        )
+                        links.new(uv, target.inputs["Vector"])
                 continue
 
             if base_as_height:
@@ -1096,26 +1141,7 @@ class VIEW3D_OT_CrafterRemoveParallax(bpy.types.Operator):
             #             list_closest = [distance,nodes_tex_coord[i]]
             #     links.new(list_closest[1].outputs["UV"], node_moving.inputs["UV"])
 
-            nodes_moving_end = []
-            nodes_tex = []
-            for node in nodes:
-                # overlay 帧内的贴图有自己的动态纹理节点，不能被基础层的动态纹理重连
-                if in_overlay_frame(node):
-                    continue
-                if node.type == "TEX_IMAGE":
-                    nodes_tex.append(node)
-                if node.type == "GROUP" and node.node_tree is not None:
-                    if node.node_tree.name == "Crafter-动态纹理_尾":
-                        nodes_moving_end.append(node)
-            for node_tex in nodes_tex:
-                if len(nodes_moving_end) == 0:
-                    continue
-                list_closest = [nodes_distance(node_tex, nodes_moving_end[0]),nodes_moving_end[0]]
-                for i in range(1,len(nodes_moving_end)):
-                    distance = nodes_distance(node_tex, nodes_moving_end[i])
-                    if list_closest[0] > distance:
-                        list_closest = [distance,nodes_moving_end[i]]
-                links.new(list_closest[1].outputs["Vector"], node_tex.inputs["Vector"])
+            restore_parallax_vectors(material, nodes, links)
 
             if node_CI != None and node_C_PBR_Parser !=None:
                 for inpupt in node_CI.inputs:
