@@ -9,6 +9,9 @@ from bpy.props import *
 from ..__init__ import dir_cafter_data, dir_resourcepacks_plans, dir_materials, dir_classification_basis, dir_blend_append, dir_init_main
 from .Defs import *
 
+# 现阶段只对法线贴图做无 Repeat 视差；基色 / PBR / Bump 的视差后面再逐步接。
+PARALLAX_NORMAL_ONLY = True
+
 lang = bpy.context.preferences.view.language
 is_chinese = lang in ("zh_HANS", "zh_HANT")
 
@@ -809,23 +812,26 @@ class VIEW3D_OT_CrafterLoadParallax(bpy.types.Operator):
         row3 = layout.row()
         row3.prop(addon_prefs,"Parallax_Smooth",text="Smooth")
 
-        row4 = layout.row()
-        row4.prop(addon_prefs,"Parallax_Calculate_Normal")
-        if addon_prefs.Parallax_Calculate_Normal:
-            row4.prop(addon_prefs,"Parallax_Based_on_Parsed_Normal")
-        
         row5 = layout.row()
         row5.prop(addon_prefs,"Parallax_Guess_Height")
         if addon_prefs.Parallax_Guess_Height:
             row5.prop(addon_prefs,"Parallax_Guess_Height_Scale")
-        # Repeat Zone 是 Blender 5.0 才有的着色器循环，低版本不显示
-        if bpy.app.version >= (5, 0, 0):
-            row6 = layout.row()
-            row6.prop(addon_prefs, "Parallax_Use_Repeat_Zone")
+
+        row6 = layout.row()
+        row6.prop(addon_prefs, "Parallax_Use_POM")
+
+        row7 = layout.row()
+        row7.enabled = addon_prefs.Parallax_Use_POM
+        row7.prop(addon_prefs, "Parallax_Refine_Steps", text="Refine Steps")
     def execute(self, context: bpy.types.Context):
 
         info_log('加载视差', '加载视差')
         addon_prefs = context.preferences.addons[__addon_name__].preferences
+        if PARALLAX_NORMAL_ONLY:
+            # 这些开关在“仅法线贴图”路径里没有作用，强制关掉，避免面板残留旧状态。
+            addon_prefs.Parallax_Use_Repeat_Zone = False
+            addon_prefs.Parallax_Calculate_Normal = False
+            addon_prefs.Parallax_Based_on_Parsed_Normal = False
         # 贴图可能刚解码/替换过，清掉上一次的 alpha 判断缓存
         clear_alpha_all_one_cache()
 
@@ -834,7 +840,7 @@ class VIEW3D_OT_CrafterLoadParallax(bpy.types.Operator):
             bpy.ops.object.mode_set(mode='OBJECT')
         bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
         # 导入CP-节点组
-        add_node_group_if_not_exists(["CP-视差","CP-视差转换"])
+        add_node_group_if_not_exists(["CP-矢量变换","CP-Iterations","CP-Depth","CP-动态纹理","CP-步进采样","CP-二分求值","CP-视差转换","CP-视线投影"])
         # 开始遍历
         for_collection = []
         for mcmt in context.scene.Crafter_mcmts:
@@ -912,18 +918,42 @@ class VIEW3D_OT_CrafterLoadParallax(bpy.types.Operator):
             info_normal = node_moving_tex_info(node_tex_normal)
             info_PBR = node_moving_tex_info(node_tex_PBR)
 
+            if PARALLAX_NORMAL_ONLY:
+                height_tex = node_tex_base if base_as_height else node_tex_normal
+                height_info = info_base if base_as_height else info_normal
+                height_out = "Color" if base_as_height else "Alpha"
+                height_scale = addon_prefs.Parallax_Guess_Height_Scale if base_as_height else 1
+                refine_steps = addon_prefs.Parallax_Refine_Steps if addon_prefs.Parallax_Use_POM else 0
+                final_uv, node_frame = creat_normal_parallax_new(
+                    node_tex_height=height_tex,
+                    iterations=iterations,
+                    refine_steps=refine_steps,
+                    smooth=smooth,
+                    info_moving=height_info,
+                    nodes=nodes,
+                    links=links,
+                    height_output=height_out,
+                    gusess_scale=height_scale,
+                    depth=addon_prefs.Parallax_Depth,
+                    target_info=info_normal,
+                    layout_info=info_base,
+                )
+                if final_uv is not None:
+                    links.new(final_uv, node_tex_normal.inputs["Vector"])
+                continue
+
             if base_as_height:
                 node_tex_height = node_tex_base
                 node_tex = node_tex_normal
                 info_height = info_base
                 info_tex = info_normal
-                node_final_depth, node_frame = creat_parallax_node(node_tex_height=node_tex_height, iterations=iterations, smooth=smooth, info_moving_normal=info_normal, nodes=nodes, links=links, height_output="Color", gusess_scale=addon_prefs.Parallax_Guess_Height_Scale, use_repeat_zone=addon_prefs.Parallax_Use_Repeat_Zone)
+                node_final_depth, node_frame = creat_parallax_node(node_tex_height=node_tex_height, iterations=iterations, smooth=smooth, info_moving_normal=info_normal, nodes=nodes, links=links, height_output="Color", gusess_scale=addon_prefs.Parallax_Guess_Height_Scale, use_repeat_zone=addon_prefs.Parallax_Use_Repeat_Zone, use_pom=addon_prefs.Parallax_Use_POM)
             else:
                 node_tex_height = node_tex_normal
                 node_tex = node_tex_base
                 info_height = info_normal
                 info_tex = info_base
-                node_final_depth, node_frame = creat_parallax_node(node_tex_height=node_tex_height, iterations=iterations, smooth=smooth, info_moving_normal=info_normal, nodes=nodes, links=links, height_output="Alpha", gusess_scale=1, use_repeat_zone=addon_prefs.Parallax_Use_Repeat_Zone)
+                node_final_depth, node_frame = creat_parallax_node(node_tex_height=node_tex_height, iterations=iterations, smooth=smooth, info_moving_normal=info_normal, nodes=nodes, links=links, height_output="Alpha", gusess_scale=1, use_repeat_zone=addon_prefs.Parallax_Use_Repeat_Zone, use_pom=addon_prefs.Parallax_Use_POM)
 
             node_final = None
             if is_moving_same(info_tex=info_tex, info_height=info_height):
@@ -962,12 +992,8 @@ class VIEW3D_OT_CrafterLoadParallax(bpy.types.Operator):
                             links.new(node_C_PBR_Parser.outputs["Parsed Normal"], node_bump.inputs["Normal"])
                         break
 
-        # Depth 是全局节点组参数，循环外设一次即可（原来每个材质都调一次 operator）
-        bpy.ops.crafter.set_parallax_depth()
-        for node in bpy.data.node_groups["CP-1 / Iterations"].nodes:
-            if node.type == "GROUP_OUTPUT":
-                node_output = node
-        node_output.inputs["1 / Iterations"].default_value = 1 / addon_prefs.Parallax_Iterations
+        # 初始化/导入后再次写入全局参数，防止 append 默认值未生效
+        set_parallax_globals(addon_prefs.Parallax_Iterations, addon_prefs.Parallax_Depth)
 
         return {'FINISHED'}
 
@@ -992,13 +1018,7 @@ class VIEW3D_OT_CrafterRemoveParallax(bpy.types.Operator):
         if context.active_object:
             bpy.ops.object.mode_set(mode='OBJECT')
         bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
-        # 删除startswith(CP-)节点组
-        node_delete = []
-        for node in bpy.data.node_groups:
-            if node.name.startswith("CP-"):
-                node_delete.append(node)
-        for node in node_delete:
-            bpy.data.node_groups.remove(node)
+        # 先清理材质里的 CP 节点，最后再删 CP 节点组，避免 node_tree 变成已删除的指针
         # 开始遍历
         for_collection = []
         for mcmt in context.scene.Crafter_mcmts:
@@ -1017,7 +1037,7 @@ class VIEW3D_OT_CrafterRemoveParallax(bpy.types.Operator):
             nodes = node_tree_material.nodes
             links = node_tree_material.links
 
-            node_frame = None
+            node_frames = []
             node_frame_Bump = None
             node_CI = None
             node_C_PBR_Parser = None
@@ -1026,14 +1046,16 @@ class VIEW3D_OT_CrafterRemoveParallax(bpy.types.Operator):
                 if in_overlay_frame(node):
                     continue
                 if node.type == "FRAME":
-                    if node.label == "Crafter-视差":
-                        node_frame = node
+                    if node.label.startswith("Crafter-视差"):
+                        node_frames.append(node)
                         nodes_wait_delete.append(node)
                     elif node.label == "Crafter-凹凸":
                         node_frame_Bump = node
                         nodes_wait_delete.append(node)
                 elif node.type == "GROUP":
                     if node.node_tree != None:
+                        if node.node_tree.name.startswith("CP-"):
+                            nodes_wait_delete.append(node)
                         if node.node_tree.name.startswith("CI-"):
                             node_CI = node
                         if node.node_tree.name == "C-PBR_Parser":
@@ -1041,10 +1063,9 @@ class VIEW3D_OT_CrafterRemoveParallax(bpy.types.Operator):
             for node in nodes:
                 if in_overlay_frame(node):
                     continue
-                if node_frame != None:
-                    if node.parent == node_frame:
-                        nodes_wait_delete.append(node)
-                        continue
+                if node_frames and node.parent in node_frames:
+                    nodes_wait_delete.append(node)
+                    continue
                 if node_frame_Bump != None:
                     if node.parent == node_frame_Bump:
                         nodes_wait_delete.append(node)
@@ -1053,7 +1074,7 @@ class VIEW3D_OT_CrafterRemoveParallax(bpy.types.Operator):
                 if node.type == "GROUP":
                     if node.node_tree == None:
                         nodes_wait_delete.append(node)
-            for node in nodes_wait_delete:
+            for node in dict.fromkeys(nodes_wait_delete):
                 nodes.remove(node)
 
             # nodes_tex_coord = []
@@ -1083,7 +1104,7 @@ class VIEW3D_OT_CrafterRemoveParallax(bpy.types.Operator):
                     continue
                 if node.type == "TEX_IMAGE":
                     nodes_tex.append(node)
-                if node.type == "GROUP":
+                if node.type == "GROUP" and node.node_tree is not None:
                     if node.node_tree.name == "Crafter-动态纹理_尾":
                         nodes_moving_end.append(node)
             for node_tex in nodes_tex:
@@ -1100,7 +1121,15 @@ class VIEW3D_OT_CrafterRemoveParallax(bpy.types.Operator):
                 for inpupt in node_CI.inputs:
                     if inpupt.name == "Parsed Normal":
                         links.new(node_C_PBR_Parser.outputs["Parsed Normal"], inpupt)
-            
+
+        # 材质里的 CP 节点已经清理完，最后再删 CP 节点组
+        node_delete = []
+        for group in bpy.data.node_groups:
+            if group.name.startswith("CP-"):
+                node_delete.append(group)
+        for group in node_delete:
+            bpy.data.node_groups.remove(group)
+
         return {'FINISHED'}
     
 # ==================== 设置视差深度 ====================
@@ -1118,10 +1147,7 @@ class VIEW3D_OT_CrafterSetParallaxDepth(bpy.types.Operator):
     def execute(self, context: bpy.types.Context):
         addon_prefs = context.preferences.addons[__addon_name__].preferences
         
-        for node in bpy.data.node_groups["CP-1 / Depth"].nodes:
-            if node.type == "GROUP_OUTPUT":
-                node_output = node
-        node_output.inputs["1 / Depth"].default_value = 1 / addon_prefs.Parallax_Depth
+        set_parallax_globals(addon_prefs.Parallax_Iterations, addon_prefs.Parallax_Depth)
         
         return {'FINISHED'}
 

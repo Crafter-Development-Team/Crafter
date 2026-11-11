@@ -898,15 +898,19 @@ def unzip(zip_path, extract_to):
         zip_ref.extractall(extract_to)
 
 def add_node_group_if_not_exists(names):
-    for name in names:
-        if name not in bpy.data.node_groups:
-            try:
-                with bpy.data.libraries.load(dir_blend_append, link=False) as (data_from, data_to):
-                    data_to.node_groups = [name]
-                bpy.data.node_groups[name].use_fake_user = True
-            except Exception as e:
-                print(f"Error loading node group '{name}': {e}")
-                continue
+    missing = [name for name in names if name not in bpy.data.node_groups]
+    if not missing:
+        return
+    try:
+        with bpy.data.libraries.load(dir_blend_append, link=False) as (data_from, data_to):
+            data_to.node_groups = [name for name in missing if name in data_from.node_groups]
+    except Exception as e:
+        print(f"Error loading node groups {missing}: {e}")
+        return
+    for name in missing:
+        group = bpy.data.node_groups.get(name)
+        if group is not None:
+            group.use_fake_user = True
 
 def add_node_moving_texture(node_tex, nodes, links, list_info_moving, parent=None):
     '''
@@ -2471,13 +2475,21 @@ def node_moving_tex_info(node):
     info = [False,None]
     if node == None:
         return info
-    if len(node.inputs["Vector"].links) >0:
-        info[0] = True
-        info[1] = node.inputs["Vector"].links[0].from_node
+    if len(node.inputs["Vector"].links) == 0:
+        return info
+    image = getattr(node, "image", None)
+    if image is not None:
+        width, height = image.size
+        # Crafter 的精灵图是竖向条带；方形/横向单帧图即使 Vector 有链接也不算动态。
+        if width > 0 and height > 0 and height <= width:
+            return info
+    info[0] = True
+    info[1] = node.inputs["Vector"].links[0].from_node
 
     return info
 
-def creat_parallax_node(node_tex_height, iterations, smooth, info_moving_normal, nodes, links, height_output="Alpha", gusess_scale=1, use_repeat_zone=False):
+def creat_parallax_node(node_tex_height, iterations, smooth, info_moving_normal, nodes, links, height_output="Alpha", gusess_scale=1, use_repeat_zone=False, use_pom=False):
+    parallax_group_name = "CP-POM视差" if use_pom else "CP-视差"
     # 创建框，方便清除
     node_frame = nodes.new(type="NodeFrame")
     location = [node_tex_height.location.x - 1500, node_tex_height.location.y]
@@ -2497,15 +2509,72 @@ def creat_parallax_node(node_tex_height, iterations, smooth, info_moving_normal,
         try:
             return _creat_parallax_repeat_zone(
                 node_tex_height, iterations, smooth, info_moving_normal, nodes, links,
-                height_output, gusess_scale, node_frame, location, row_dao)
+                height_output, gusess_scale, node_frame, location, row_dao, parallax_group_name)
         except Exception as ex:
             warn_log(f"Repeat Zone 视差失败，回退手动展开: {ex}")
+
+    # POM 正向链：UV 来源 → 第 1 个 → ... → 第 N 个 → 最终 UV
+    # （原版 CP-视差 是反向链，两者 Start 递增方向相反，不能混用）
+    if use_pom:
+        if info_moving_normal[0]:
+            node_moving = copy_node_tree_recursive(source_node=info_moving_normal[1], nodes=nodes, links=links,
+                                                   to_location=[location[0] - 600, location[1]], parent=node_frame)
+            uv_source = node_moving.outputs["Vector"]
+        else:
+            node_TexCoord = nodes.new("ShaderNodeTexCoord")
+            node_TexCoord.location = [location[0] - 600, location[1]]
+            node_TexCoord.parent = node_frame
+            uv_source = node_TexCoord.outputs["UV"]
+
+        node_prev = None
+        node_final_parallax = None
+        for i in range(1, iterations + 1):
+            node_parallax = nodes.new("ShaderNodeGroup")
+            node_parallax.node_tree = bpy.data.node_groups[parallax_group_name]
+            node_parallax.inputs["1 / row"].default_value = row_dao
+            node_parallax.location = location
+            node_parallax.parent = node_frame
+            location[0] += 1.5 * move
+
+            node_height = nodes.new("ShaderNodeTexImage")
+            node_height.image = node_tex_height.image
+            node_height.location = location
+            node_height.parent = node_frame
+            node_height.interpolation = "Linear" if smooth else "Closest"
+            location[0] += move
+
+            if node_prev is not None:
+                links.new(node_prev.outputs["Next Start"], node_parallax.inputs["Start"])
+                links.new(node_prev.outputs["UV"], node_parallax.inputs["UV"])
+                links.new(node_prev.outputs["UV"], node_height.inputs["Vector"])
+            else:
+                links.new(uv_source, node_parallax.inputs["UV"])
+                links.new(uv_source, node_height.inputs["Vector"])
+
+            if gusess_scale == 1:
+                links.new(node_height.outputs[height_output], node_parallax.inputs["Depth"])
+            else:
+                node_math = nodes.new("ShaderNodeMath")
+                node_math.operation = "MULTIPLY_ADD"
+                node_math.location = location
+                node_math.parent = node_frame
+                node_math.inputs["Value_001"].default_value = gusess_scale
+                node_math.inputs["Value_002"].default_value = 1 - gusess_scale
+                links.new(node_height.outputs[height_output], node_math.inputs["Value"])
+                links.new(node_math.outputs["Value"], node_parallax.inputs["Depth"])
+                location[0] += move
+
+            node_prev = node_parallax
+            node_final_parallax = node_parallax
+
+        links.new(node_final_parallax.outputs["UV"], node_tex_height.inputs["Vector"])
+        return node_final_parallax, node_frame
 
     i = 1
     while iterations >= i:
 
         node_parallax = nodes.new("ShaderNodeGroup")
-        node_parallax.node_tree = bpy.data.node_groups["CP-视差"]
+        node_parallax.node_tree = bpy.data.node_groups[parallax_group_name]
         node_parallax.location = location
         node_parallax.inputs["1 / row"].default_value = row_dao
         location[0] -= 1.5 * move# location
@@ -2564,7 +2633,7 @@ def creat_parallax_node(node_tex_height, iterations, smooth, info_moving_normal,
 
 def _creat_parallax_repeat_zone(node_tex_height, iterations, smooth, info_moving_normal,
                                 nodes, links, height_output, gusess_scale,
-                                node_frame, location, row_dao):
+                                node_frame, location, row_dao, group_name="CP-视差"):
     '''
     Blender 5.0+ 着色器 Repeat Zone 版视差（实验性）。
     节点类型/接口在 5.x 小版本可能变化，任何不符合预期都抛异常，由调用方回退手动展开。
@@ -2600,7 +2669,7 @@ def _creat_parallax_repeat_zone(node_tex_height, iterations, smooth, info_moving
     node_height.interpolation = "Linear" if smooth else "Closest"
 
     node_parallax = nodes.new("ShaderNodeGroup")
-    node_parallax.node_tree = bpy.data.node_groups["CP-视差"]
+    node_parallax.node_tree = bpy.data.node_groups[group_name]
     node_parallax.inputs["1 / row"].default_value = row_dao
     node_parallax.location = [location[0] + 550, location[1]]
     node_parallax.parent = node_frame
@@ -2662,6 +2731,298 @@ def _parallax_frame_alpha(source_info):
     if frame_input is None or not frame_input.is_linked:
         return None
     return frame_input.links[0].from_node.outputs.get("Alpha")
+
+
+def set_parallax_globals(iterations, depth):
+    '''导入后再次写 CP-Iterations / CP-Depth，避免 append 默认值没有生效。'''
+    values = (
+        ("CP-Iterations", "Value", int(iterations)),
+        ("CP-Depth", "Depth", float(depth)),
+    )
+    for group_name, output_name, value in values:
+        group = bpy.data.node_groups.get(group_name)
+        if group is None:
+            continue
+        for node in group.nodes:
+            if node.type != "GROUP_OUTPUT":
+                continue
+            try:
+                node.inputs[output_name].default_value = value
+            except Exception:
+                pass
+
+
+def _parallax_frame_info(info_moving):
+    '''只取动态纹理的帧偏移和行数，UV 初始化另行处理。'''
+    source = info_moving[1] if info_moving and info_moving[0] else None
+    if source is None:
+        return None, 1
+    row = 1
+    row_input = source.inputs.get("row")
+    if row_input is not None:
+        try:
+            row = max(1, int(round(row_input.default_value)))
+        except Exception:
+            row = 1
+    return _parallax_frame_alpha(info_moving), row
+
+
+def _parallax_uv_source(nodes, info_moving, parent, location):
+    '''返回 (local UV, Frame Offset, row)；动态纹理时取组的输入 Vector，而不是输出。'''
+    source = info_moving[1] if info_moving and info_moving[0] else None
+    if source is not None:
+        vector_input = source.inputs.get("Vector")
+        if vector_input is not None and vector_input.is_linked:
+            row = 1
+            row_input = source.inputs.get("row")
+            if row_input is not None:
+                try:
+                    row = max(1, int(round(row_input.default_value)))
+                except Exception:
+                    row = 1
+            return vector_input.links[0].from_socket, _parallax_frame_alpha(info_moving), row
+    node = nodes.new("ShaderNodeTexCoord")
+    node.parent = parent
+    node.location = location
+    return node.outputs["UV"], None, 1
+
+
+def _parallax_set_uv_scale(node, scale_y):
+    if "row_b / row_h" in node.inputs:
+        node.inputs["row_b / row_h"].default_value = float(scale_y)
+    elif "row" in node.inputs:
+        node.inputs["row"].default_value = int(round(scale_y))
+
+
+def _parallax_dynamic_uv(nodes, links, uv_socket, frame_offset, scale_y, parent, location):
+    node = nodes.new("ShaderNodeGroup")
+    node.node_tree = bpy.data.node_groups["CP-动态纹理"]
+    node.parent = parent
+    node.location = location
+    links.new(uv_socket, node.inputs["UV"])
+    if frame_offset is not None:
+        links.new(frame_offset, node.inputs["Frame Offset"])
+    else:
+        node.inputs["Frame Offset"].default_value = 0.0
+    _parallax_set_uv_scale(node, scale_y)
+    return node.outputs["UV"]
+
+
+def _parallax_scale_uv(nodes, links, uv_socket, row, parent, location):
+    '''只做 Y 方向缩放，不加帧偏移：用于基础色精灵布局下的静态法线/高度。'''
+    row = max(1, int(row))
+    node_sep = nodes.new("ShaderNodeSeparateXYZ")
+    node_sep.parent = parent
+    node_sep.location = location
+    links.new(uv_socket, node_sep.inputs["Vector"])
+
+    node_mul = nodes.new("ShaderNodeMath")
+    node_mul.operation = "MULTIPLY"
+    node_mul.parent = parent
+    node_mul.location = (location[0] + 110.0, location[1])
+    links.new(node_sep.outputs["Y"], node_mul.inputs[0])
+    node_mul.inputs[1].default_value = float(row)
+
+    node_fract = nodes.new("ShaderNodeMath")
+    node_fract.operation = "FRACT"
+    node_fract.parent = parent
+    node_fract.location = (location[0] + 180.0, location[1] - 70.0)
+    links.new(node_mul.outputs[0], node_fract.inputs[0])
+
+    node_comb = nodes.new("ShaderNodeCombineXYZ")
+    node_comb.parent = parent
+    node_comb.location = (location[0] + 240.0, location[1])
+    links.new(node_sep.outputs["X"], node_comb.inputs["X"])
+    links.new(node_fract.outputs[0], node_comb.inputs["Y"])
+    links.new(node_sep.outputs["Z"], node_comb.inputs["Z"])
+    return node_comb.outputs["Vector"]
+
+
+def _parallax_height_sampler(nodes, links, node_tex_height, uv_socket, height_output, gusess_scale, smooth, parent, location):
+    node_height = nodes.new("ShaderNodeTexImage")
+    node_height.image = node_tex_height.image
+    node_height.interpolation = "Linear" if smooth else "Closest"
+    try:
+        node_height.extension = node_tex_height.extension
+    except Exception:
+        pass
+    node_height.parent = parent
+    node_height.location = location
+    links.new(uv_socket, node_height.inputs["Vector"])
+    height_socket = node_height.outputs[height_output]
+    if gusess_scale != 1:
+        node_math = nodes.new("ShaderNodeMath")
+        node_math.operation = "MULTIPLY_ADD"
+        node_math.parent = parent
+        node_math.location = (location[0], location[1] - 70.0)
+        node_math.inputs[1].default_value = gusess_scale
+        node_math.inputs[2].default_value = 1.0 - gusess_scale
+        links.new(height_socket, node_math.inputs[0])
+        height_socket = node_math.outputs[0]
+    return height_socket, node_height
+
+
+def creat_normal_parallax_new(node_tex_height, iterations, refine_steps, smooth, info_moving,
+                              nodes, links, height_output="Alpha", gusess_scale=1, depth=0.25,
+                              target_info=None, layout_info=None):
+    '''
+    无 Repeat 的法线视差：用 CP-步进采样 / CP-二分求值 手动展开。
+    只返回最终 UV，基色 / PBR / Bump 暂不接。
+    '''
+    if node_tex_height is None or node_tex_height.image is None:
+        return None, None
+
+    iterations = max(1, int(iterations))
+    refine_steps = max(0, int(refine_steps))
+    set_parallax_globals(iterations, depth)
+
+    node_frame = nodes.new("NodeFrame")
+    node_frame.label = "Crafter-视差（法线 / 无 Repeat）"
+    layout_total = 3 * iterations + 3 * refine_steps + 12
+    node_frame.location = (
+        node_tex_height.location.x - layout_total * 340.0 - 400.0,
+        node_tex_height.location.y,
+    )
+
+    layout_index = [0]
+
+    def local_location(x=0.0, y=0.0):
+        index = layout_index[0]
+        layout_index[0] += 1
+        return (-120.0 + index * 340.0, 0.0)
+
+    is_dynamic = bool(info_moving and info_moving[0])
+    height_offset, height_row = _parallax_frame_info(info_moving)
+    target_dynamic = bool(target_info and target_info[0])
+    target_offset, target_row = _parallax_frame_info(target_info)
+    base_dynamic = bool(layout_info and layout_info[0])
+    _, base_row = _parallax_frame_info(layout_info)
+    layout_row = base_row if base_dynamic else max(height_row, target_row, 1)
+    height_scale_y = float(layout_row) / float(max(height_row if is_dynamic else 1, 1))
+    target_scale_y = float(layout_row) / float(max(target_row if target_dynamic else 1, 1))
+    height_frame = height_offset if is_dynamic else None
+    target_frame = target_offset if target_dynamic else None
+
+    node_uv = nodes.new("ShaderNodeTexCoord")
+    node_uv.label = "UV 初始化"
+    node_uv.parent = node_frame
+    node_uv.location = local_location()
+    uv_source = node_uv.outputs["UV"]
+
+    node_view = nodes.new("ShaderNodeGroup")
+    node_view.node_tree = bpy.data.node_groups["CP-视线投影"]
+    node_view.parent = node_frame
+    node_view.location = local_location()
+
+    node_view.inputs["Scale"].default_value = int(layout_row)
+    if layout_row > 1:
+        # 基础色精灵布局下 UV 是帧尺寸，使用组内已除以 row 的步进
+        step_vector = node_view.outputs["视线投影_动态纹理"]
+    else:
+        # 没有动态布局，直接用未缩放的输出，省掉一次缩放
+        step_vector = node_view.outputs["视线投影"]
+
+    height_uv = _parallax_dynamic_uv(
+        nodes, links, uv_source, height_frame, height_scale_y, node_frame, local_location())
+
+    prev_height, _ = _parallax_height_sampler(
+        nodes, links, node_tex_height, height_uv, height_output, gusess_scale,
+        smooth, node_frame, local_location())
+
+    prev_hit = None
+    prev_uv = uv_source
+    prev_hit_uv = uv_source
+    prev_r = None
+    prev_hit_r = None
+    last_step = None
+
+    for index in range(iterations):
+        step = nodes.new("ShaderNodeGroup")
+        step.node_tree = bpy.data.node_groups["CP-步进采样"]
+        step.label = "步进 %d" % (index + 1)
+        step.parent = node_frame
+        step.location = local_location()
+
+        links.new(prev_height, step.inputs["Height"])
+        links.new(step_vector, step.inputs["视线投影"])
+        if prev_hit is not None:
+            links.new(prev_hit, step.inputs["命中"])
+        links.new(prev_uv, step.inputs["UV"])
+        links.new(prev_hit_uv, step.inputs["命中UV"])
+        if prev_r is not None:
+            links.new(prev_r, step.inputs["射线高度"])
+        if prev_hit_r is not None:
+            links.new(prev_hit_r, step.inputs["命中高度"])
+        if height_frame is not None:
+            links.new(height_frame, step.inputs["Frame Offset"])
+        else:
+            step.inputs["Frame Offset"].default_value = 0.0
+        _parallax_set_uv_scale(step, height_scale_y)
+
+        if index < iterations - 1:
+            next_uv = step.outputs["UV动态纹理"]
+            prev_height, _ = _parallax_height_sampler(
+                nodes, links, node_tex_height, next_uv, height_output,
+                gusess_scale, smooth, node_frame, local_location())
+            prev_hit = step.outputs["命中"]
+            prev_uv = step.outputs["UV"]
+            prev_hit_uv = step.outputs["命中UV"]
+            prev_r = step.outputs["射线高度"]
+            prev_hit_r = step.outputs["命中高度"]
+        else:
+            last_step = step
+
+    if last_step is None:
+        return None, node_frame
+
+    final_uv = last_step.outputs["命中UV"]
+
+    if refine_steps > 0:
+        # CP-步进采样 现在会把首次命中的上界和中点冻结在 UV_上/射线高度_上/UV_中 里。
+        b_uv_upper = last_step.outputs["UV_上"]
+        b_uv_lower = last_step.outputs["命中UV"]
+        b_r_upper = last_step.outputs["射线高度_上"]
+        b_r_lower = last_step.outputs["命中高度"]
+        b_hit = last_step.outputs["命中"]
+        b_uv_mid = last_step.outputs["UV_中"]
+        b_uv_mid_dyn = last_step.outputs["UV_中_动态纹理"]
+
+        for index in range(refine_steps):
+            b_height, _ = _parallax_height_sampler(
+                nodes, links, node_tex_height, b_uv_mid_dyn, height_output,
+                gusess_scale, smooth, node_frame, local_location())
+
+            binary = nodes.new("ShaderNodeGroup")
+            binary.node_tree = bpy.data.node_groups["CP-二分求值"]
+            binary.label = "二分 %d" % (index + 1)
+            binary.parent = node_frame
+            binary.location = local_location()
+
+            links.new(b_height, binary.inputs["Height"])
+            links.new(b_uv_upper, binary.inputs["UV_上"])
+            links.new(b_uv_lower, binary.inputs["UV_下"])
+            links.new(b_r_upper, binary.inputs["射线高度_上"])
+            links.new(b_r_lower, binary.inputs["射线高度_下"])
+            links.new(b_hit, binary.inputs["命中"])
+            links.new(b_uv_mid, binary.inputs["UV_中"])
+            if height_frame is not None:
+                links.new(height_frame, binary.inputs["Frame Offset"])
+            else:
+                binary.inputs["Frame Offset"].default_value = 0.0
+            _parallax_set_uv_scale(binary, height_scale_y)
+
+            final_uv = binary.outputs["UV_下"]
+            if index < refine_steps - 1:
+                b_uv_upper = binary.outputs["UV_上"]
+                b_uv_lower = binary.outputs["UV_下"]
+                b_r_upper = binary.outputs["射线高度_上"]
+                b_r_lower = binary.outputs["射线高度_下"]
+                b_uv_mid = binary.outputs["UV_中"]
+                b_uv_mid_dyn = binary.outputs["UV_中_动态纹理"]
+
+    final_uv = _parallax_dynamic_uv(
+        nodes, links, final_uv, target_frame, target_scale_y, node_frame, local_location())
+    return final_uv, node_frame
 
 
 def create_parallax_final(node, node_final_depth, info_height, info_moving, nodes, links, node_frame=None):

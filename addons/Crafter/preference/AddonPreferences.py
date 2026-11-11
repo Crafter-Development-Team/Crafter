@@ -286,7 +286,7 @@ class CrafterAddonPreferences(AddonPreferences):
     Parallax_Calculate_Normal: BoolProperty(name="Calculate Normal",
                                             default=False)# type: ignore
     Parallax_Based_on_Parsed_Normal: BoolProperty(name="Based on Parsed Normal",
-                                                  default=True)# type: ignore
+                                                  default=False)# type: ignore
     Parallax_Guess_Height: BoolProperty(name="Guess Height",
                                         description="Use base color as height",
                                         default=False)# type: ignore
@@ -295,8 +295,16 @@ class CrafterAddonPreferences(AddonPreferences):
                                              max=1,
                                              min=0)# type: ignore
     Parallax_Use_Repeat_Zone: BoolProperty(name="Use Repeat Zone",
-                                           description="Use the shader Repeat Zone (Blender 5.0+) instead of manually expanded iterations",
+                                           description="Deprecated: the current normal-only parallax path always uses the manual chain",
                                            default=False)# type: ignore
+    Parallax_Use_POM: BoolProperty(name="Use POM",
+                                   description="Run binary refinement after step sampling; Refine Steps controls its iteration count",
+                                   default=False)# type: ignore
+    Parallax_Refine_Steps: IntProperty(name="Refine Steps",
+                                       description="Binary refinement iterations after step sampling (0 = step only)",
+                                       default=5,
+                                       min=0,
+                                       max=16)# type: ignore
     
 # ========== 其他功能属性 ==========
     Other_index: IntProperty(name="Other Function's Index",
