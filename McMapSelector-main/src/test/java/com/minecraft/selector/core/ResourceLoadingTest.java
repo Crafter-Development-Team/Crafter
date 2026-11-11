@@ -93,24 +93,29 @@ class ResourceLoadingTest {
         assertTrue(assets.json.containsKey("assets/comments/blockstates/test.json"));
         new MinecraftResourceExtractor().addArchives(Collections.singletonList(file.toString()),(c,t,m)->{});
     }
-    @Test void malformedBiomeStillFailsWithArchiveAndEntryInTopLevelMessage() throws Exception {
+    @Test void malformedBiomeIsSkippedWithArchiveAndEntry() throws Exception {
         String entry="data/errors/worldgen/biome/broken.json";
         Path file=archive("bad-biome.jar",Collections.singletonMap(entry,json("{ /* unterminated"))).toRealPath();
-        IOException error=assertThrows(IOException.class,()->new MinecraftResourceExtractor().addArchives(Collections.singletonList(file.toString()),(c,t,m)->{}));
-        assertTrue(error.getMessage().contains(file.toString()));
-        assertTrue(error.getMessage().contains(entry));
+        MinecraftResourceExtractor extractor=new MinecraftResourceExtractor();
+        extractor.addArchives(Collections.singletonList(file.toString()),(c,t,m)->{});
+        String error=extractor.getArchiveFailures().get(file.toString());
+        assertTrue(error.contains(file.toString()));
+        assertTrue(error.contains(entry));
     }
-    @Test void malformedModelStillFailsWithArchiveAndEntryInTopLevelMessage() throws Exception {
+    @Test void malformedModelIsSkippedWithArchiveAndEntry() throws Exception {
         String entry="assets/errors/models/block/broken.json";
         Path file=archive("bad-model.jar",Collections.singletonMap(entry,json("{ \"parent\": }"))).toRealPath();
-        IOException error=assertThrows(IOException.class,()->new MinecraftResourceExtractor().addArchives(Collections.singletonList(file.toString()),(c,t,m)->{}));
-        assertTrue(error.getMessage().contains(file.toString()));
-        assertTrue(error.getMessage().contains(entry));
+        MinecraftResourceExtractor extractor=new MinecraftResourceExtractor();
+        extractor.addArchives(Collections.singletonList(file.toString()),(c,t,m)->{});
+        String error=extractor.getArchiveFailures().get(file.toString());
+        assertTrue(error.contains(file.toString()));
+        assertTrue(error.contains(entry));
     }
     @Test void brokenArchiveFailsAndCanBeRetriedAfterRepair() throws Exception {
         Path file=directory.resolve("broken.zip");Files.write(file,new byte[]{1,2,3});
         MinecraftResourceExtractor extractor=new MinecraftResourceExtractor();
-        assertThrows(IOException.class,()->extractor.addArchives(Collections.singletonList(file.toString()),(c,t,m)->{}));
+        extractor.addArchives(Collections.singletonList(file.toString()),(c,t,m)->{});
+        assertTrue(extractor.getArchiveFailures().containsKey(file.toString()));
         archive("broken.zip",Collections.singletonMap("assets/retry/textures/block/block.png",png(0xffcb12ad)));
         extractor.addArchives(Collections.singletonList(file.toString()),(c,t,m)->{});
         assertEquals(new Color(0xcb12ad),extractor.getExtractedColor("retry:block"));
@@ -120,16 +125,49 @@ class ResourceLoadingTest {
         String entry="assets/broken/models/block/fault.json";
         Path file=archive("中文 broken.zip",Collections.singletonMap(entry,json("{ not-json")));
         MinecraftResourceExtractor extractor=new MinecraftResourceExtractor();
-        IOException failure=assertThrows(IOException.class,()->extractor.addArchives(Collections.singletonList(file.toString()),(c,t,m)->{}));
-        assertTrue(failure.getMessage().contains(file.toString()),failure.toString());
-        StringWriter stack=new StringWriter();failure.printStackTrace(new PrintWriter(stack));
-        assertTrue(stack.toString().contains(entry),stack.toString());
-        assertTrue(stack.toString().contains("JsonParseException"),stack.toString());
-        assertFalse(extractor.isExtractionCompleted());
+        extractor.addArchives(Collections.singletonList(file.toString()),(c,t,m)->{});
+        String failure=extractor.getArchiveFailures().get(file.toString());
+        assertTrue(failure.contains(file.toString()),failure);
+        assertTrue(failure.contains(entry),failure);
+        assertTrue(extractor.isExtractionCompleted());
         assertTrue(extractor.getAllExtractedColors().isEmpty());
         archive("中文 broken.zip",Collections.singletonMap("assets/repaired/textures/block/block.png",png(0xff45ab23)));
         extractor.addArchives(Collections.singletonList(file.toString()),(c,t,m)->{});
         assertEquals(new Color(0x45ab23),extractor.getExtractedColor("repaired:block"));
+    }
+
+    @Test void badArchiveDoesNotAbortPaletteAndRepairIsRetried() throws Exception {
+        Path bad=directory.resolve("bad.jar");Files.write(bad,new byte[]{1,2,3});
+        Path good=archive("good.jar",Collections.singletonMap("assets/survivor/textures/block/block.png",png(0xff123456)));
+        ResourceOptions options=new ResourceOptions();options.auto=false;
+        options.mods.add(bad.toString());options.mods.add(good.toString());
+        BlockColors.Palette first=BlockColors.loadPalette(directory.toString(),options);
+        assertEquals(new Color(0x123456),first.getBlockColor("survivor:block"));
+        archive("bad.jar",Collections.singletonMap("assets/survivor/textures/block/block.png",png(0xffabcdef)));
+        options.mods.clear();options.mods.add(good.toString());options.mods.add(bad.toString());
+        assertEquals(new Color(0xabcdef),BlockColors.loadPalette(directory.toString(),options).getBlockColor("survivor:block"));
+    }
+    @Test void failedDecodeDoesNotDiscardGoodArchivesOrOverrideOrder() throws Exception {
+        Path a=archive("first.jar",Collections.singletonMap("assets/order/textures/block/block.png",png(0xff123456)));
+        Map<String,byte[]> broken=new LinkedHashMap<>();
+        broken.put("assets/leaked/textures/block/block.png",png(0xffabcdef));
+        broken.put("assets/leaked/models/block/broken.json",json("{ bad"));
+        Path b=archive("broken-model.jar",broken);
+        Path c=archive("last.jar",Collections.singletonMap("assets/order/textures/block/block.png",png(0xffabcdef)));
+        MinecraftResourceExtractor extractor=new MinecraftResourceExtractor();List<Integer> counts=new ArrayList<>();
+        extractor.addArchives(Arrays.asList(a.toString(),b.toString(),c.toString()),(n,t,m)->counts.add(n));
+        assertEquals(new Color(0xabcdef),extractor.getExtractedColor("order:block"));
+        assertFalse(extractor.getAllExtractedColors().containsKey("leaked:block"));
+        assertEquals(Arrays.asList(1,2,3),counts);
+        assertEquals(1,extractor.getArchiveFailures().size());
+    }
+    @Test void interruptedLoadingStillAborts() throws Exception {
+        Path file=archive("cancel.jar",Collections.singletonMap("assets/cancel/textures/block/block.png",png(0xff123456)));
+        Thread.currentThread().interrupt();
+        try {
+            assertThrows(IOException.class,()->new MinecraftResourceExtractor().addArchives(Collections.singletonList(file.toString()),(c,t,m)->{}));
+            assertTrue(Thread.currentThread().isInterrupted());
+        } finally {Thread.interrupted();}
     }
 
     @Test void malformedBiomeReportsZipEntry() throws Exception {
