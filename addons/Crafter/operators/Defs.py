@@ -2878,18 +2878,12 @@ def creat_normal_parallax_new(node_tex_height, iterations, refine_steps, smooth,
 
     node_frame = nodes.new("NodeFrame")
     node_frame.label = "Crafter-视差（法线 / 无 Repeat）"
-    layout_total = 3 * iterations + 3 * refine_steps + 12
-    node_frame.location = (
-        node_tex_height.location.x - layout_total * 340.0 - 400.0,
-        node_tex_height.location.y,
-    )
+    # 先按任意坐标创建，最后从右往左统一排版
+    node_frame.location = (0.0, 0.0)
+    image_slot = cp_slot = misc_slot = 0.0
 
-    layout_index = [0]
-
-    def local_location(x=0.0, y=0.0):
-        index = layout_index[0]
-        layout_index[0] += 1
-        return (-120.0 + index * 340.0, 0.0)
+    def local_location(slot=0.0):
+        return (0.0, 0.0)
 
     is_dynamic = bool(info_moving and info_moving[0])
     height_offset, height_row = _parallax_frame_info(info_moving)
@@ -2906,13 +2900,13 @@ def creat_normal_parallax_new(node_tex_height, iterations, refine_steps, smooth,
     node_uv = nodes.new("ShaderNodeTexCoord")
     node_uv.label = "UV 初始化"
     node_uv.parent = node_frame
-    node_uv.location = local_location()
+    node_uv.location = local_location(misc_slot)
     uv_source = node_uv.outputs["UV"]
 
     node_view = nodes.new("ShaderNodeGroup")
     node_view.node_tree = bpy.data.node_groups["CP-视线投影"]
     node_view.parent = node_frame
-    node_view.location = local_location()
+    node_view.location = local_location(cp_slot)
 
     node_view.inputs["Scale"].default_value = int(layout_row)
     if layout_row > 1:
@@ -2923,11 +2917,11 @@ def creat_normal_parallax_new(node_tex_height, iterations, refine_steps, smooth,
         step_vector = node_view.outputs["视线投影"]
 
     height_uv = _parallax_dynamic_uv(
-        nodes, links, uv_source, height_frame, height_scale_y, node_frame, local_location())
+        nodes, links, uv_source, height_frame, height_scale_y, node_frame, local_location(cp_slot))
 
     prev_height, _ = _parallax_height_sampler(
         nodes, links, node_tex_height, height_uv, height_output, gusess_scale,
-        smooth, node_frame, local_location())
+        smooth, node_frame, local_location(image_slot))
 
     prev_hit = None
     prev_uv = uv_source
@@ -2963,7 +2957,7 @@ def creat_normal_parallax_new(node_tex_height, iterations, refine_steps, smooth,
             next_uv = step.outputs["UV动态纹理"]
             prev_height, _ = _parallax_height_sampler(
                 nodes, links, node_tex_height, next_uv, height_output,
-                gusess_scale, smooth, node_frame, local_location())
+                gusess_scale, smooth, node_frame, local_location(image_slot))
             prev_hit = step.outputs["命中"]
             prev_uv = step.outputs["UV"]
             prev_hit_uv = step.outputs["命中UV"]
@@ -2990,7 +2984,7 @@ def creat_normal_parallax_new(node_tex_height, iterations, refine_steps, smooth,
         for index in range(refine_steps):
             b_height, _ = _parallax_height_sampler(
                 nodes, links, node_tex_height, b_uv_mid_dyn, height_output,
-                gusess_scale, smooth, node_frame, local_location())
+                gusess_scale, smooth, node_frame, local_location(image_slot))
 
             binary = nodes.new("ShaderNodeGroup")
             binary.node_tree = bpy.data.node_groups["CP-二分求值"]
@@ -3021,7 +3015,20 @@ def creat_normal_parallax_new(node_tex_height, iterations, refine_steps, smooth,
                 b_uv_mid_dyn = binary.outputs["UV_中_动态纹理"]
 
     final_uv = _parallax_dynamic_uv(
-        nodes, links, final_uv, target_frame, target_scale_y, node_frame, local_location())
+        nodes, links, final_uv, target_frame, target_scale_y, node_frame, local_location(cp_slot))
+
+    # 从右往左排：最后一颗固定，前面依次往左
+    layout_nodes = [n for n in nodes if n.parent == node_frame]
+    layout_nodes = [n for n in layout_nodes if n.bl_idname not in (
+        "ShaderNodeMath", "ShaderNodeCombineXYZ", "ShaderNodeSeparateXYZ",
+        "ShaderNodeValue", "NodeReroute")]
+    cursor = node_tex_height.location.x - 1800.0
+    gap = 12.0
+    for node in reversed(layout_nodes):
+        width = max(float(getattr(node, "width", 200.0)), 1.0)
+        node.location = (cursor - width, 0.0)
+        cursor = node.location.x - gap
+
     return final_uv, node_frame
 
 
