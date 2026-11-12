@@ -898,12 +898,12 @@ def unzip(zip_path, extract_to):
     with zipfile.ZipFile(zip_path, 'r') as zip_ref:
         zip_ref.extractall(extract_to)
 
-def add_node_group_if_not_exists(names):
+def add_node_group_if_not_exists(names, blend_path=None):
     missing = [name for name in names if name not in bpy.data.node_groups]
     if not missing:
         return
     try:
-        with bpy.data.libraries.load(dir_blend_append, link=False) as (data_from, data_to):
+        with bpy.data.libraries.load(blend_path or dir_blend_append, link=False) as (data_from, data_to):
             data_to.node_groups = [name for name in missing if name in data_from.node_groups]
     except Exception as e:
         print(f"Error loading node groups {missing}: {e}")
@@ -2595,12 +2595,17 @@ def _parallax_frame_alpha(source_info):
     return frame_input.links[0].from_node.outputs.get("Alpha")
 
 
-def set_parallax_globals(iterations, depth):
-    '''导入后再次写 CP-Iterations / CP-Depth，避免 append 默认值没有生效。'''
-    values = (
+def set_parallax_globals(iterations, depth, refine_steps=None):
+    '''导入后再次写 CP-/CPR- 的迭代/深度常量，避免 append 默认值没有生效。'''
+    values = [
         ("CP-Iterations", "Value", int(iterations)),
         ("CP-Depth", "Depth", float(depth)),
-    )
+        # Repeat Zone 版：同样是“组输出上的常量”，不是节点输入
+        ("CPR-Iterations", "Value", int(iterations)),
+        ("CPR-Depth", "Depth", float(depth)),
+    ]
+    if refine_steps is not None:
+        values.append(("CPR-Iterations_Binary", "Value", max(0, int(refine_steps))))
     for group_name, output_name, value in values:
         group = bpy.data.node_groups.get(group_name)
         if group is None:
@@ -2904,6 +2909,93 @@ def creat_normal_parallax_new(node_tex_height, iterations, refine_steps, smooth,
         node.location = (cursor - width, 0.0)
         cursor = node.location.x - gap
 
+    return final_uv, node_frame, layout_row
+
+
+def creat_normal_parallax_repeat(node_tex_height, iterations, refine_steps, smooth, info_moving,
+                                 nodes, links, height_output="Alpha", gusess_scale=1, depth=0.25,
+                                 target_info=None, layout_info=None, use_pom=False):
+    '''
+    Blender 5.0+ 的 Repeat Zone 版视差：把高度贴图包成一个 Closure，
+    交给 append_5.0.blend 里的 CPR-视差 组迭代，输出二分/POM 的局部 UV。
+    任何依赖缺失或版本不符都返回 (None, None, 1)，由调用方回退手动展开。
+    '''
+    if bpy.app.version < (5, 0, 0):
+        return None, None, 1
+    if node_tex_height is None or node_tex_height.image is None:
+        return None, None, 1
+    if not all(hasattr(bpy.types, name) for name in ("NodeClosureInput", "NodeClosureOutput")):
+        return None, None, 1
+    required_groups = (
+        "CPR-视差", "CPR-步进采样", "CPR-二分求值", "CPR-POM插值",
+        "CPR-动态纹理", "CPR-视线投影", "CPR-Iterations",
+        "CPR-Iterations_Binary", "CPR-Depth",
+    )
+    if any(name not in bpy.data.node_groups for name in required_groups):
+        return None, None, 1
+
+    iterations = max(1, int(iterations))
+    refine_steps = max(0, int(refine_steps))
+    set_parallax_globals(iterations, depth, refine_steps)
+
+    # 与手动展开路径一致：先把基础色/法向/高度各自的动态帧信息换算成统一行高
+    is_dynamic = bool(info_moving and info_moving[0])
+    height_offset, height_row = _parallax_frame_info(info_moving)
+    _, target_row = _parallax_frame_info(target_info)
+    base_dynamic = bool(layout_info and layout_info[0])
+    _, base_row = _parallax_frame_info(layout_info)
+    layout_row = base_row if base_dynamic else max(height_row, target_row, 1)
+    height_scale_y = float(layout_row) / float(max(height_row if is_dynamic else 1, 1))
+    height_frame = height_offset if is_dynamic else None
+
+    node_frame = nodes.new("NodeFrame")
+    node_frame.label = "Crafter-视差（Repeat）"
+    node_frame.location = (max(0.0, node_tex_height.location.x - 1200.0),
+                           node_tex_height.location.y)
+
+    def place(node, x, y=0.0):
+        node.parent = node_frame
+        node.location = (x, y)
+        return node
+
+    # 高度采样闭包：输入 UV，输出 Height；CPR-视差 内部用 Evaluate Closure 迭代
+    closure_in = place(nodes.new("NodeClosureInput"), 0.0, 0.0)
+    closure_out = place(nodes.new("NodeClosureOutput"), 620.0, 0.0)
+    closure_out.input_items.new("VECTOR", "UV")
+    closure_out.output_items.new("FLOAT", "Height")
+    closure_in.pair_with_output(closure_out)
+
+    node_height = place(nodes.new("ShaderNodeTexImage"), 220.0, 0.0)
+    node_height.image = node_tex_height.image
+    node_height.interpolation = "Linear" if smooth else "Closest"
+    try:
+        node_height.extension = node_tex_height.extension
+    except Exception:
+        pass
+    links.new(closure_in.outputs["UV"], node_height.inputs["Vector"])
+
+    height_socket = node_height.outputs[height_output]
+    if gusess_scale != 1:
+        node_math = place(nodes.new("ShaderNodeMath"), 380.0, -110.0)
+        node_math.operation = "MULTIPLY_ADD"
+        node_math.inputs[1].default_value = gusess_scale
+        node_math.inputs[2].default_value = 1.0 - gusess_scale
+        links.new(height_socket, node_math.inputs[0])
+        height_socket = node_math.outputs[0]
+    links.new(height_socket, closure_out.inputs["Height"])
+
+    node_parallax = place(nodes.new("ShaderNodeGroup"), 820.0, 0.0)
+    node_parallax.node_tree = bpy.data.node_groups["CPR-视差"]
+    node_parallax.inputs["Scale"].default_value = int(layout_row)
+    if height_frame is not None:
+        links.new(height_frame, node_parallax.inputs["Frame Offset"])
+    else:
+        node_parallax.inputs["Frame Offset"].default_value = 0.0
+    node_parallax.inputs["row_b / row_h"].default_value = height_scale_y
+    links.new(closure_out.outputs["Closure"], node_parallax.inputs["Closure"])
+
+    use_pom_group = use_pom and "POM" in node_parallax.outputs
+    final_uv = node_parallax.outputs["POM" if use_pom_group else "二分"]
     return final_uv, node_frame, layout_row
 
 

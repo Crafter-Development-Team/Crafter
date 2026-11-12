@@ -6,7 +6,7 @@ import math
 from ..config import __addon_name__
 from ....common.i18n.i18n import i18n, load_dictionary
 from bpy.props import *
-from ..__init__ import dir_cafter_data, dir_resourcepacks_plans, dir_materials, dir_classification_basis, dir_blend_append, dir_init_main
+from ..__init__ import dir_cafter_data, dir_resourcepacks_plans, dir_materials, dir_classification_basis, dir_blend_append, dir_blend_append_5_0, dir_init_main
 from .Defs import *
 from ..i18n.dictionary import dictionary as _addon_dictionary
 # 操作符的 bl_label 在类定义时就要取值；先把本插件的词典并进去，
@@ -15,6 +15,12 @@ load_dictionary(_addon_dictionary)
 
 # 无 Repeat 手动视差：基础色/PBR/法线分别按自己的帧信息转换 UV。
 PARALLAX_VECTOR_PREFIX = "Crafter_parallax_vector_"
+# Blender 5.0+ Repeat Zone 视差组；旧版本不加载、不显示、不使用
+CPR_GROUP_NAMES = (
+    "CPR-视差", "CPR-步进采样", "CPR-二分求值", "CPR-POM插值",
+    "CPR-动态纹理", "CPR-视线投影", "CPR-Iterations",
+    "CPR-Iterations_Binary", "CPR-Depth",
+)
 
 
 def remember_parallax_vector(material, node):
@@ -855,6 +861,9 @@ class VIEW3D_OT_CrafterLoadParallax(bpy.types.Operator):
         row.enabled = not addon_prefs.Parallax_Use_POM_Interpolation
         row.prop(addon_prefs, "Parallax_Refine_Steps", text=i18n("Binary Steps"))
 
+        if bpy.app.version >= (5, 0, 0):
+            layout.prop(addon_prefs, "Parallax_Use_Repeat_Zone", text=i18n("Use Repeat Zone"))
+
     def execute(self, context: bpy.types.Context):
 
         info_log('加载视差', '加载视差')
@@ -866,8 +875,21 @@ class VIEW3D_OT_CrafterLoadParallax(bpy.types.Operator):
         if context.active_object:
             bpy.ops.object.mode_set(mode='OBJECT')
         bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
-        # 导入CP-节点组
+        # 导入CP-节点组（手动展开路径；Repeat 失败时也靠它回退）
         add_node_group_if_not_exists(["CP-矢量变换","CP-Iterations","CP-Depth","CP-动态纹理","CP-步进采样","CP-二分求值","CP-POM插值","CP-视线投影"])
+        # Blender 5.0+ 才加载 Repeat Zone 组；旧版本连文件都不碰
+        use_repeat_zone = (bpy.app.version >= (5, 0, 0)
+                           and bool(getattr(addon_prefs, "Parallax_Use_Repeat_Zone", True)))
+        if use_repeat_zone:
+            if not os.path.exists(dir_blend_append_5_0):
+                warn_log("找不到 append_5.0.blend，Repeat Zone 视差回退手动展开")
+                use_repeat_zone = False
+            else:
+                add_node_group_if_not_exists(list(CPR_GROUP_NAMES), blend_path=dir_blend_append_5_0)
+                missing_cpr = [name for name in CPR_GROUP_NAMES if name not in bpy.data.node_groups]
+                if missing_cpr:
+                    warn_log(f"Repeat Zone 视差节点组缺失，回退手动展开: {missing_cpr}")
+                    use_repeat_zone = False
         # 开始遍历
         for_collection = []
         for mcmt in context.scene.Crafter_mcmts:
@@ -939,21 +961,48 @@ class VIEW3D_OT_CrafterLoadParallax(bpy.types.Operator):
             height_scale = addon_prefs.Parallax_Guess_Height_Scale if base_as_height else 1
             use_pom_interp = addon_prefs.Parallax_Use_POM_Interpolation
             refine_steps = 0 if use_pom_interp else addon_prefs.Parallax_Refine_Steps
-            final_uv, node_frame, base_row = creat_normal_parallax_new(
-                node_tex_height=height_tex,
-                iterations=iterations,
-                refine_steps=refine_steps,
-                smooth=smooth,
-                info_moving=height_info,
-                nodes=nodes,
-                links=links,
-                height_output=height_out,
-                gusess_scale=height_scale,
-                depth=addon_prefs.Parallax_Depth,
-                target_info=info_normal,
-                layout_info=info_base,
-                use_pom=use_pom_interp,
-            )
+            # 纯步进（二分 0 次）时 CPR-视差 没有对应的“步进 UV”输出，回退手动展开
+            use_repeat_for_material = use_repeat_zone and (use_pom_interp or refine_steps > 0)
+
+            final_uv = None
+            node_frame = None
+            base_row = 1
+            if use_repeat_for_material:
+                try:
+                    final_uv, node_frame, base_row = creat_normal_parallax_repeat(
+                        node_tex_height=height_tex,
+                        iterations=iterations,
+                        refine_steps=refine_steps,
+                        smooth=smooth,
+                        info_moving=height_info,
+                        nodes=nodes,
+                        links=links,
+                        height_output=height_out,
+                        gusess_scale=height_scale,
+                        depth=addon_prefs.Parallax_Depth,
+                        target_info=info_normal,
+                        layout_info=info_base,
+                        use_pom=use_pom_interp,
+                    )
+                except Exception as ex:
+                    warn_log(f"Repeat Zone 视差失败，回退手动展开: {ex}")
+                    final_uv = None
+            if final_uv is None:
+                final_uv, node_frame, base_row = creat_normal_parallax_new(
+                    node_tex_height=height_tex,
+                    iterations=iterations,
+                    refine_steps=refine_steps,
+                    smooth=smooth,
+                    info_moving=height_info,
+                    nodes=nodes,
+                    links=links,
+                    height_output=height_out,
+                    gusess_scale=height_scale,
+                    depth=addon_prefs.Parallax_Depth,
+                    target_info=info_normal,
+                    layout_info=info_base,
+                    use_pom=use_pom_interp,
+                )
             if final_uv is not None:
                 targets = [
                     (node_tex_base, info_base),
@@ -1033,7 +1082,7 @@ class VIEW3D_OT_CrafterRemoveParallax(bpy.types.Operator):
                         nodes_wait_delete.append(node)
                 elif node.type == "GROUP":
                     if node.node_tree != None:
-                        if node.node_tree.name.startswith("CP-"):
+                        if node.node_tree.name.startswith(("CP-", "CPR-")):
                             nodes_wait_delete.append(node)
                         if node.node_tree.name.startswith("CI-"):
                             node_CI = node
@@ -1063,10 +1112,10 @@ class VIEW3D_OT_CrafterRemoveParallax(bpy.types.Operator):
                     if inpupt.name == "Parsed Normal":
                         links.new(node_C_PBR_Parser.outputs["Parsed Normal"], inpupt)
 
-        # 材质里的 CP 节点已经清理完，最后再删 CP 节点组
+        # 材质里的 CP/CPR 节点已经清理完，最后再删节点组
         node_delete = []
         for group in bpy.data.node_groups:
-            if group.name.startswith("CP-"):
+            if group.name.startswith(("CP-", "CPR-")):
                 node_delete.append(group)
         for group in node_delete:
             bpy.data.node_groups.remove(group)

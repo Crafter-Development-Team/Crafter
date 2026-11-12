@@ -18,7 +18,7 @@ bl_info = {
     "name": "Crafter",
     "author": "Crafter Development Team",
     "blender": (4, 2, 0),
-    "version": (0, 9, 8),
+    "version": (0, 9, 9),
     "description": "目标是成为从Minecraft到Blender全流程的Blender插件",
     "warning": "",
     "doc_url": "https://github.com/Crafter-Production-Team/Crafter?tab=readme-ov-file#crafter",
@@ -78,6 +78,8 @@ dir_materials = os.path.join(dir_cafter_data, "materials")
 dir_classification_basis = os.path.join(dir_cafter_data, "classification basis")
 dir_classification_basis_default = os.path.join(dir_classification_basis, "default")
 dir_blend_append = os.path.join(dir_defaults,"append.blend")
+# Blender 5.0+ 的 Repeat Zone 视差节点组单独放一个文件，旧版本永远不加载
+dir_blend_append_5_0 = os.path.join(dir_defaults,"append_5.0.blend")
 dir_no_lod_blocks = os.path.join(dir_cafter_data, "no_lod_blocks")
 # ========== 注册 ==========
 from .diagnostics import trace_operation, log_environment, log_event, log_exception
@@ -93,9 +95,11 @@ def register():
     try:
         # Crafter-time 改成颜色 alpha 驱动器后，老偏好里关着的开关一次性打开（只迁移一次）
         from .preference.AddonPreferences import (migrate_crafter_time_preference,
-                                                  migrate_merge_mirror_preference)
+                                                  migrate_merge_mirror_preference,
+                                                  migrate_parallax_repeat_preference)
         migrate_crafter_time_preference()
         migrate_merge_mirror_preference()
+        migrate_parallax_repeat_preference()
         # 时间驱动的 Cycles 刷新补丁：换帧时给带驱动器的物体打标记（EEVEE 下不做事）
         from .operators.Defs import register_crafter_time_handlers
         register_crafter_time_handlers()

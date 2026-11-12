@@ -314,6 +314,14 @@ class CrafterAddonPreferences(AddonPreferences):
                                        default=5,
                                        min=0,
                                        max=16)# type: ignore
+    # Blender 5.0+ 才用 Repeat Zone；旧版本不显示也不使用
+    Parallax_Use_Repeat_Zone: BoolProperty(name="Use Repeat Zone",
+                                           description="Blender 5.0+ only: build the parallax iteration with a shader Repeat Zone. Older Blender versions ignore this switch",
+                                           default=True)# type: ignore
+    # Repeat Zone 默认改为开启的迁移标记
+    parallax_repeat_prefs_version: IntProperty(name="Parallax Repeat Prefs Version",
+                                               default=0,
+                                               options={'HIDDEN'})# type: ignore
     
 # ========== 其他功能属性 ==========
     Other_index: IntProperty(name="Other Function's Index",
@@ -440,5 +448,23 @@ def migrate_merge_mirror_preference():
             return
         addon_prefs.mergeMirrorDoubleSided = True
         addon_prefs.merge_mirror_prefs_version = MERGE_MIRROR_PREFS_VERSION
+    except (KeyError, AttributeError):
+        return
+
+
+# Repeat Zone 视差现在默认开；老实验版本里存着的 False 一次性迁成开，之后用户仍可手动关。
+PARALLAX_REPEAT_PREFS_VERSION = 1
+
+
+def migrate_parallax_repeat_preference():
+    '''老偏好里"Repeat Zone 视差"默认关的一次性打开（仅 5.0+ 真正生效）'''
+    try:
+        addon_prefs = bpy.context.preferences.addons[__addon_name__].preferences
+        if addon_prefs is None:
+            return
+        if getattr(addon_prefs, "parallax_repeat_prefs_version", 0) >= PARALLAX_REPEAT_PREFS_VERSION:
+            return
+        addon_prefs.Parallax_Use_Repeat_Zone = True
+        addon_prefs.parallax_repeat_prefs_version = PARALLAX_REPEAT_PREFS_VERSION
     except (KeyError, AttributeError):
         return
