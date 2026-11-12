@@ -1,5 +1,7 @@
 package com.minecraft.selector.core;
 
+import com.minecraft.selector.i18n.I18n;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.awt.Color;
 import java.io.*;
@@ -25,7 +27,7 @@ public class MinecraftResourceExtractor {
         archiveFailures.clear();
         final long started=System.nanoTime();
         final com.minecraft.selector.utils.LogManager logs=com.minecraft.selector.utils.LogManager.getInstance();
-        if(paths.isEmpty()) {progress.onProgress(0,0,"No resource archives found");return;}
+        if(paths.isEmpty()) {progress.onProgress(0,0,I18n.t("No resource archives found"));return;}
         int workerCount=Math.min(paths.size(),Math.min(4,Math.max(1,Runtime.getRuntime().availableProcessors())));
         logs.info("Resource extraction started: archives="+paths.size()+" workers="+workerCount,"Resources");
         java.util.concurrent.ExecutorService workers=java.util.concurrent.Executors.newFixedThreadPool(workerCount);
@@ -60,7 +62,7 @@ public class MinecraftResourceExtractor {
             for(int i=1;i<=paths.size();i++) {
                 Map.Entry<Integer,ResourceArchiveCache.Assets> result=done.take().get();
                 ordered[result.getKey()]=result.getValue();extracted=i;
-                String message=(result.getValue()==null?"Skipped resource archive ":"Extracted resources ")+i+"/"+paths.size()+": "+new File(paths.get(result.getKey())).getName();
+                String message=(result.getValue()==null?I18n.t("Skipped resource archive %d/%d: %s", i, paths.size(), new File(paths.get(result.getKey())).getName()):I18n.t("Extracted resources %d/%d: %s", i, paths.size(), new File(paths.get(result.getKey())).getName()));
                 logs.info(message,"Resources");
                 progress.onProgress(i,paths.size(),message);
             }

@@ -1,6 +1,7 @@
 package com.minecraft.selector.utils;
 
 import javax.swing.JLabel;
+import com.minecraft.selector.i18n.I18n;
 import javax.swing.JOptionPane;
 import javax.swing.SwingUtilities;
 import java.awt.Component;
@@ -55,7 +56,7 @@ public final class UserFeedback {
         if (throwable != null && throwable.getMessage() != null && !throwable.getMessage().isEmpty()) {
             return throwable.getMessage();
         }
-        return throwable != null ? throwable.getClass().getSimpleName() : "Unknown error";
+        return throwable != null ? throwable.getClass().getSimpleName() : I18n.t("Unknown error");
     }
 
     private static String source(Component owner) {
@@ -73,7 +74,7 @@ public final class UserFeedback {
 
     private static void showDialog(final Component owner, final String text) {
         Runnable show = () -> JOptionPane.showMessageDialog(
-            owner, text, "Map selector", JOptionPane.ERROR_MESSAGE);
+            owner, text, I18n.t("Map selector"), JOptionPane.ERROR_MESSAGE);
         if (SwingUtilities.isEventDispatchThread()) {
             show.run();
         } else {

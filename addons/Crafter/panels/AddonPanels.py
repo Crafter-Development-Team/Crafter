@@ -125,8 +125,8 @@ class VIEW3D_PT_CrafterMaterials(bpy.types.Panel):
         col1_parallax.label(icon="TEXTURE")
         col2_parallax = row_parallax.column()
         row_col2_parallax = col2_parallax.row(align=True)
-        row_col2_parallax.operator("crafter.load_parallax",icon="ADD",text="Load Parallax")
-        row_col2_parallax.operator("crafter.remove_parallax",icon="X",text="Remove Parallax")
+        row_col2_parallax.operator("crafter.load_parallax",icon="ADD",text=i18n("Load Parallax"))
+        row_col2_parallax.operator("crafter.remove_parallax",icon="X",text=i18n("Remove Parallax"))
 
         box_material_panel = box.box()
         row_material_panel = box_material_panel.row()

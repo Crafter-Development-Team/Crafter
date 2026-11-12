@@ -2,14 +2,15 @@ package com.minecraft.selector.gui;
 
 import com.minecraft.selector.core.ImportLod;
 import java.awt.*;
+import com.minecraft.selector.i18n.I18n;
 import java.util.function.Consumer;
 import javax.swing.*;
 
 /** Swing controls kept independent of JFrame so the preferences link is headless-testable. */
 public final class ImportLodPanel extends JPanel {
-    final JComboBox<String> maxLevel = new JComboBox<>(new String[]{"Off","1","2","3","4"});
+    final JComboBox<String> maxLevel = new JComboBox<>(new String[]{I18n.t("Off"),"1","2","3","4"});
     final JSpinner[] distances = new JSpinner[4];
-    final JCheckBox autoCenter = new JCheckBox("Auto center",true);
+    final JCheckBox autoCenter = new JCheckBox(I18n.t("Auto center"),true);
     final JSpinner centerX = integer(0,Integer.MIN_VALUE), centerZ = integer(0,Integer.MIN_VALUE);
     final JLabel effectiveCenter = new JLabel();
     private final Consumer<ImportLod> listener;
@@ -23,19 +24,19 @@ public final class ImportLodPanel extends JPanel {
         setAlignmentX(Component.LEFT_ALIGNMENT);
         // Stretch to CollapsiblePanel width so FlowLayout can wrap instead of a single tall column.
         setMaximumSize(new Dimension(Integer.MAX_VALUE, Integer.MAX_VALUE));
-        add(labeled("Max LOD", maxLevel));
+        add(labeled(I18n.t("Max LOD"), maxLevel));
         for (int i=0;i<4;i++) {
             distances[i]=integer(8,0);
             add(labeled("LOD"+i, distances[i]));
             distances[i].addChangeListener(e->changed());
         }
         add(autoCenter);
-        add(labeled("Center X", centerX));
-        add(labeled("Center Z", centerZ));
-        add(labeled("Preview", effectiveCenter));
+        add(labeled(I18n.t("Center X"), centerX));
+        add(labeled(I18n.t("Center Z"), centerZ));
+        add(labeled(I18n.t("Preview"), effectiveCenter));
         maxLevel.addActionListener(e->changed()); autoCenter.addActionListener(e->changed());
         centerX.addChangeListener(e->changed()); centerZ.addChangeListener(e->changed());
-        setToolTipText("Auto: selection chunk midpoint (toward zero); otherwise player, spawn in this dimension, or 0,0. Circles use cumulative chunk distances × 16.");
+        setToolTipText(I18n.t("Auto: selection chunk midpoint (toward zero); otherwise player, spawn in this dimension, or 0,0. Circles use cumulative chunk distances × 16."));
         setSettings(ImportLod.DEFAULT);
     }
 

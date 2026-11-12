@@ -50,12 +50,12 @@ public class CollapsiblePanel extends JPanel {
         
         // 标题标签
         titleLabel = new JLabel(title);
-        titleLabel.setFont(titleLabel.getFont().deriveFont(Font.BOLD, 12f));
+        titleLabel.setFont(Fonts.ui(12f, Font.BOLD));
         titleLabel.setForeground(borderColor.darker());
         
         // 箭头标签
         arrowLabel = new JLabel(collapsed ? "▶" : "▼");
-        arrowLabel.setFont(arrowLabel.getFont().deriveFont(Font.BOLD, 10f));
+        arrowLabel.setFont(Fonts.ui(10f, Font.BOLD));
         arrowLabel.setForeground(borderColor);
         
         headerPanel.add(arrowLabel, BorderLayout.WEST);

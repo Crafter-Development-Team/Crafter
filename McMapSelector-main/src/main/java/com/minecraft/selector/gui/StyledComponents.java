@@ -1,6 +1,7 @@
 package com.minecraft.selector.gui;
 
 import javax.swing.*;
+import com.minecraft.selector.i18n.I18n;
 import javax.swing.border.Border;
 import javax.swing.event.ChangeEvent;
 import javax.swing.event.ChangeListener;
@@ -24,7 +25,7 @@ public class StyledComponents {
         JTextField textField = new JTextField(text, columns);
         
         // 设置基本样式
-        textField.setFont(textField.getFont().deriveFont(Font.PLAIN, 12f));
+        textField.setFont(Fonts.ui(12f, Font.PLAIN));
         textField.setBorder(createRoundedBorder(UIThemeManager.ThemeColors.PRIMARY_BLUE, false));
         
         // 添加焦点效果
@@ -50,7 +51,7 @@ public class StyledComponents {
         JComboBox<T> comboBox = new JComboBox<>(items);
         
         // 设置基本样式
-        comboBox.setFont(comboBox.getFont().deriveFont(Font.PLAIN, 12f));
+        comboBox.setFont(Fonts.ui(12f, Font.PLAIN));
         comboBox.setBorder(createRoundedBorder(UIThemeManager.ThemeColors.MINECRAFT_GREEN, false));
         
         // 设置渲染器
@@ -83,7 +84,7 @@ public class StyledComponents {
         JCheckBox checkBox = new JCheckBox(text, selected);
         
         // 设置基本样式
-        checkBox.setFont(checkBox.getFont().deriveFont(Font.BOLD, 12f));
+        checkBox.setFont(Fonts.ui(12f, Font.BOLD));
         checkBox.setFocusPainted(false);
         
         // 设置颜色
@@ -97,7 +98,7 @@ public class StyledComponents {
      */
     public static JLabel createStyledLabel(String text) {
         JLabel label = new JLabel(text);
-        label.setFont(label.getFont().deriveFont(Font.PLAIN, 12f));
+        label.setFont(Fonts.ui(12f, Font.PLAIN));
         return label;
     }
     
@@ -106,7 +107,7 @@ public class StyledComponents {
      */
     public static JLabel createTitleLabel(String text) {
         JLabel label = new JLabel(text);
-        label.setFont(label.getFont().deriveFont(Font.BOLD, 14f));
+        label.setFont(Fonts.ui(14f, Font.BOLD));
         label.setForeground(UIThemeManager.ThemeColors.PRIMARY_BLUE);
         return label;
     }
@@ -116,7 +117,7 @@ public class StyledComponents {
      */
     public static JLabel createInfoLabel(String text) {
         JLabel label = new JLabel(text);
-        label.setFont(label.getFont().deriveFont(Font.PLAIN, 11f));
+        label.setFont(Fonts.ui(11f, Font.PLAIN));
         label.setForeground(Color.GRAY);
         return label;
     }
@@ -126,7 +127,7 @@ public class StyledComponents {
      */
     public static JLabel createSuccessLabel(String text) {
         JLabel label = new JLabel(text);
-        label.setFont(label.getFont().deriveFont(Font.BOLD, 12f));
+        label.setFont(Fonts.ui(12f, Font.BOLD));
         label.setForeground(UIThemeManager.ThemeColors.SUCCESS_GREEN);
         return label;
     }
@@ -136,7 +137,7 @@ public class StyledComponents {
      */
     public static JLabel createWarningLabel(String text) {
         JLabel label = new JLabel(text);
-        label.setFont(label.getFont().deriveFont(Font.BOLD, 12f));
+        label.setFont(Fonts.ui(12f, Font.BOLD));
         label.setForeground(UIThemeManager.ThemeColors.WARNING_ORANGE);
         return label;
     }
@@ -146,7 +147,7 @@ public class StyledComponents {
      */
     public static JLabel createErrorLabel(String text) {
         JLabel label = new JLabel(text);
-        label.setFont(label.getFont().deriveFont(Font.BOLD, 12f));
+        label.setFont(Fonts.ui(12f, Font.BOLD));
         label.setForeground(UIThemeManager.ThemeColors.DANGER_RED);
         return label;
     }
@@ -159,7 +160,7 @@ public class StyledComponents {
         
         // 设置基本样式
         progressBar.setStringPainted(true);
-        progressBar.setFont(progressBar.getFont().deriveFont(Font.BOLD, 11f));
+        progressBar.setFont(Fonts.ui(11f, Font.BOLD));
         progressBar.setForeground(UIThemeManager.ThemeColors.SUCCESS_GREEN);
         progressBar.setBackground(Color.LIGHT_GRAY);
         
@@ -466,7 +467,7 @@ public class StyledComponents {
 
             // 绘制数值标签
             g2d.setColor(Color.BLACK);
-            g2d.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 10));
+            g2d.setFont(Fonts.ui(10f, Font.PLAIN));
             FontMetrics fm = g2d.getFontMetrics();
 
             // 下限标签
@@ -553,7 +554,7 @@ public class StyledComponents {
             this.highlightValue = Math.min(this.maxValue, this.upperValue + 16);   // 默认贴着上界上方一点：既能看到紫 thumb，带里通常又是空的
             setPreferredSize(new Dimension(104, 420));
             setOpaque(false);
-            setToolTipText("Purple = highlight band top, orange = top Y, green = bottom Y");
+            setToolTipText(I18n.t("Purple = highlight band top, orange = top Y, green = bottom Y"));
 
             addMouseListener(new MouseAdapter() {
                 @Override
@@ -812,7 +813,7 @@ public class StyledComponents {
             drawThumb(g2d, x, upperY, UIThemeManager.ThemeColors.WARNING_ORANGE);
             drawThumb(g2d, x, highlightY, highlightEnabled ? HIGHLIGHT_COLOR : Color.GRAY);
 
-            g2d.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 11));
+            g2d.setFont(Fonts.ui(11f, Font.PLAIN));
             FontMetrics fm = g2d.getFontMetrics();
             g2d.setColor(Color.DARK_GRAY);
             drawValue(g2d, fm, x, highlightY, highlightValue);
@@ -854,7 +855,7 @@ public class StyledComponents {
         
         // 设置基本样式
         button.setFocusPainted(false);
-        button.setFont(button.getFont().deriveFont(Font.BOLD, 12f));
+        button.setFont(Fonts.ui(12f, Font.BOLD));
         button.setIconTextGap(8);
         button.setBackground(UIThemeManager.ThemeColors.PRIMARY_BLUE);
         button.setForeground(Color.WHITE);

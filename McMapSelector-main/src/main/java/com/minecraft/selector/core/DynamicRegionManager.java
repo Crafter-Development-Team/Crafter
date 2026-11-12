@@ -2,6 +2,7 @@ package com.minecraft.selector.core;
 
 import com.minecraft.selector.utils.LogManager;
 import com.minecraft.selector.utils.WorldPathResolver;
+import com.minecraft.selector.i18n.I18n;
 
 import java.awt.*;
 import java.awt.image.BufferedImage;
@@ -471,7 +472,7 @@ public class DynamicRegionManager {
      * 更新视口，加载/卸载相应区域
      */
     private final java.util.concurrent.atomic.AtomicLong cacheHits=new java.util.concurrent.atomic.AtomicLong(),cacheMisses=new java.util.concurrent.atomic.AtomicLong();
-    public String hudMetrics(){long hit=cacheHits.get(),miss=cacheMisses.get();return "regions "+loadedRegions.size()+"/"+availableRegions.size()+", viewport "+desiredRegions.size()+", hits "+(hit+miss==0?"—":String.format(java.util.Locale.ROOT,"%.0f%%",100.0*hit/(hit+miss)));}
+    public String hudMetrics(){long hit=cacheHits.get(),miss=cacheMisses.get();return I18n.t("regions %d/%d, viewport %d, hits %s",loadedRegions.size(),availableRegions.size(),desiredRegions.size(),hit+miss==0?"—":String.format(java.util.Locale.ROOT,"%.0f%%",100.0*hit/(hit+miss)));}
     public void trimViewportCache(){synchronized(stateLock){for(Point p:new java.util.ArrayList<>(loadedRegions.keySet()))if(!desiredRegions.contains(p)){loadedRegions.remove(p);notifyRegionUnloaded(p);}}}
     public void updateViewport(Rectangle worldViewport) {
         if (worldViewport == null || worldViewport.width <= 0 || worldViewport.height <= 0 || closed) return;
@@ -857,7 +858,7 @@ public class DynamicRegionManager {
      * 获取状态信息
      */
     public String getStatusInfo() {
-        return String.format("已加载: %d, 加载中: %d, 可用: %d", 
+        return I18n.t("Loaded: %d, loading: %d, available: %d",
             loadedRegions.size(), loadingRegions.size(), availableRegions.size());
     }
     

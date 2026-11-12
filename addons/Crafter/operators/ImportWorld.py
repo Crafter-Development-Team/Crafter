@@ -20,6 +20,7 @@ from ..__init__ import dir_cafter_data, dir_resourcepacks_plans, dir_blend_appen
 from ..__init__ import icons_world, icons_game_resource, icons_game_unuse_resource
 from .Defs import *
 from .AutoChunkSettings import calculate_auto_chunk_settings
+from ..world_layout import apply_world_layout, reset_world_layout
 
 dir_importer = os.path.join(dir_init_main, "importer")
 
@@ -105,7 +106,10 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         row_parser_always = col_material_1.row()
         row_parser_always.enabled = addon_prefs.Auto_Load_Material
         row_parser_always.prop(addon_prefs, "Always_Add_PBR_Parser")
-        col_material_1.prop(addon_prefs, "mergeModTextures")
+        # 按方块拆分时导出器会临时关闭模组贴图合并，这里跟着置灰，避免界面与行为不一致
+        row_merge_mod = col_material_1.row()
+        row_merge_mod.enabled = not addon_prefs.splitImportByBlock
+        row_merge_mod.prop(addon_prefs, "mergeModTextures")
         col_material_2 = row_material.column(align=True)
         # 背面剔除是加载材质时做的事，依赖自动加载材质（几何双面已恒开）
         row_ds_cull = col_material_2.row()
@@ -130,6 +134,30 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
         row_Light_Block_size = col_output_2.row()
         row_Light_Block_size.enabled = addon_prefs.exportLightBlock
         row_Light_Block_size.prop(addon_prefs, "lightBlockSize")
+
+        # 多世界排布：第一次导入居中，之后的按世界路径分配槽位；只影响之后的导入
+        box_layout = layout.box()
+        box_layout.label(text=i18n("World Layout"), icon="WORLD")
+        # align=True + 不用 row：让两个开关紧贴，避免中间多出一行空白
+        col_layout = box_layout.column(align=True)
+        col_layout.use_property_split = False
+        col_layout.prop(addon_prefs, "World_Layout")
+        if addon_prefs.World_Layout:
+            # 正常开启时直接用 prop，保持两行紧贴；只有关闭时才需要一个禁用的 row
+            col_layout.prop(addon_prefs, "World_Layout_Distribute_Later")
+        else:
+            row_layout_later = col_layout.row()
+            row_layout_later.enabled = False
+            row_layout_later.prop(addon_prefs, "World_Layout_Distribute_Later")
+        box_layout.operator("crafter.reset_world_layout", icon="LOOP_BACK")
+
+        # 按材质/方块拆对象：交给导出器写多个 o 段，Blender 导入时自动拆成多个物体
+        box_split = layout.box()
+        box_split.label(text=i18n("Object Split"), icon="MESH_DATA")
+        col_split = box_split.column(align=True)
+        col_split.use_property_split = False
+        col_split.prop(addon_prefs, "splitImportByMaterial")
+        col_split.prop(addon_prefs, "splitImportByBlock")
 
         # 详细参数：枚举/数值型，各占整行，避免标签被省略
         box_values = layout.box()
@@ -614,7 +642,13 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             "mergeMirrorDoubleSided":getattr(addon_prefs, "mergeMirrorDoubleSided", False),
             "doubleSidedFaceOffset":addon_prefs.doubleSidedFaceOffset,
             "overlayLayerStep":addon_prefs.overlayLayerStep,
-            "mergeModTextures":addon_prefs.mergeModTextures,
+            # 按方块拆分时每个方块必须有自己的材质名，否则模组贴图复用会把多个方块
+            # 并进同一个材质，Blender 侧就无法按材质名区分方块了。
+            "mergeModTextures":bool(addon_prefs.mergeModTextures
+                                    and not addon_prefs.splitImportByBlock),
+            # 按材质/按方块拆对象：导出器在同一 obj 里写多个 o 段，导入端按 o 拆分
+            "splitByMaterial":bool(addon_prefs.splitImportByMaterial),
+            "splitByBlock":bool(addon_prefs.splitImportByBlock),
             "plantOffset":addon_prefs.plantOffset,
             "exportFullModel":not effective_as_chunk,
             # 生物模型与区域 obj 分开导出；同一开关也控制导入端是否导入
@@ -664,6 +698,10 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
                  f"Z[{worldconfig['minZ']},{worldconfig['maxZ']}]")
         log_step(f"维度: {worldconfig['selectedDimension']} | status={status} "
                  f"| LOD={worldconfig['activeLOD']} | GreedyMesh={worldconfig['useGreedyMesh']}")
+        if addon_prefs.splitImportByMaterial or addon_prefs.splitImportByBlock:
+            log_step(f"对象拆分: 材质={addon_prefs.splitImportByMaterial} "
+                     f"方块={addon_prefs.splitImportByBlock}"
+                     + ("（按方块拆分已临时关闭模组贴图合并）" if addon_prefs.splitImportByBlock else ""))
         log_stage_end("构建导入配置", "worldconfig 构建完成")
 
         # 确保配置目录存在
@@ -803,6 +841,27 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             self._wm.progress_end()
 
 
+class VIEW3D_OT_CrafterResetWorldLayout(bpy.types.Operator):
+    bl_label = "Reset World Layout"
+    bl_idname = "crafter.reset_world_layout"
+    bl_description = ("Forget the saved world slots without moving any object. "
+                      "The next import becomes the first world again and is centred on the origin")
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context: bpy.types.Context):
+        return True
+
+    def execute(self, context):
+        changed = reset_world_layout(context.scene)
+        if changed:
+            log_step("世界布局已重置：下一次导入会重新居中")
+            self.report({'INFO'}, "World layout reset")
+        else:
+            self.report({'INFO'}, "No world layout to reset")
+        return {'FINISHED'}
+
+
 # ==================== 续传函数（定时器主线程调用） ====================
 
 def _classify_importer_line(line):
@@ -910,6 +969,8 @@ def finish_import(ctx, prefs, imported_time, worldconfig, prepared_time,
 
     log_stage_begin("导入 OBJ", f"{len(obj_files)} 个文件")
     obj_idx = 0
+    registered_materials = []          # 保持首次出现顺序，UI 材质列表不会乱序
+    registered_material_seen = set()
     for file in obj_files:
         obj_idx += 1
         _obj_t0 = time.perf_counter()
@@ -917,8 +978,9 @@ def finish_import(ctx, prefs, imported_time, worldconfig, prepared_time,
         pre_set = set(bpy.data.objects)
         try:
             # WorldImporter's clean GreedyMesh output needs no costly post-import validation.
+            # 按材质/方块拆分时导出器会在同一个 .obj 里写多个 o 段；这里显式要求按 o 拆物体。
             _run_ops(bpy.ops.wm.obj_import, filepath=os.path.join(dir_importer, file),
-                     validate_meshes=False)
+                     validate_meshes=False, use_split_objects=True)
             _run_ops(bpy.ops.object.transform_apply, location=False, rotation=True, scale=True)
             have_obj = True
         except Exception as ex:
@@ -939,11 +1001,42 @@ def finish_import(ctx, prefs, imported_time, worldconfig, prepared_time,
                     material_should_delete.append(mat.name)
                 else:
                     real_name_dic[n] = mat.name
-            add_to_mcmts_collection(object=obj, context=ctx)
-            add_to_crafter_mcmts_collection(object=obj, context=ctx)
+            # 拆对象后可能有上万个物体，逐物体扫 bpy.data.materials 会变成平方级；
+            # 这里只收集材质名，循环结束后统一登记一次。
+            if obj.type == "MESH" and obj.data.materials and obj.name not in donot:
+                for mat in obj.data.materials:
+                    if mat is not None and mat.name not in donot \
+                            and mat.name not in registered_material_seen:
+                        registered_material_seen.add(mat.name)
+                        registered_materials.append(mat.name)
             if prefs.Add_Crafter_time_On_Import:
                 add_Crafter_time(obj=obj)
     log_stage_end("导入 OBJ", f"{len(real_name_dic)} 个唯一材质")
+
+    if registered_materials:
+        add_material_names_to_mcmts(registered_materials, ctx)
+        add_material_names_to_crafter_mcmts(registered_materials, ctx)
+
+    # 多世界布局：只平移本次新增的物体，开关变化不会动已经导入的旧模型。
+    # ReplayMod 的回放是“基础世界 + 逐时间块临时世界 + 相机/实体”一套绝对坐标场景，
+    # 相机关键帧和实体根节点不跟随本次偏移，贸然平移地形会让回放错位；这里先跳过。
+    is_replay_import = (str(getattr(prefs, "World_Path", "") or "").lower().endswith(".mcpr")
+                        or "crafter_replay_" in str(worldconfig.get("worldPath", "") or "").lower())
+    if have_obj and is_replay_import:
+        log_step("布局: 回放导入保持绝对坐标（避免相机/实体错位）")
+    elif have_obj:
+        layout_info = apply_world_layout(
+            prefs, ctx.scene, prefs.World_Path,
+            set(bpy.data.objects) - before_objects)
+        if layout_info:
+            if layout_info.get("mode") == "absolute":
+                log_step(f"布局: 后导入保持绝对坐标（{layout_info.get('key')}）")
+            else:
+                offset = layout_info.get("offset") or (0.0, 0.0, 0.0)
+                log_step(f"布局: {layout_info.get('mode')} key={layout_info.get('key')} "
+                         f"offset=({offset[0]:.1f}, {offset[1]:.1f}, {offset[2]:.1f}) "
+                         f"objects={layout_info.get('moved', 0)}")
+
 
     for name in set(material_should_delete):
         mat_del = bpy.data.materials.get(name)

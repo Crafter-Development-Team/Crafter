@@ -1,6 +1,7 @@
 package com.minecraft.selector.gui;
 import com.minecraft.selector.core.WorldAnchors;
 import com.minecraft.selector.core.ImportLod;
+import com.minecraft.selector.i18n.I18n;
 import java.awt.*;
 import java.util.function.Function;
 /** Shared map decoration settings and painter, independent of tile loading. */
@@ -32,13 +33,13 @@ public final class ViewOverlays {
     }
     public void draw(Graphics2D g,int width,int height,double pixelsPerBlock,Function<Point,Point> screen,SelectionMath.Bounds selection,Point pos1,Point corner1,Point corner2) {
         if(importLodVisible) drawImportLod(g,width,height,pixelsPerBlock,screen,selection);
-        if(markers) {marker(g,anchors.spawn,"Spawn",new Color(255,211,60),screen);marker(g,anchors.player,"Player",new Color(76,209,255),screen);}
+        if(markers) {marker(g,anchors.spawn,I18n.t("Spawn"),new Color(255,211,60),screen);marker(g,anchors.player,I18n.t("Player"),new Color(76,209,255),screen);}
         if(markers)for(com.minecraft.selector.core.WaypointStore.Marker m:waypoints.list())if(dimension.equals(m.dimension)){Point p=screen.apply(new Point(m.x,m.z));corner(g,p,new Color(220,120,255),m.label);}
         if(hud&&width>250&&height>140)badge(g,hudText,8,height-12);
         if(selection!=null) {
             Point a=screen.apply(new Point(selection.minX,selection.minZ)),b=screen.apply(new Point(selection.maxX,selection.maxZ));
             int x=Math.max(4,Math.min(width-150,a.x+5)),y=Math.max(20,Math.min(height-65,a.y-6));
-            String label="Import Y: "+minY+" … "+maxY;badge(g,label,x,y);
+            String label=I18n.t("Import Y: %d … %d", minY, maxY);badge(g,label,x,y);
             g.setColor(new Color(255,220,85));for(int i=0;i<4;i++) {int tx=a.x+(int)(((long)b.x-a.x)*i/3);g.drawLine(tx,a.y,tx,a.y-7);}
             if(posMode) {corner(g,corner1==null?a:screen.apply(corner1),new Color(255,100,120),"1");corner(g,corner2==null?b:screen.apply(corner2),new Color(100,170,255),"2");}
         }
@@ -47,7 +48,7 @@ public final class ViewOverlays {
             double distance=scaleDistance(pixelsPerBlock);int length=(int)Math.round(distance*pixelsPerBlock),x=18,y=height-45;
             g.setColor(new Color(0,0,0,180));g.fillRoundRect(x-8,y-24,length+30,39,6,6);g.setColor(Color.WHITE);g.setStroke(new BasicStroke(2));
             g.drawLine(x,y,x+length,y);g.drawLine(x,y-5,x,y+5);g.drawLine(x+length,y-5,x+length,y+5);
-            g.drawString(String.format(java.util.Locale.ROOT,distance<1?"%.2f blocks":"%.0f blocks",distance),x,y-8);
+            g.drawString(distance<1?I18n.t("%.2f blocks", distance):I18n.t("%.0f blocks", distance),x,y-8);
         }
     }
     private static final Color[] LOD_COLORS={new Color(92,230,130),new Color(85,190,255),
@@ -86,19 +87,19 @@ public final class ViewOverlays {
             g.fillRect(center.x-6,center.y-1,13,2);
             g.fillRect(center.x-1,center.y-6,2,13);
             if(width>240&&height>180) {
-                String title="Import LOD · center chunk "+Math.floorDiv(lod.centerX,16)+", "+Math.floorDiv(lod.centerZ,16);
+                String title=I18n.t("Import LOD · center chunk %d, %d", Math.floorDiv(lod.centerX,16), Math.floorDiv(lod.centerZ,16));
                 int legendWidth=g.getFontMetrics().stringWidth(title)+12;
                 for(int level=0;level<=lod.maxLevel;level++) {
-                    String range=level==lod.maxLevel?"> "+lod.radiusChunks(level-1):"≤ "+lod.radiusChunks(level);
-                    legendWidth=Math.max(legendWidth,g.getFontMetrics().stringWidth("LOD"+level+" "+range+" chunks")+28);
+                    String range=level==lod.maxLevel?I18n.t("> %d", lod.radiusChunks(level-1)):I18n.t("≤ %d", lod.radiusChunks(level));
+                    legendWidth=Math.max(legendWidth,g.getFontMetrics().stringWidth(I18n.t("LOD%d %s chunks", level, range))+28);
                 }
                 // DynamicMapCanvas already paints tile status in the upper left.
                 int legendX=Math.max(12,width-legendWidth-12);
                 badge(g,title,legendX,22);
                 for(int level=0;level<=lod.maxLevel;level++) {
-                    String range=level==lod.maxLevel?"> "+lod.radiusChunks(level-1):"≤ "+lod.radiusChunks(level);
+                    String range=level==lod.maxLevel?I18n.t("> %d", lod.radiusChunks(level-1)):I18n.t("≤ %d", lod.radiusChunks(level));
                     int y=44+level*22;
-                    badge(g,"LOD"+level+" "+range+" chunks",legendX+14,y);
+                    badge(g,I18n.t("LOD%d %s chunks", level, range),legendX+14,y);
                     g.setColor(LOD_COLORS[level]);g.fillRect(legendX,y-10,9,9);
                 }
             }
@@ -147,11 +148,11 @@ public final class ViewOverlays {
     }
     public String tooltip(Point cursor,Function<Point,Point> screen) {
         if(!markers) return "";StringBuilder out=new StringBuilder();
-        WorldAnchors.Anchor[] a={anchors.spawn,anchors.player};String[] names={"Spawn","Player"};
+        WorldAnchors.Anchor[] a={anchors.spawn,anchors.player};String[] names={I18n.t("Spawn"),I18n.t("Player")};
         // screen 可能返回 null（画布还没渲染出图时 worldToScreenCoordinates 就是 null），
         // 直接调 .distance() 会 NPE 并把调用方（世界加载）一起打断。
         for(int i=0;i<a.length;i++) if(a[i]!=null&&dimension.equals(a[i].dimension)) {Point p=screen.apply(a[i].xz);if(p!=null&&p.distance(cursor)<=12) out.append("  ").append(names[i]).append(" (").append(a[i].xz.x).append(", ").append(a[i].xz.y).append(')');}
-        for(com.minecraft.selector.core.WaypointStore.Marker m:waypoints.list())if(dimension.equals(m.dimension)){Point p=screen.apply(new Point(m.x,m.z));if(p!=null&&p.distance(cursor)<=12)out.append("  POI: ").append(m.toString());}
+        for(com.minecraft.selector.core.WaypointStore.Marker m:waypoints.list())if(dimension.equals(m.dimension)){Point p=screen.apply(new Point(m.x,m.z));if(p!=null&&p.distance(cursor)<=12)out.append("  ").append(I18n.t("POI: ")).append(m.toString());}
         return out.toString();
     }
 }

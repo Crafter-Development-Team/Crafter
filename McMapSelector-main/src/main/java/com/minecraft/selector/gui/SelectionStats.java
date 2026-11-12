@@ -1,5 +1,6 @@
 package com.minecraft.selector.gui;
 import java.math.BigInteger;
+import com.minecraft.selector.i18n.I18n;
 public final class SelectionStats {
     public final long sizeX,sizeZ,sizeY; public final BigInteger columns,cells;
     public SelectionStats(SelectionMath.Bounds b,int minY,int maxY) {
@@ -9,5 +10,5 @@ public final class SelectionStats {
     }
     public static long warningThreshold() {return Math.max(1,Long.getLong("selector.warningColumns",65536L));}
     public boolean isLarge() {return columns.compareTo(BigInteger.valueOf(warningThreshold()))>0;}
-    @Override public String toString() {return sizeX+"×"+sizeZ+" blocks, H="+sizeY+", "+columns+" columns, ~"+cells+" block-cells"+(isLarge()?" — Large Blender import; may be slow":"");}
+    @Override public String toString() {return I18n.t("%d×%d blocks, H=%d, %s columns, ~%s block-cells", sizeX, sizeZ, sizeY, columns, cells)+(isLarge()?I18n.t(" — Large Blender import; may be slow"):"");}
 }

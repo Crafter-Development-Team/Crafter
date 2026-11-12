@@ -18,7 +18,7 @@ public class PerformanceMonitor {
     
     private PerformanceMonitor() {}
     
-    public static String heapHud(){Runtime r=Runtime.getRuntime();return "heap "+((r.totalMemory()-r.freeMemory())/(1024*1024))+"/"+(r.maxMemory()/(1024*1024))+" MiB";}
+    public static String heapHud(){Runtime r=Runtime.getRuntime();return com.minecraft.selector.i18n.I18n.t("heap %d/%d MiB",(r.totalMemory()-r.freeMemory())/(1024*1024),r.maxMemory()/(1024*1024));}
     public static PerformanceMonitor getInstance() {
         return INSTANCE;
     }

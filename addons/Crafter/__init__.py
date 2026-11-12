@@ -92,8 +92,10 @@ def register():
     # register() 一旦抛异常，Blender 会移除 addon 条目，所有面板都会因为拿不到偏好而变空。
     try:
         # Crafter-time 改成颜色 alpha 驱动器后，老偏好里关着的开关一次性打开（只迁移一次）
-        from .preference.AddonPreferences import migrate_crafter_time_preference
+        from .preference.AddonPreferences import (migrate_crafter_time_preference,
+                                                  migrate_merge_mirror_preference)
         migrate_crafter_time_preference()
+        migrate_merge_mirror_preference()
         # 时间驱动的 Cycles 刷新补丁：换帧时给带驱动器的物体打标记（EEVEE 下不做事）
         from .operators.Defs import register_crafter_time_handlers
         register_crafter_time_handlers()

@@ -104,7 +104,7 @@ class CrafterAddonPreferences(AddonPreferences):
                                        default=False,)# type: ignore
     mergeMirrorDoubleSided: BoolProperty(name="Merge Mirrored Double-Sided",
                                          description="Merge only the double-sided pairs whose two sides use the same texture but are mirror-UV (the common case where both sides read left-to-right correctly in game). Same-direction pairs are controlled by Merge Same Double-Sided. This halves those faces too, but one side then shows a mirrored image; merged materials are excluded from backface culling so the remaining single face still shows from both sides",
-                                         default=False,)# type: ignore
+                                         default=True,)# type: ignore
     plantOffset: BoolProperty(name="Plant Offset",
                               description="Apply the vanilla random offset (BlockBehaviour.OffsetType) to plants and flowers: grass, ferns and flowers shift up to 0.25 blocks horizontally, grass-type plants also sink up to 0.2 blocks. The shift comes from the block position exactly like in game, so every export of the same world matches. Turn it off to keep every plant centred in its block",
                               default=True)# type: ignore
@@ -127,6 +127,18 @@ class CrafterAddonPreferences(AddonPreferences):
     useEntityModels: BoolProperty(name="Entities",
                                   description="Include the mobs and entities found inside the selected area. They come in with their own models, textures, tint and overlay metadata",
                                   default=True,)# type: ignore
+    splitImportByMaterial: BoolProperty(name="Split by Material",
+                                        description="Write one OBJ object per material, so the importer creates a separate Blender object for each material. This can produce a very large number of objects on big imports and slows down import and editing",
+                                        default=False,)# type: ignore
+    splitImportByBlock: BoolProperty(name="Split by Block",
+                                     description="Write one OBJ object per block ID, so the importer creates a separate Blender object for each block type (a block keeps all of its materials in one object). Merge Mod Textures is disabled for this import so every block gets its own material. This can produce a very large number of objects",
+                                     default=False,)# type: ignore
+    World_Layout: BoolProperty(name="World Layout",
+                               description="Lay out imported worlds instead of leaving them at Minecraft absolute coordinates. The first import is centred on the world origin (X/Z) with its lowest point on the ground; later imports are placed side by side in a shelf grid. Toggling this only affects future imports",
+                               default=True,)# type: ignore
+    World_Layout_Distribute_Later: BoolProperty(name="Distribute Later Imports",
+                                                description="When World Layout is on, place later imports in the next free shelf slot based on their world path. Turn this off to keep later imports at their Minecraft absolute coordinates",
+                                                default=True,)# type: ignore
     notexportFullModel: BoolProperty(name="As Chunk",
                                   default=False,)# type: ignore
     autoPartitionSettings: BoolProperty(name="Auto Chunk Settings",
@@ -232,10 +244,14 @@ class CrafterAddonPreferences(AddonPreferences):
                                              description="Automatically give imported objects a time driver: the object color alpha holds the current second (frame * fps_base / fps), and material nodes read it from the Object Info node's Alpha output. No geometry nodes are involved, so it costs nothing on heavy geometry",
                                              default=True)# type: ignore
     Cycles_Time_Refresh: BoolProperty(name="Refresh Time in Cycles",
-                                      description="Cycles only re-reads an object's color when it is told that object changed, so a driven time value freezes until the render engine is switched. With this on, the objects that carry a time driver are marked on every frame change while Cycles is the render engine, which makes the time advance during playback and animation renders. EEVEE reads the object color every frame and is never touched",
+                                      description="Cycles only re-reads an object's color when it is told that object changed, so a driven time value freezes until the render engine is switched. With this on, the objects that carry a time driver are marked on every frame change while Cycles is the render engine, which makes the time advance during playback and in the Rendered viewport. Marking is skipped while a final render is running (Cycles re-evaluates the scene every frame there, and touching the depsgraph from the render thread can corrupt it) and re-applied when the render ends; EEVEE is never touched",
                                       default=True)# type: ignore
     # Crafter-time 换实现的迁移标记：不等于 CRAFTER_TIME_PREFS_VERSION 就说明还没迁移过
     Crafter_time_prefs_version: IntProperty(name="Crafter Time Prefs Version",
+                                            default=0,
+                                            options={'HIDDEN'})# type: ignore
+    # 合并镜像双面改为默认开启的迁移标记
+    merge_mirror_prefs_version: IntProperty(name="Merge Mirror Prefs Version",
                                             default=0,
                                             options={'HIDDEN'})# type: ignore
     Search_PBR_On_Load: BoolProperty(name="Search PBR",
@@ -283,10 +299,6 @@ class CrafterAddonPreferences(AddonPreferences):
                                   min=0.001,
                                   max=2.0,
                                   update=lambda self, context: self.set_parallax_depth(context))# type: ignore
-    Parallax_Calculate_Normal: BoolProperty(name="Calculate Normal",
-                                            default=False)# type: ignore
-    Parallax_Based_on_Parsed_Normal: BoolProperty(name="Based on Parsed Normal",
-                                                  default=False)# type: ignore
     Parallax_Guess_Height: BoolProperty(name="Guess Height",
                                         description="Use base color as height",
                                         default=False)# type: ignore
@@ -294,12 +306,6 @@ class CrafterAddonPreferences(AddonPreferences):
                                              default=0.5,
                                              max=1,
                                              min=0)# type: ignore
-    Parallax_Use_Repeat_Zone: BoolProperty(name="Use Repeat Zone",
-                                           description="Deprecated: the current normal-only parallax path always uses the manual chain",
-                                           default=False)# type: ignore
-    Parallax_Use_POM: BoolProperty(name="Use POM",
-                                   description="Deprecated: replaced by POM Interpolation",
-                                   default=False)# type: ignore
     Parallax_Use_POM_Interpolation: BoolProperty(name="POM Interpolation",
                                                  description="POM interpolation is often underwhelming on Minecraft-style textures; binary refinement is disabled while this is on",
                                                  default=False)# type: ignore
@@ -417,4 +423,22 @@ def migrate_crafter_time_preference():
         addon_prefs.Crafter_time_prefs_version = CRAFTER_TIME_PREFS_VERSION
     except (KeyError, AttributeError):
         # 注册早期偏好实例可能还取不到，或者属性还没注册：跳过一次，下次启动再迁移
+        return
+
+
+# 合并镜像双面现在默认开；老偏好里存着的 False 是一次性默认值，迁成开，之后用户仍可手动关。
+MERGE_MIRROR_PREFS_VERSION = 1
+
+
+def migrate_merge_mirror_preference():
+    '''老偏好里"合并镜像双面"默认关的一次性打开'''
+    try:
+        addon_prefs = bpy.context.preferences.addons[__addon_name__].preferences
+        if addon_prefs is None:
+            return
+        if getattr(addon_prefs, "merge_mirror_prefs_version", 0) >= MERGE_MIRROR_PREFS_VERSION:
+            return
+        addon_prefs.mergeMirrorDoubleSided = True
+        addon_prefs.merge_mirror_prefs_version = MERGE_MIRROR_PREFS_VERSION
+    except (KeyError, AttributeError):
         return

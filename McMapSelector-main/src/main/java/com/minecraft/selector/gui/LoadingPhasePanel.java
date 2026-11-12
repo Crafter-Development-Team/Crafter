@@ -1,6 +1,7 @@
 package com.minecraft.selector.gui;
 
 import javax.swing.*;
+import com.minecraft.selector.i18n.I18n;
 import java.awt.*;
 
 /** Two distinct loading presentations; idle occupies no space. All calls run on the EDT. */
@@ -19,7 +20,7 @@ public final class LoadingPhasePanel extends JPanel {
         resourceProgress.setStringPainted(true);mapProgress.setStringPainted(true);
         log.setEditable(false);log.setLineWrap(true);
         JScrollPane scroll=new JScrollPane(log);
-        scroll.setBorder(BorderFactory.createTitledBorder("Resource preparation log"));
+        scroll.setBorder(BorderFactory.createTitledBorder(I18n.t("Resource preparation log")));
         preparation.add(resourceProgress,BorderLayout.NORTH);preparation.add(scroll,BorderLayout.CENTER);
         add(preparation,Phase.PREPARING.name());add(mapProgress,Phase.MAP_LOADING.name());
         setVisible(false);

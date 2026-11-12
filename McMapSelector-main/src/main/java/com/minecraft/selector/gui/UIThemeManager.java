@@ -96,7 +96,11 @@ public class UIThemeManager {
         
         // 应用当前主题
         applyTheme(currentTheme);
-        
+
+        // 基准字体：内置 GNU Unifont（失败时 Fonts 内部回退系统字体）。必须在
+        // setLookAndFeel 之后 put，否则 FlatLaf 安装默认值时会把它冲掉。
+        UIManager.put("defaultFont", Fonts.ui(13f));
+
         // 自定义UI组件样式
         customizeUIComponents();
     }
@@ -117,6 +121,8 @@ public class UIThemeManager {
                     UIManager.setLookAndFeel(new FlatDarkLaf());
                     break;
             }
+            // 换 LAF 会重装 UIManager 默认值，字体要重新放一次
+            UIManager.put("defaultFont", Fonts.ui(13f));
             
             // 更新所有窗口
             FlatLaf.updateUI();
@@ -212,7 +218,7 @@ public class UIThemeManager {
         
         // 设置按钮样式
         button.setFocusPainted(false);
-        button.setFont(button.getFont().deriveFont(Font.BOLD, 12f));
+        button.setFont(Fonts.ui(12f, Font.BOLD));
         
         // 设置按钮颜色
         button.setBackground(ThemeColors.PRIMARY_BLUE);

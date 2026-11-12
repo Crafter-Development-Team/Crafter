@@ -3,6 +3,7 @@ package com.minecraft.selector.gui;
 import com.minecraft.selector.utils.LogManager;
 import com.minecraft.selector.utils.LogManager.LogEntry;
 import com.minecraft.selector.utils.LogManager.LogLevel;
+import com.minecraft.selector.i18n.I18n;
 
 import javax.swing.*;
 import javax.swing.table.AbstractTableModel;
@@ -49,7 +50,7 @@ public class LogWindow extends JFrame implements LogManager.LogListener {
     }
     
     private void initializeComponents() {
-        setTitle("Minecraft Map Selector - Log Viewer");
+        setTitle(I18n.t("Minecraft Map Selector - Log Viewer"));
         setDefaultCloseOperation(JFrame.HIDE_ON_CLOSE);
         setSize(1000, 600);
         setLocationRelativeTo(null);
@@ -71,7 +72,7 @@ public class LogWindow extends JFrame implements LogManager.LogListener {
         
         // 搜索框
         searchField = new JTextField(20);
-        searchField.setToolTipText("Search log content...");
+        searchField.setToolTipText(I18n.t("Search log content..."));
     }
     
     private void setupTable() {
@@ -124,32 +125,32 @@ public class LogWindow extends JFrame implements LogManager.LogListener {
         panel.setBorder(BorderFactory.createEtchedBorder());
         
         // 刷新按钮
-        JButton refreshButton = new JButton("Refresh");
-        refreshButton.setToolTipText("Refresh log list");
+        JButton refreshButton = new JButton(I18n.t("Refresh"));
+        refreshButton.setToolTipText(I18n.t("Refresh log list"));
         panel.add(refreshButton);
         
         // 清空按钮
-        JButton clearButton = new JButton("Clear");
-        clearButton.setToolTipText("Clear all logs");
+        JButton clearButton = new JButton(I18n.t("Clear"));
+        clearButton.setToolTipText(I18n.t("Clear all logs"));
         panel.add(clearButton);
         
         // 导出按钮
-        JButton exportButton = new JButton("Export");
-        exportButton.setToolTipText("Export logs to file");
+        JButton exportButton = new JButton(I18n.t("Export"));
+        exportButton.setToolTipText(I18n.t("Export logs to file"));
         panel.add(exportButton);
         
         panel.add(new JSeparator(SwingConstants.VERTICAL));
         
         // 级别过滤
-        panel.add(new JLabel("Level:"));
+        panel.add(new JLabel(I18n.t("Level:")));
         panel.add(levelFilter);
         
         panel.add(new JSeparator(SwingConstants.VERTICAL));
         
         // 搜索
-        panel.add(new JLabel("Search:"));
+        panel.add(new JLabel(I18n.t("Search:")));
         panel.add(searchField);
-        JButton searchButton = new JButton("Search");
+        JButton searchButton = new JButton(I18n.t("Search"));
         panel.add(searchButton);
         
         // 事件处理
@@ -205,8 +206,8 @@ public class LogWindow extends JFrame implements LogManager.LogListener {
     private void clearLogs() {
         int result = JOptionPane.showConfirmDialog(
             this,
-            "Clear all logs? This cannot be undone.",
-            "Confirm clear",
+            I18n.t("Clear all logs? This cannot be undone."),
+            I18n.t("Confirm clear"),
             JOptionPane.YES_NO_OPTION,
             JOptionPane.WARNING_MESSAGE
         );
@@ -219,10 +220,10 @@ public class LogWindow extends JFrame implements LogManager.LogListener {
     
     private void exportLogs() {
         JFileChooser fileChooser = new JFileChooser();
-        fileChooser.setDialogTitle("Export log file");
+        fileChooser.setDialogTitle(I18n.t("Export log file"));
         fileChooser.setSelectedFile(new File("log.log"));
         fileChooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
-            "Log files (*.log)", "log"));
+            I18n.t("Log files (*.log)"), "log"));
         
         int result = fileChooser.showSaveDialog(this);
         if (result == JFileChooser.APPROVE_OPTION) {
@@ -231,16 +232,16 @@ public class LogWindow extends JFrame implements LogManager.LogListener {
                 logManager.exportToFile(file.getAbsolutePath());
                 JOptionPane.showMessageDialog(
                     this,
-                    "Logs exported to: " + file.getAbsolutePath(),
-                    "Export successful",
+                    I18n.t("Logs exported to: %s", file.getAbsolutePath()),
+                    I18n.t("Export successful"),
                     JOptionPane.INFORMATION_MESSAGE
                 );
             } catch (Exception e) {
                 logManager.error("Failed to export logs", "LogWindow", e);
                 JOptionPane.showMessageDialog(
                     this,
-                    "Failed to export logs: " + e.getMessage(),
-                    "Export failed",
+                    I18n.t("Failed to export logs: %s", e.getMessage()),
+                    I18n.t("Export failed"),
                     JOptionPane.ERROR_MESSAGE
                 );
             }
@@ -280,14 +281,14 @@ public class LogWindow extends JFrame implements LogManager.LogListener {
     }
     
     private void updateStatus() {
-        statusLabel.setText(logManager.getLogStats() + " | showing: " + tableModel.getRowCount() + " entries");
+        statusLabel.setText(I18n.t("%s | showing: %d entries", logManager.getLogStats(), tableModel.getRowCount()));
     }
     
     /**
      * 日志表格模型
      */
     private class LogTableModel extends AbstractTableModel {
-        private final String[] columnNames = {"Time", "Level", "Source", "Message"};
+        private final String[] columnNames = {I18n.t("Time"), I18n.t("Level"), I18n.t("Source"), I18n.t("Message")};
         private List<LogEntry> logEntries = new ArrayList<>();
         
         public void setLogEntries(List<LogEntry> entries) {

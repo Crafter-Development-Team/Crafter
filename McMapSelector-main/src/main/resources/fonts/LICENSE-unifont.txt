@@ -1,0 +1,37 @@
+GNU Unifont 15.0.01 - bundled UI font
+=====================================
+
+File: fonts/unifont.otf (unifont-15.0.01.otf, about 5 MB)
+Upstream: https://unifoundry.com/unifont/
+Download: https://unifoundry.com/pub/unifont/unifont-15.0.01/font-builds/
+
+GNU Unifont is copyright (C) Roman Czyborra, Paul Hardy and the
+GNU Unifont project contributors. It is free software: you can
+redistribute it and/or modify it under the terms of the GNU General
+Public License as published by the Free Software Foundation, either
+version 2 of the License, or (at your option) any later version,
+with the GNU font embedding exception:
+
+    As a special exception, if you create a document which uses this
+    font, and embed this font or unaltered portions of this font into
+    the document, this font does not by itself cause the resulting
+    document to be covered by the GNU General Public License. This
+    exception does not however invalidate any other reasons why the
+    document might be covered by the GNU General Public License. If
+    you modify this font, you may extend this exception to your
+    version of the font, but you are not obligated to do so. If you
+    do not wish to do so, delete this exception statement from your
+    version.
+
+License texts:
+  https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
+  https://unifoundry.com/unifont/ (licensing section)
+
+This project (minecraft-map-selector) is distributed under GPLv3.
+GPLv2-or-later with the font embedding exception is compatible with,
+and may be combined with, GPLv3 code; the font itself remains under
+its own license.
+
+The font is used unmodified. It is embedded in the application jar only
+so the Java/Swing UI can render CJK (Chinese) text without depending on
+fonts installed on the user's machine.

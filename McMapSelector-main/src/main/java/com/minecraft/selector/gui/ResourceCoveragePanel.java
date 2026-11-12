@@ -3,6 +3,7 @@ import com.minecraft.selector.core.*;
 import java.awt.*;
 import java.util.*;
 import javax.swing.*;
+import com.minecraft.selector.i18n.I18n;
 /**
  * Reports the cached surface column count for the viewport plus the palette IDs that no
  * resource source could classify. Per-column block IDs were removed with the +4 MB/tile
@@ -19,10 +20,10 @@ public final class ResourceCoveragePanel extends JPanel {
                 namespaces.merge(ns,1L,Long::sum);unknown.add(e.getKey()+"  ("+source+")");
             }
         }
-        StringBuilder out=new StringBuilder("Current viewport cached surface: "+total+" columns\nUnloaded columns excluded.\nUnclassified palette IDs: "+unknown.size()+"\nNamespaces: "+namespaces+"\n\n");
+        StringBuilder out=new StringBuilder(I18n.t("Current viewport cached surface: %d columns", total)+"\n"+I18n.t("Unloaded columns excluded.")+"\n"+I18n.t("Unclassified palette IDs: %d", unknown.size())+"\n"+I18n.t("Namespaces: %s", namespaces)+"\n\n");
         for(String line:unknown) out.append(line).append('\n');return out.toString();
     }
     public ResourceCoveragePanel(String report) {
-        super(new BorderLayout(4,4));JTextArea text=new JTextArea(report,22,75);text.setEditable(false);add(new JScrollPane(text));JButton copy=new JButton("Copy report");copy.addActionListener(e->{try {java.awt.Toolkit.getDefaultToolkit().getSystemClipboard().setContents(new java.awt.datatransfer.StringSelection(text.getText()),null);}catch(Exception ex) {copy.setText("Clipboard unavailable");}});add(copy,BorderLayout.SOUTH);
+        super(new BorderLayout(4,4));JTextArea text=new JTextArea(report,22,75);text.setEditable(false);add(new JScrollPane(text));JButton copy=new JButton(I18n.t("Copy report"));copy.addActionListener(e->{try {java.awt.Toolkit.getDefaultToolkit().getSystemClipboard().setContents(new java.awt.datatransfer.StringSelection(text.getText()),null);}catch(Exception ex) {copy.setText(I18n.t("Clipboard unavailable"));}});add(copy,BorderLayout.SOUTH);
     }
 }

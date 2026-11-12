@@ -5,6 +5,7 @@ import com.minecraft.selector.core.DynamicRegionManager.RegionTile;
 import com.minecraft.selector.utils.LogManager;
 
 import javax.swing.*;
+import com.minecraft.selector.i18n.I18n;
 import com.minecraft.selector.core.RenderedMap;
 import com.minecraft.selector.core.SelectionYFit;
 import java.util.function.Consumer;
@@ -762,8 +763,8 @@ public class DynamicMapCanvas extends JPanel implements SelectionCanvas, Dynamic
                         
                         if (showLoadingIndicator) {
                             g2d.setColor(Color.WHITE);
-                            g2d.setFont(new Font("Arial", Font.BOLD, 12));
-                            String text = "Loading...";
+                            g2d.setFont(Fonts.ui(12f, Font.BOLD));
+                            String text = I18n.t("Loading...");
                             FontMetrics fm = g2d.getFontMetrics();
                             int textX = screenX + (screenWidth - fm.stringWidth(text)) / 2;
                             int textY = screenY + (screenHeight + fm.getAscent()) / 2;
@@ -837,8 +838,8 @@ public class DynamicMapCanvas extends JPanel implements SelectionCanvas, Dynamic
             
             // 绘制选区信息
             g2d.setColor(Color.WHITE);
-            g2d.setFont(new Font("Arial", Font.BOLD, 12));
-            String selectionInfo = String.format("Selection: (%d,%d) to (%d,%d)", 
+            g2d.setFont(Fonts.ui(12f, Font.BOLD));
+            String selectionInfo = I18n.t("Selection: (%d,%d) to (%d,%d)",
                 currentMinX, currentMinZ, currentMaxX, currentMaxZ);
             g2d.drawString(selectionInfo, x + 5, y + 20);
         }
@@ -849,12 +850,12 @@ public class DynamicMapCanvas extends JPanel implements SelectionCanvas, Dynamic
      */
     private void drawStatusInfo(Graphics2D g2d) {
         g2d.setColor(Color.WHITE);
-        g2d.setFont(new Font("Arial", Font.PLAIN, 12));
+        g2d.setFont(Fonts.ui(12f, Font.PLAIN));
         
-        String statusText = String.format("Zoom: %.2f | %s", scale, regionManager.getStatusInfo());
+        String statusText = I18n.t("Zoom: %.2f | %s", scale, regionManager.getStatusInfo());
         g2d.drawString(statusText, 10, 20);
         
-        String controlsText = "Controls: drag move | scroll zoom | WASD move | G grid | R reset view";
+        String controlsText = I18n.t("Controls: drag move | scroll zoom | WASD move | G grid | R reset view");
         g2d.drawString(controlsText, 10, getHeight() - 10);
     }
     
@@ -863,9 +864,9 @@ public class DynamicMapCanvas extends JPanel implements SelectionCanvas, Dynamic
      */
     private void drawNoDataMessage(Graphics2D g2d) {
         g2d.setColor(Color.WHITE);
-        g2d.setFont(new Font("Arial", Font.BOLD, 16));
+        g2d.setFont(Fonts.ui(16f, Font.BOLD));
         
-        String message = "Please select a Minecraft save first";
+        String message = I18n.t("Please select a Minecraft save first");
         FontMetrics fm = g2d.getFontMetrics();
         int x = (getWidth() - fm.stringWidth(message)) / 2;
         int y = getHeight() / 2;

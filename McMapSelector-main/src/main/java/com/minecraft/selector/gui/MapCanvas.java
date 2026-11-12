@@ -1,6 +1,7 @@
 package com.minecraft.selector.gui;
 
 import javax.swing.*;
+import com.minecraft.selector.i18n.I18n;
 import com.minecraft.selector.core.RenderedMap;
 import com.minecraft.selector.core.SelectionYFit;
 import java.util.function.Consumer;
@@ -710,7 +711,7 @@ public class MapCanvas extends JPanel implements Scrollable, SelectionCanvas {
         } else {
             // 没有图像时显示提示
             g2d.setColor(new Color(0xCCCCCC));
-            String message = "No map image loaded";
+            String message = I18n.t("No map image loaded");
             FontMetrics fm = g2d.getFontMetrics();
             int x = (getWidth() - fm.stringWidth(message)) / 2;
             int y = getHeight() / 2;

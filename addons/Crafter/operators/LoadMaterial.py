@@ -4,13 +4,16 @@ import json
 import math
 
 from ..config import __addon_name__
-from ....common.i18n.i18n import i18n
+from ....common.i18n.i18n import i18n, load_dictionary
 from bpy.props import *
 from ..__init__ import dir_cafter_data, dir_resourcepacks_plans, dir_materials, dir_classification_basis, dir_blend_append, dir_init_main
 from .Defs import *
+from ..i18n.dictionary import dictionary as _addon_dictionary
+# 操作符的 bl_label 在类定义时就要取值；先把本插件的词典并进去，
+# 否则 auto_load 导入模块时词典还没加载，标题只能停在英文。
+load_dictionary(_addon_dictionary)
 
 # 无 Repeat 手动视差：基础色/PBR/法线分别按自己的帧信息转换 UV。
-PARALLAX_NEW_MANUAL = True
 PARALLAX_VECTOR_PREFIX = "Crafter_parallax_vector_"
 
 
@@ -818,7 +821,7 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):
 # ==================== 加载视差 ====================
 
 class VIEW3D_OT_CrafterLoadParallax(bpy.types.Operator):
-    bl_label = "Load Parallax"
+    bl_label = i18n("Load Parallax")
     bl_idname = "crafter.load_parallax"
     bl_description = " "
     bl_options = {"REGISTER", "UNDO"}
@@ -833,35 +836,29 @@ class VIEW3D_OT_CrafterLoadParallax(bpy.types.Operator):
     def draw(self, context):
         addon_prefs = context.preferences.addons[__addon_name__].preferences
 
-        t = lambda cn, en: cn if is_chinese else en
         layout = self.layout
-        layout.label(text=t("视差设置", "Parallax Settings"))
+        layout.label(text=i18n("Parallax Settings"))
 
         col = layout.column(align=True)
-        col.prop(addon_prefs, "Parallax_Iterations", text=t("迭代", "Iterations"))
-        col.prop(addon_prefs, "Parallax_Depth", text=t("深度", "Depth"))
-        col.prop(addon_prefs, "Parallax_Smooth", text=t("平滑", "Smooth"))
+        col.prop(addon_prefs, "Parallax_Iterations", text=i18n("Iterations"))
+        col.prop(addon_prefs, "Parallax_Depth", text=i18n("Depth"))
+        col.prop(addon_prefs, "Parallax_Smooth", text=i18n("Smooth"))
 
         row = col.row(align=True)
-        row.prop(addon_prefs, "Parallax_Guess_Height", text=t("猜测高度", "Guess Height"))
+        row.prop(addon_prefs, "Parallax_Guess_Height", text=i18n("Guess Height"))
         if addon_prefs.Parallax_Guess_Height:
-            row.prop(addon_prefs, "Parallax_Guess_Height_Scale", text=t("缩放", "Scale"))
+            row.prop(addon_prefs, "Parallax_Guess_Height_Scale", text=i18n("Scale"))
 
-        layout.prop(addon_prefs, "Parallax_Use_POM_Interpolation", text=t("POM 插值", "POM Interpolation"))
+        layout.prop(addon_prefs, "Parallax_Use_POM_Interpolation", text=i18n("POM Interpolation"))
 
         row = layout.row()
         row.enabled = not addon_prefs.Parallax_Use_POM_Interpolation
-        row.prop(addon_prefs, "Parallax_Refine_Steps", text=t("二分次数", "Binary Steps"))
+        row.prop(addon_prefs, "Parallax_Refine_Steps", text=i18n("Binary Steps"))
 
     def execute(self, context: bpy.types.Context):
 
         info_log('加载视差', '加载视差')
         addon_prefs = context.preferences.addons[__addon_name__].preferences
-        if PARALLAX_NEW_MANUAL:
-            # 这些开关在当前无 Repeat 路径里没有作用，强制关掉，避免面板残留旧状态。
-            addon_prefs.Parallax_Use_Repeat_Zone = False
-            addon_prefs.Parallax_Calculate_Normal = False
-            addon_prefs.Parallax_Based_on_Parsed_Normal = False
         # 贴图可能刚解码/替换过，清掉上一次的 alpha 判断缓存
         clear_alpha_all_one_cache()
 
@@ -887,13 +884,9 @@ class VIEW3D_OT_CrafterLoadParallax(bpy.types.Operator):
             links = node_tree_material.links
             have_loaded_material = False
             # 遍历并寻找关键节点
-            nodes_wait_remove = []
             node_tex_base = None
             node_tex_normal = None
             node_tex_PBR = None
-            node_output = None
-            node_CI = None
-            node_C_PBR_Parser = None
             # 贴图角色：整份材质(不含 overlay 帧)一起判，只有存在同名的无后缀贴图时
             # _n/_s/_a 才算 PBR/法向（孤立的后缀贴图是基础色）
             texture_candidates = [tex_node for tex_node in nodes
@@ -913,20 +906,10 @@ class VIEW3D_OT_CrafterLoadParallax(bpy.types.Operator):
                         node_tex_PBR = node
                     elif fuq_bl_dot_number(node.image.name).endswith("_a.png"):
                         node_tex_PBR = node
-                elif role_texture == TEX_ROLE_BASE:
-                    if node_tex_base is not None:
-                        nodes_wait_remove.append(node)
-                    else:
-                        node_tex_base = node
+                elif role_texture == TEX_ROLE_BASE and node_tex_base is None:
+                    node_tex_base = node
                 if node.type == "GROUP":
-                    if node.node_tree != None:
-                        if node.node_tree.name.startswith("CI-"):
-                            node_CI = node
-                        if node.node_tree.name == "C-PBR_Parser":
-                            node_C_PBR_Parser = node
                     have_loaded_material = True
-                elif node.type == "OUTPUT_MATERIAL" and node.target == "EEVEE":
-                    node_output = node
             if not have_loaded_material:
                 continue
             if node_tex_base == None or node_tex_normal == None:# 若没有基础纹理或没有法向纹理，则跳过
@@ -948,94 +931,45 @@ class VIEW3D_OT_CrafterLoadParallax(bpy.types.Operator):
             info_normal = node_moving_tex_info(node_tex_normal)
             info_PBR = node_moving_tex_info(node_tex_PBR)
 
-            if PARALLAX_NEW_MANUAL:
-                height_tex = node_tex_base if base_as_height else node_tex_normal
-                height_info = info_base if base_as_height else info_normal
-                height_out = "Color" if base_as_height else "Alpha"
-                height_scale = addon_prefs.Parallax_Guess_Height_Scale if base_as_height else 1
-                use_pom_interp = addon_prefs.Parallax_Use_POM_Interpolation
-                refine_steps = 0 if use_pom_interp else addon_prefs.Parallax_Refine_Steps
-                final_uv, node_frame, base_row = creat_normal_parallax_new(
-                    node_tex_height=height_tex,
-                    iterations=iterations,
-                    refine_steps=refine_steps,
-                    smooth=smooth,
-                    info_moving=height_info,
-                    nodes=nodes,
-                    links=links,
-                    height_output=height_out,
-                    gusess_scale=height_scale,
-                    depth=addon_prefs.Parallax_Depth,
-                    target_info=info_normal,
-                    layout_info=info_base,
-                    use_pom=use_pom_interp,
-                )
-                if final_uv is not None:
-                    targets = [
-                        (node_tex_base, info_base),
-                        (node_tex_normal, info_normal),
-                    ]
-                    if node_tex_PBR is not None:
-                        targets.append((node_tex_PBR, info_PBR))
-                    for index, (target, target_info) in enumerate(targets):
-                        remember_parallax_vector(material, target)
-                        uv = parallax_map_uv(
-                            nodes, links, final_uv, target_info, base_row, node_frame,
-                            (height_tex.location.x - 1700,
-                             height_tex.location.y - 220 - index * 160),
-                        )
-                        links.new(uv, target.inputs["Vector"])
-                continue
-
-            if base_as_height:
-                node_tex_height = node_tex_base
-                node_tex = node_tex_normal
-                info_height = info_base
-                info_tex = info_normal
-                node_final_depth, node_frame = creat_parallax_node(node_tex_height=node_tex_height, iterations=iterations, smooth=smooth, info_moving_normal=info_normal, nodes=nodes, links=links, height_output="Color", gusess_scale=addon_prefs.Parallax_Guess_Height_Scale, use_repeat_zone=addon_prefs.Parallax_Use_Repeat_Zone, use_pom=addon_prefs.Parallax_Use_POM)
-            else:
-                node_tex_height = node_tex_normal
-                node_tex = node_tex_base
-                info_height = info_normal
-                info_tex = info_base
-                node_final_depth, node_frame = creat_parallax_node(node_tex_height=node_tex_height, iterations=iterations, smooth=smooth, info_moving_normal=info_normal, nodes=nodes, links=links, height_output="Alpha", gusess_scale=1, use_repeat_zone=addon_prefs.Parallax_Use_Repeat_Zone, use_pom=addon_prefs.Parallax_Use_POM)
-
-            node_final = None
-            if is_moving_same(info_tex=info_tex, info_height=info_height):
-                links.new(node_final_depth.outputs["UV"], node_tex.inputs["Vector"])
-            else:
-                node_final = create_parallax_final(node=node_tex, node_final_depth=node_final_depth, info_height=info_height, info_moving=info_tex, nodes=nodes, links=links, node_frame=node_frame)
-            if node_tex_PBR != None:
-                if is_moving_same(info_tex=info_tex, info_height=info_height):
-                    links.new(node_final_depth.outputs["UV"], node_tex_PBR.inputs["Vector"])
-                else:
-                    create_pbr_fianl = True
-                    if node_final != None:
-                        create_pbr_fianl = not is_moving_same(info_tex=info_PBR, info_height=info_tex)
-                    if create_pbr_fianl:
-                        create_parallax_final(node=node_tex_PBR, node_final_depth=node_final_depth, info_height=info_height, info_moving=info_PBR, nodes=nodes, links=links, node_frame=node_frame)
-                    else:
-                        links.new(node_final.outputs["UV"], node_tex_PBR.inputs["Vector"])
-
-            if addon_prefs.Parallax_Calculate_Normal and node_output != None and node_CI !=None:
-                for input in node_CI.inputs:
-                    if input.name == "Parsed Normal":
-                        node_frame_Bump = nodes.new(type="NodeFrame")
-                        node_frame_Bump.label = "Crafter-凹凸"
-
-                        node_bump = nodes.new(type="ShaderNodeBump")
-                        node_bump.location = (node_output.location.x - 400, node_output.location.y + 100)
-                        node_bump.invert = True
-                        node_bump.parent = node_frame_Bump
-                        links.new(node_bump.outputs["Normal"], input)
-                        links.new(node_final_depth.outputs["Current Depth"], node_bump.inputs["Height"])
-                        for input in node_bump.inputs:
-                            if input.name == "Filter Width":
-                                input.default_value = 1.2
-                                node_bump.inputs["Distance"].default_value = 1
-                        if addon_prefs.Parallax_Based_on_Parsed_Normal and node_C_PBR_Parser is not None:
-                            links.new(node_C_PBR_Parser.outputs["Parsed Normal"], node_bump.inputs["Normal"])
-                        break
+            # 统一的“手动展开”视差路径：基础色/法向/ PBR 共用同一份最终 UV，
+            # 再按各自动态纹理的帧偏移映射回去。
+            height_tex = node_tex_base if base_as_height else node_tex_normal
+            height_info = info_base if base_as_height else info_normal
+            height_out = "Color" if base_as_height else "Alpha"
+            height_scale = addon_prefs.Parallax_Guess_Height_Scale if base_as_height else 1
+            use_pom_interp = addon_prefs.Parallax_Use_POM_Interpolation
+            refine_steps = 0 if use_pom_interp else addon_prefs.Parallax_Refine_Steps
+            final_uv, node_frame, base_row = creat_normal_parallax_new(
+                node_tex_height=height_tex,
+                iterations=iterations,
+                refine_steps=refine_steps,
+                smooth=smooth,
+                info_moving=height_info,
+                nodes=nodes,
+                links=links,
+                height_output=height_out,
+                gusess_scale=height_scale,
+                depth=addon_prefs.Parallax_Depth,
+                target_info=info_normal,
+                layout_info=info_base,
+                use_pom=use_pom_interp,
+            )
+            if final_uv is not None:
+                targets = [
+                    (node_tex_base, info_base),
+                    (node_tex_normal, info_normal),
+                ]
+                if node_tex_PBR is not None:
+                    targets.append((node_tex_PBR, info_PBR))
+                for index, (target, target_info) in enumerate(targets):
+                    remember_parallax_vector(material, target)
+                    uv = parallax_map_uv(
+                        nodes, links, final_uv, target_info, base_row, node_frame,
+                        (height_tex.location.x - 1700,
+                         height_tex.location.y - 220 - index * 160),
+                    )
+                    links.new(uv, target.inputs["Vector"])
+            continue
 
         # 初始化/导入后再次写入全局参数，防止 append 默认值未生效
         set_parallax_globals(addon_prefs.Parallax_Iterations, addon_prefs.Parallax_Depth)
@@ -1121,25 +1055,6 @@ class VIEW3D_OT_CrafterRemoveParallax(bpy.types.Operator):
                         nodes_wait_delete.append(node)
             for node in dict.fromkeys(nodes_wait_delete):
                 nodes.remove(node)
-
-            # nodes_tex_coord = []
-            # nodes_moving = []
-            # for node in nodes:
-            #     if node.type == "TEX_COORD":
-            #         nodes_tex_coord.append(node)
-            #     if node.type == "GROUP":
-            #         if node.node_tree.name == "Crafter-动态纹理_尾":
-            #             nodes_moving.append(node)
-            # for node_moving in nodes_moving:
-            #     if len(nodes_tex_coord) == 0:
-            #         continue
-            #     xy = [node_moving.location.x, node_moving.location.y]
-            #     list_closest = [(((nodes_tex_coord[0].location.x - xy[0]) ** 2) + ((nodes_tex_coord[0].location.y - xy[1]) ** 2)) ** 0.5,nodes_tex_coord[0]]
-            #     for i in range(1,len(nodes_tex_coord)):
-            #         distance = (((nodes_tex_coord[i].location.x - xy[0]) ** 2) + ((nodes_tex_coord[i].location.y - xy[1]) ** 2)) ** 0.5
-            #         if list_closest[0] > distance:
-            #             list_closest = [distance,nodes_tex_coord[i]]
-            #     links.new(list_closest[1].outputs["UV"], node_moving.inputs["UV"])
 
             restore_parallax_vectors(material, nodes, links)
 

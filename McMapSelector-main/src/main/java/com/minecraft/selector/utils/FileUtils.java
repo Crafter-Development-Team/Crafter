@@ -1,5 +1,7 @@
 package com.minecraft.selector.utils;
 
+import com.minecraft.selector.i18n.I18n;
+
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.io.*;
@@ -230,7 +232,7 @@ public class FileUtils {
         try {
             Path programPath = Paths.get(programDir);
             if (!Files.exists(programPath)) {
-                result.errorMessage = "程序目录不存在: " + programDir;
+                result.errorMessage = I18n.t("Program directory does not exist: %s", programDir);
                 return result;
             }
 
@@ -259,7 +261,7 @@ public class FileUtils {
                     });
 
         } catch (IOException e) {
-            result.errorMessage = "清理PNG缓存时出错: " + e.getMessage();
+            result.errorMessage = I18n.t("Error while clearing PNG cache: %s", e.getMessage());
         }
 
         return result;
@@ -280,18 +282,18 @@ public class FileUtils {
 
         public String getSummary() {
             if (!isSuccess()) {
-                return "清理失败: " + errorMessage;
+                return I18n.t("Cleanup failed: %s", errorMessage);
             }
 
             if (deletedFiles == 0) {
-                return "没有找到需要清理的PNG缓存文件";
+                return I18n.t("No PNG cache files to delete");
             }
 
-            String summary = String.format("成功删除 %d 个PNG缓存文件，释放空间 %s",
+            String summary = I18n.t("Deleted %d PNG cache files, freed %s",
                                           deletedFiles, formatFileSize(freedSpace));
 
             if (failedFiles > 0) {
-                summary += String.format("，%d 个文件删除失败", failedFiles);
+                summary += I18n.t(", %d files could not be deleted", failedFiles);
             }
 
             return summary;

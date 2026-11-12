@@ -11,6 +11,7 @@ import textwrap
 import re
 import fnmatch
 import copy
+import threading
 
 # 只在Windows上导入wintypes
 if platform.system() == "Windows":
@@ -1131,6 +1132,34 @@ def add_to_crafter_mcmts_collection(object,context):
         for i in range(len(context.scene.Crafter_crafter_mcmts)-1,-1,-1):
             if context.scene.Crafter_crafter_mcmts[i].name not in list_name_context_material:
                 context.scene.Crafter_crafter_mcmts.remove(i)
+
+
+def _add_material_names_to_collection(collection, names):
+    '''把一批材质名登记进 UI 集合，并清掉已经不存在于 bpy.data 的旧条目。
+
+    与逐物体调用 add_to_mcmts_collection 的最终结果一致，但把 O(物体数 x 材质数)
+    的扫描合并成一次。按材质/方块拆分导入时物体数可能上万，逐物体扫会卡死。
+    '''
+    existing = {item.name for item in collection}
+    all_materials = {material.name for material in bpy.data.materials}
+    for name in names:
+        if name and name not in donot and name not in existing:
+            item = collection.add()
+            item.name = name
+            existing.add(name)
+    for i in range(len(collection) - 1, -1, -1):
+        if collection[i].name not in all_materials:
+            collection.remove(i)
+
+
+def add_material_names_to_mcmts(names, context):
+    '''批量登记材质名到 Crafter_mcmts（导入循环用）'''
+    _add_material_names_to_collection(context.scene.Crafter_mcmts, names)
+
+
+def add_material_names_to_crafter_mcmts(names, context):
+    '''批量登记材质名到 Crafter_crafter_mcmts（导入循环用）'''
+    _add_material_names_to_collection(context.scene.Crafter_crafter_mcmts, names)
                 
 # ========== 分类依据：结构化匹配 ==========
 # 规则格式：{组名: 条目 或 [条目...]}；条目 = {"namespace": [...], "block": [...], "key": [...], "texture": [...]}
@@ -2063,6 +2092,35 @@ _crafter_time_objects = {}   # obj.as_pointer() -> Object（存引用，改名�
 # addon register 期间 bpy.data 会被 Blender 换成空的占位对象，那时不能扫物体建表，
 # 所以表标成"待建"，等第一次换帧或打开文件时再真正重建。
 _crafter_time_registry_stale = True
+# 渲染期间不能直接从渲染线程 update_tag（会和主线程的 depsgraph 刷新抢内存，
+# 轻则数据写坏、重则 tbbmalloc 堆损坏 0xc0000374）。渲染中只记一个待办标记，
+# 等渲染结束、回到主线程后由定时器补一次标记。
+_crafter_time_refresh_pending = False
+
+
+def _crafter_time_request_refresh():
+    '''请求在下一个安全的主线程时机补打标记（可在渲染线程调用，只写一个 bool）'''
+    global _crafter_time_refresh_pending
+    _crafter_time_refresh_pending = True
+
+
+def _crafter_time_pending_timer():
+    '''主线程定时器：渲染结束/视口空闲时把延迟的 Cycles 刷新补上'''
+    global _crafter_time_refresh_pending
+    if not _crafter_time_refresh_pending:
+        return 0.5
+    if bpy.app.is_job_running('RENDER'):
+        return 0.5
+    if threading.current_thread() is not threading.main_thread():
+        return 0.5
+    _crafter_time_refresh_pending = False
+    try:
+        _crafter_time_refresh_for_cycles(getattr(bpy.context, "scene", None))
+    except Exception:
+        # 定时器里绝不能抛异常：Blender 会注销掉这个回调，之后渲染结束就再也没人补标记了
+        import traceback
+        traceback.print_exc()
+    return 0.5
 
 
 def register_crafter_time_object(obj):
@@ -2189,7 +2247,20 @@ def _crafter_time_cycles_is_drawing():
 
 
 def _crafter_time_refresh_for_cycles(scene):
-    '''换帧时给带时间驱动器的物体打标记，让 Cycles 重新同步物体数据（真置换连几何一起）'''
+    '''换帧时给带时间驱动器的物体打标记，让 Cycles 重新同步物体数据（真置换连几何一起）
+
+    这个回调也会在渲染时被 Blender 从渲染线程调用。此时绝不能碰 depsgraph：
+    主线程可能正在为视口刷新 depsgraph，两边同时写物体/ID 的 recalc 标记会撞车
+    （调查报告里的 EXCEPTION_ACCESS_VIOLATION / tbbmalloc 堆损坏 0xc0000374）。
+    渲染期间只记待办，等渲染结束回到主线程后由定时器补一次；最终渲染的每一帧
+    Cycles 本来就会重新求值 depsgraph，不依赖这里的标记。
+    '''
+    if bpy.app.is_job_running('RENDER'):
+        _crafter_time_request_refresh()
+        return
+    if threading.current_thread() is not threading.main_thread():
+        _crafter_time_request_refresh()
+        return
     if scene is None or scene.render.engine != 'CYCLES':
         return  # EEVEE 每帧自己读物体颜色，不用管
     if not _crafter_time_cycles_is_drawing():
@@ -2228,6 +2299,12 @@ def _crafter_time_on_load(*_args):
     _crafter_time_rebuild_registry()
 
 
+@bpy.app.handlers.persistent
+def _crafter_time_on_render_end(*_args):
+    '''渲染结束/取消：让定时器在主线程补一次标记，视口切回来时不至于停在旧时间'''
+    _crafter_time_request_refresh()
+
+
 def register_crafter_time_handlers():
     '''挂 handler（幂等：先摘再挂，避免重载插件时叠好几份）
 
@@ -2239,19 +2316,36 @@ def register_crafter_time_handlers():
     remove_crafter_time_handlers()
     bpy.app.handlers.frame_change_pre.append(_crafter_time_on_frame_change)
     bpy.app.handlers.load_post.append(_crafter_time_on_load)
+    bpy.app.handlers.render_complete.append(_crafter_time_on_render_end)
+    bpy.app.handlers.render_cancel.append(_crafter_time_on_render_end)
+    try:
+        if not bpy.app.timers.is_registered(_crafter_time_pending_timer):
+            bpy.app.timers.register(_crafter_time_pending_timer, first_interval=0.5,
+                                    persistent=True)
+    except Exception:
+        import traceback
+        traceback.print_exc()
     _crafter_time_registry_stale = True
 
 
 def remove_crafter_time_handlers():
     global _crafter_time_registry_stale
-    for handlers, callback in ((bpy.app.handlers.frame_change_pre, _crafter_time_on_frame_change),
-                               (bpy.app.handlers.load_post, _crafter_time_on_load)):
+    for handlers, callback in (
+            (bpy.app.handlers.frame_change_pre, _crafter_time_on_frame_change),
+            (bpy.app.handlers.load_post, _crafter_time_on_load),
+            (bpy.app.handlers.render_complete, _crafter_time_on_render_end),
+            (bpy.app.handlers.render_cancel, _crafter_time_on_render_end)):
         while callback in handlers:
             handlers.remove(callback)
         # 插件重新加载后，列表里可能残留旧模块里的同名函数对象：按名字再清一遍
         for existing in list(handlers):
             if getattr(existing, "__name__", "") == callback.__name__:
                 handlers.remove(existing)
+    try:
+        if bpy.app.timers.is_registered(_crafter_time_pending_timer):
+            bpy.app.timers.unregister(_crafter_time_pending_timer)
+    except Exception:
+        pass
     _crafter_time_objects.clear()
     _crafter_time_registry_stale = True
 
@@ -2488,238 +2582,6 @@ def node_moving_tex_info(node):
 
     return info
 
-def creat_parallax_node(node_tex_height, iterations, smooth, info_moving_normal, nodes, links, height_output="Alpha", gusess_scale=1, use_repeat_zone=False, use_pom=False):
-    parallax_group_name = "CP-POM视差" if use_pom else "CP-视差"
-    # 创建框，方便清除
-    node_frame = nodes.new(type="NodeFrame")
-    location = [node_tex_height.location.x - 1500, node_tex_height.location.y]
-    node_frame.location = location
-    node_frame.label = "Crafter-视差"
-
-    move = 190
-    iterations = max(iterations, 1)
-
-    if info_moving_normal[0]:
-        row_dao = 1 / info_moving_normal[1].inputs["row"].default_value
-    else:
-        row_dao = 1
-
-    # Blender 5.0+ 可以用着色器 Repeat Zone 把迭代收进一个循环区；失败时回退手动展开
-    if use_repeat_zone and bpy.app.version >= (5, 0, 0):
-        try:
-            return _creat_parallax_repeat_zone(
-                node_tex_height, iterations, smooth, info_moving_normal, nodes, links,
-                height_output, gusess_scale, node_frame, location, row_dao, parallax_group_name)
-        except Exception as ex:
-            warn_log(f"Repeat Zone 视差失败，回退手动展开: {ex}")
-
-    # POM 正向链：UV 来源 → 第 1 个 → ... → 第 N 个 → 最终 UV
-    # （原版 CP-视差 是反向链，两者 Start 递增方向相反，不能混用）
-    if use_pom:
-        if info_moving_normal[0]:
-            node_moving = copy_node_tree_recursive(source_node=info_moving_normal[1], nodes=nodes, links=links,
-                                                   to_location=[location[0] - 600, location[1]], parent=node_frame)
-            uv_source = node_moving.outputs["Vector"]
-        else:
-            node_TexCoord = nodes.new("ShaderNodeTexCoord")
-            node_TexCoord.location = [location[0] - 600, location[1]]
-            node_TexCoord.parent = node_frame
-            uv_source = node_TexCoord.outputs["UV"]
-
-        node_prev = None
-        node_final_parallax = None
-        for i in range(1, iterations + 1):
-            node_parallax = nodes.new("ShaderNodeGroup")
-            node_parallax.node_tree = bpy.data.node_groups[parallax_group_name]
-            node_parallax.inputs["1 / row"].default_value = row_dao
-            node_parallax.location = location
-            node_parallax.parent = node_frame
-            location[0] += 1.5 * move
-
-            node_height = nodes.new("ShaderNodeTexImage")
-            node_height.image = node_tex_height.image
-            node_height.location = location
-            node_height.parent = node_frame
-            node_height.interpolation = "Linear" if smooth else "Closest"
-            location[0] += move
-
-            if node_prev is not None:
-                links.new(node_prev.outputs["Next Start"], node_parallax.inputs["Start"])
-                links.new(node_prev.outputs["UV"], node_parallax.inputs["UV"])
-                links.new(node_prev.outputs["UV"], node_height.inputs["Vector"])
-            else:
-                links.new(uv_source, node_parallax.inputs["UV"])
-                links.new(uv_source, node_height.inputs["Vector"])
-
-            if gusess_scale == 1:
-                links.new(node_height.outputs[height_output], node_parallax.inputs["Depth"])
-            else:
-                node_math = nodes.new("ShaderNodeMath")
-                node_math.operation = "MULTIPLY_ADD"
-                node_math.location = location
-                node_math.parent = node_frame
-                node_math.inputs["Value_001"].default_value = gusess_scale
-                node_math.inputs["Value_002"].default_value = 1 - gusess_scale
-                links.new(node_height.outputs[height_output], node_math.inputs["Value"])
-                links.new(node_math.outputs["Value"], node_parallax.inputs["Depth"])
-                location[0] += move
-
-            node_prev = node_parallax
-            node_final_parallax = node_parallax
-
-        links.new(node_final_parallax.outputs["UV"], node_tex_height.inputs["Vector"])
-        return node_final_parallax, node_frame
-
-    i = 1
-    while iterations >= i:
-
-        node_parallax = nodes.new("ShaderNodeGroup")
-        node_parallax.node_tree = bpy.data.node_groups[parallax_group_name]
-        node_parallax.location = location
-        node_parallax.inputs["1 / row"].default_value = row_dao
-        location[0] -= 1.5 * move# location
-        node_parallax.parent = node_frame
-        if i == 1:
-            node_final_parallax = node_parallax
-        else:
-            links.new(node_parallax.outputs["Next Start"], node_last.inputs["Start"])
-            links.new(node_parallax.outputs["UV"], node_last.inputs["UV"])
-            links.new(node_parallax.outputs["Current Depth"], node_last.inputs["Current Depth"])
-            links.new(node_parallax.outputs["UV"], node_height.inputs["Vector"])
-        node_last = node_parallax
-
-        node_height = nodes.new("ShaderNodeTexImage")
-        node_height.image = node_tex_height.image
-        node_height.location = location
-        location[0] -= move# location
-        node_height.parent = node_frame
-        if smooth:
-            node_height.interpolation = "Linear"
-        else:
-            node_height.interpolation = "Closest"
-        if gusess_scale == 1:
-            links.new(node_height.outputs[height_output], node_last.inputs["Depth"])
-        else:
-            node_math = nodes.new("ShaderNodeMath")
-            node_math.operation = "MULTIPLY_ADD"
-            node_math.location = location
-            location[0] -= move# location
-            node_math.inputs["Value_001"].default_value = gusess_scale
-            node_math.inputs["Value_002"].default_value = 1 - gusess_scale
-            links.new(node_height.outputs[height_output], node_math.inputs["Value"])
-            links.new(node_math.outputs["Value"], node_last.inputs["Depth"])
-            node_math.parent = node_frame
-
-        if i == iterations:
-            if info_moving_normal[0]:
-                node_moving = copy_node_tree_recursive(source_node=info_moving_normal[1], nodes=nodes, links=links, to_location=location, parent=node_frame)
-
-                links.new(node_moving.outputs["Vector"], node_height.inputs["Vector"])
-                links.new(node_moving.outputs["Vector"], node_last.inputs["UV"])
-            else:
-                node_TexCoord = nodes.new("ShaderNodeTexCoord")
-                node_TexCoord.location = location
-                node_TexCoord.parent = node_frame
-
-                links.new(node_TexCoord.outputs["UV"], node_height.inputs["Vector"])
-                links.new(node_TexCoord.outputs["UV"], node_last.inputs["UV"])
-
-        i += 1
-
-    # 循环内每轮都连同一个输入，最后一条生效——移出循环只连一次
-    links.new(node_final_parallax.outputs["UV"], node_tex_height.inputs["Vector"])
-
-    return node_final_parallax, node_frame
-
-def _creat_parallax_repeat_zone(node_tex_height, iterations, smooth, info_moving_normal,
-                                nodes, links, height_output, gusess_scale,
-                                node_frame, location, row_dao, group_name="CP-视差"):
-    '''
-    Blender 5.0+ 着色器 Repeat Zone 版视差（实验性）。
-    节点类型/接口在 5.x 小版本可能变化，任何不符合预期都抛异常，由调用方回退手动展开。
-    '''
-    # 着色器 Repeat Zone 复用几何节点的类型（Blender 5.2 实测）
-    repeat_out_type = "GeometryNodeRepeatOutput" if hasattr(bpy.types, "GeometryNodeRepeatOutput") else None
-    repeat_in_type = "GeometryNodeRepeatInput" if hasattr(bpy.types, "GeometryNodeRepeatInput") else None
-    if repeat_out_type is None or repeat_in_type is None:
-        raise RuntimeError("当前 Blender 版本没有 Repeat Zone 节点")
-
-    repeat_out = nodes.new(repeat_out_type)
-    repeat_out.location = [location[0] + 900, location[1]]
-    repeat_out.parent = node_frame
-    for item_name, item_type in (("UV", "VECTOR"), ("Current Depth", "FLOAT"), ("Next Start", "FLOAT")):
-        repeat_out.repeat_items.new(item_type, item_name)
-
-    repeat_in = nodes.new(repeat_in_type)
-    repeat_in.location = location
-    repeat_in.parent = node_frame
-    repeat_in.pair_with_output(repeat_out)
-    repeat_in.inputs["Iterations"].default_value = iterations
-    # 初始值：Current Depth / Next Start 从 0 开始，UV 由贴图 UV 来源提供
-    if "Current Depth" in repeat_in.inputs:
-        repeat_in.inputs["Current Depth"].default_value = 0.0
-    if "Next Start" in repeat_in.inputs:
-        repeat_in.inputs["Next Start"].default_value = 0.0
-
-    # 和手动展开一致：纹理在左、CP-视差在右
-    node_height = nodes.new("ShaderNodeTexImage")
-    node_height.image = node_tex_height.image
-    node_height.location = [location[0] + 300, location[1]]
-    node_height.parent = node_frame
-    node_height.interpolation = "Linear" if smooth else "Closest"
-
-    node_parallax = nodes.new("ShaderNodeGroup")
-    node_parallax.node_tree = bpy.data.node_groups[group_name]
-    node_parallax.inputs["1 / row"].default_value = row_dao
-    node_parallax.location = [location[0] + 550, location[1]]
-    node_parallax.parent = node_frame
-
-    # 循环值 UV → CP-视差的 UV 输入 + 高度贴图的 Vector
-    links.new(repeat_in.outputs["UV"], node_parallax.inputs["UV"])
-    links.new(repeat_in.outputs["UV"], node_height.inputs["Vector"])
-    # 循环值 Current Depth → CP-视差的 Current Depth 输入
-    links.new(repeat_in.outputs["Current Depth"], node_parallax.inputs["Current Depth"])
-    # 循环值 Next Start → CP-视差的 Start 输入
-    start_input = node_parallax.inputs.get("Start") or node_parallax.inputs.get("起始")
-    if start_input is not None:
-        links.new(repeat_in.outputs["Next Start"], start_input)
-    # 高度采样结果 → CP-视差的深度输入
-    depth_input = node_parallax.inputs.get("Depth") or node_parallax.inputs.get("深度")
-    if gusess_scale == 1:
-        if depth_input is not None:
-            links.new(node_height.outputs[height_output], depth_input)
-    else:
-        node_math = nodes.new("ShaderNodeMath")
-        node_math.operation = "MULTIPLY_ADD"
-        node_math.location = [location[0] + 550, location[1] - 200]
-        node_math.parent = node_frame
-        node_math.inputs["Value_001"].default_value = gusess_scale
-        node_math.inputs["Value_002"].default_value = 1 - gusess_scale
-        links.new(node_height.outputs[height_output], node_math.inputs["Value"])
-        if depth_input is not None:
-            links.new(node_math.outputs["Value"], depth_input)
-    # CP-视差的输出 → Repeat Output 的对应循环变量
-    links.new(node_parallax.outputs["UV"], repeat_out.inputs["UV"])
-    links.new(node_parallax.outputs["Current Depth"], repeat_out.inputs["Current Depth"])
-    links.new(node_parallax.outputs["Next Start"], repeat_out.inputs["Next Start"])
-
-    # 循环的 UV 起点：动态纹理或 Texture Coordinate（放在 Repeat Input 左侧）
-    if info_moving_normal[0]:
-        node_moving = copy_node_tree_recursive(source_node=info_moving_normal[1], nodes=nodes, links=links,
-                                               to_location=[location[0] - 600, location[1]], parent=node_frame)
-        uv_source = node_moving.outputs["Vector"]
-    else:
-        node_TexCoord = nodes.new("ShaderNodeTexCoord")
-        node_TexCoord.location = [location[0] - 600, location[1]]
-        node_TexCoord.parent = node_frame
-        uv_source = node_TexCoord.outputs["UV"]
-    links.new(uv_source, repeat_in.inputs["UV"])
-
-    # 循环结束后的 UV 接回高度贴图（法向贴图）的 Vector，和手动展开一致
-    links.new(repeat_out.outputs["UV"], node_tex_height.inputs["Vector"])
-
-    return repeat_out, node_frame
-
 def _parallax_frame_alpha(source_info):
     '''取动态纹理源节点的帧驱动 Alpha 输出；没有 row 输入或没有上游连接时返回 None。'''
     if not source_info[0] or source_info[1] is None:
@@ -2767,26 +2629,6 @@ def _parallax_frame_info(info_moving):
     return _parallax_frame_alpha(info_moving), row
 
 
-def _parallax_uv_source(nodes, info_moving, parent, location):
-    '''返回 (local UV, Frame Offset, row)；动态纹理时取组的输入 Vector，而不是输出。'''
-    source = info_moving[1] if info_moving and info_moving[0] else None
-    if source is not None:
-        vector_input = source.inputs.get("Vector")
-        if vector_input is not None and vector_input.is_linked:
-            row = 1
-            row_input = source.inputs.get("row")
-            if row_input is not None:
-                try:
-                    row = max(1, int(round(row_input.default_value)))
-                except Exception:
-                    row = 1
-            return vector_input.links[0].from_socket, _parallax_frame_alpha(info_moving), row
-    node = nodes.new("ShaderNodeTexCoord")
-    node.parent = parent
-    node.location = location
-    return node.outputs["UV"], None, 1
-
-
 def _parallax_set_uv_scale(node, scale_y):
     node.inputs["row_b / row_h"].default_value = float(scale_y)
 
@@ -2817,36 +2659,6 @@ def parallax_map_uv(nodes, links, uv_socket, info, base_row, parent, location):
     return _parallax_dynamic_uv(
         nodes, links, uv_socket, frame_offset if dynamic else None,
         scale_y, parent, location)
-
-
-def _parallax_scale_uv(nodes, links, uv_socket, row, parent, location):
-    '''只做 Y 方向缩放，不加帧偏移：用于基础色精灵布局下的静态法线/高度。'''
-    row = max(1, int(row))
-    node_sep = nodes.new("ShaderNodeSeparateXYZ")
-    node_sep.parent = parent
-    node_sep.location = location
-    links.new(uv_socket, node_sep.inputs["Vector"])
-
-    node_mul = nodes.new("ShaderNodeMath")
-    node_mul.operation = "MULTIPLY"
-    node_mul.parent = parent
-    node_mul.location = (location[0] + 110.0, location[1])
-    links.new(node_sep.outputs["Y"], node_mul.inputs[0])
-    node_mul.inputs[1].default_value = float(row)
-
-    node_fract = nodes.new("ShaderNodeMath")
-    node_fract.operation = "FRACT"
-    node_fract.parent = parent
-    node_fract.location = (location[0] + 180.0, location[1] - 70.0)
-    links.new(node_mul.outputs[0], node_fract.inputs[0])
-
-    node_comb = nodes.new("ShaderNodeCombineXYZ")
-    node_comb.parent = parent
-    node_comb.location = (location[0] + 240.0, location[1])
-    links.new(node_sep.outputs["X"], node_comb.inputs["X"])
-    links.new(node_fract.outputs[0], node_comb.inputs["Y"])
-    links.new(node_sep.outputs["Z"], node_comb.inputs["Z"])
-    return node_comb.outputs["Vector"]
 
 
 def _parallax_height_sampler(nodes, links, node_tex_height, uv_socket, height_output, gusess_scale, smooth, parent, location):
@@ -3095,32 +2907,6 @@ def creat_normal_parallax_new(node_tex_height, iterations, refine_steps, smooth,
     return final_uv, node_frame, layout_row
 
 
-def create_parallax_final(node, node_final_depth, info_height, info_moving, nodes, links, node_frame=None):
-    node_final = nodes.new("ShaderNodeGroup")
-    node_final.node_tree = bpy.data.node_groups["CP-视差转换"]
-    Scale = 1
-    if info_height[0] and "row" in info_height[1].inputs:
-        Scale = info_height[1].inputs["row"].default_value
-        alpha = _parallax_frame_alpha(info_height)
-        if alpha is not None:
-            links.new(alpha, node_final.inputs["old move"])
-
-    if info_moving[0] and "row" in info_moving[1].inputs:
-        Scale /= info_moving[1].inputs["row"].default_value
-        alpha = _parallax_frame_alpha(info_moving)
-        if alpha is not None:
-            links.new(alpha, node_final.inputs["new move"])
-
-    node_final.location = node.location.x - 1400, node.location.y
-    node_final.inputs["Scale"].default_value = Scale
-
-    if node_frame != None:
-        node_final.parent = node_frame
-    links.new(node_final_depth.outputs["UV"], node_final.inputs["UV"])
-    links.new(node_final.outputs["UV"], node.inputs["Vector"])
-
-    return node_final
-
 _alpha_all_one_cache = {}
 
 
@@ -3175,258 +2961,6 @@ def is_alpha_channel_all_one(image_node):
             return False
     return True
 
-
-def copy_node_tree_recursive(source_node, nodes, links, node_mapping=None, to_location=[0,0], parent=None):
-    """
-    递归复制节点及其所有上游节点，并保持它们之间的连接关系
-    
-    参数:
-        source_node: 要复制的源节点
-        target_nodes: 目标节点集合 (nodes)
-        target_links: 目标连接集合 (links)
-        node_mapping: 用于跟踪已复制节点的字典，避免重复复制
-    
-    返回:
-        复制后的新节点
-    """
-    
-
-    # 初始化映射字典
-    if node_mapping is None:
-        node_mapping = {}
-    
-    # 如果节点已经复制过，直接返回已复制的节点
-    if source_node in node_mapping:
-        return node_mapping[source_node]
-    
-    # 复制当前节点
-    new_node = nodes.new(type=source_node.bl_idname)
-
-    new_node.location = to_location[0], to_location[1]
-    if parent != None:
-        new_node.parent = parent
-    
-    # 复制特殊属性（根据节点类型）
-    if hasattr(source_node, 'node_tree') and source_node.node_tree:
-        new_node.node_tree = source_node.node_tree
-    
-    if source_node.type == 'TEX_IMAGE' and source_node.image:
-        new_node.image = source_node.image
-        new_node.projection = source_node.projection
-        new_node.interpolation = source_node.interpolation
-        
-    # 复制颜色渐变的插值模式
-    if source_node.type == 'VALTORGB' and hasattr(source_node, 'color_ramp'):
-        new_node.color_ramp.interpolation = source_node.color_ramp.interpolation
-        new_node.color_ramp.color_mode = source_node.color_ramp.color_mode
-        new_node.color_ramp.hue_interpolation = source_node.color_ramp.hue_interpolation
-        
-        # 复制所有颜色元素
-        for i, element in enumerate(source_node.color_ramp.elements):
-            if i == 0 or i == 1:
-                # 第一个元素已经存在，只需设置其属性
-                new_element = new_node.color_ramp.elements[i]
-                new_element.position = element.position
-                new_element.color = element.color
-            else:
-                # 添加新元素
-                new_element = new_node.color_ramp.elements.new(element.position)
-                new_element.color = element.color
-    
-    # 复制节点属性
-    for input in source_node.inputs:
-        new_node.inputs[input.name].default_value = input.default_value
-        
-    # 将新节点添加到映射字典中
-    node_mapping[source_node] = new_node
-    
-    # 递归处理所有上游节点（输入连接）
-    for input_socket in source_node.inputs:
-        for link in input_socket.links:
-            from_node = link.from_node
-            from_socket = link.from_socket
-            to_socket = link.to_socket
-            
-            # 递归复制上游节点
-            new_from_node = copy_node_tree_recursive(from_node, nodes, links, node_mapping, to_location=[from_node.location.x - source_node.location.x + to_location[0], from_node.location.y - source_node.location.y + to_location[1]], parent=parent)
-            
-            # 找到对应的输出socket
-            new_from_socket = None
-            if from_socket.name in new_from_node.outputs:
-                new_from_socket = new_from_node.outputs[from_socket.name]
-            else:
-                # 如果名称不匹配，尝试按索引查找
-                try:
-                    socket_index = list(from_node.outputs).index(from_socket)
-                    if socket_index < len(new_from_node.outputs):
-                        new_from_socket = new_from_node.outputs[socket_index]
-                except ValueError:
-                    pass
-            
-            # 找到新节点上对应的输入socket
-            new_to_socket = None
-            if to_socket.name in new_node.inputs:
-                new_to_socket = new_node.inputs[to_socket.name]
-            else:
-                # 如果名称不匹配，尝试按索引查找
-                try:
-                    socket_index = list(source_node.inputs).index(to_socket)
-                    if socket_index < len(new_node.inputs):
-                        new_to_socket = new_node.inputs[socket_index]
-                except ValueError:
-                    pass
-            
-            # 创建连接
-            if new_from_socket and new_to_socket:
-                links.new(new_from_socket, new_to_socket)
-    
-    return new_node
-
-def nodes_distance(node1, node2):
-    """
-    计算两个节点之间的欧几里得距离
-    
-    参数:
-        node1: 第一个节点对象
-        node2: 第二个节点对象
-        
-    返回:
-        float: 两个节点之间的距离
-    """
-    loc1 = node1.location
-    loc2 = node2.location
-    
-    # 使用欧几里得距离公式计算距离
-    distance = ((loc1.x - loc2.x) ** 2 + (loc1.y - loc2.y) ** 2) ** 0.5
-    return distance
-
-def same_nodes(node1, node2, visited_pairs=None):
-    
-    """
-    递归向上游对比两个节点及其所有上游节点，检查每个接口的数值是否相同
-    
-    参数:
-        node1: 第一个节点对象
-        node2: 第二个节点对象
-        visited_pairs: 已经对比过的节点对，防止无限循环
-    
-    返回:
-        bool: 如果所有节点及其接口数值都相同返回True，否则返回False
-    """
-    # 初始化已访问节点对集合
-    if visited_pairs is None:
-        visited_pairs = set()
-    
-    # 如果节点对已经对比过，跳过以防止循环引用导致的无限递归
-    node_pair = (node1, node2)
-    if node_pair in visited_pairs:
-        return True  # 假设已经对比过的节点对是相同的
-    
-    # 将当前节点对添加到已访问集合中
-    visited_pairs.add(node_pair)
-    
-    # 首先检查节点本身是否相同类型
-    if node1.bl_idname != node2.bl_idname:
-        return False
-    
-    # 检查节点节点树
-    if hasattr(node1, 'node_tree') and hasattr(node2, 'node_tree'):
-        if node1.node_tree != node2.node_tree:
-            return False
-    
-    # 检查输入接口数量是否相同
-    if len(node1.inputs) != len(node2.inputs):
-        return False
-    
-    # 检查输出接口数量是否相同
-    if len(node1.outputs) != len(node2.outputs):
-        return False
-    
-    # 检查输入接口的默认值是否相同
-    for i in range(len(node1.inputs)):
-        input1 = node1.inputs[i]
-        input2 = node2.inputs[i]
-        # 检查默认值是否相同
-        if input1.default_value != input2.default_value:
-            # 对于颜色等向量值，需要特殊处理
-            if hasattr(input1.default_value, '__iter__') and hasattr(input2.default_value, '__iter__'):
-                try:
-                    if tuple(input1.default_value) != tuple(input2.default_value):
-                        return False
-                except:
-                    # 如果无法转换为元组，则直接比较
-                    if input1.default_value != input2.default_value:
-                        return False
-            else:
-                return False
-    
-    # 检查特殊属性（如图像纹理节点的图像）
-    if node1.type == 'TEX_IMAGE' and node2.type == 'TEX_IMAGE':
-        if node1.image != node2.image:
-            return False
-        if node1.projection != node2.projection:
-            return False
-        if node1.interpolation != node2.interpolation:
-            return False
-    
-    # 检查颜色渐变节点
-    if node1.type == 'VALTORGB' and node2.type == 'VALTORGB':
-        if node1.color_ramp.interpolation != node2.color_ramp.interpolation:
-            return False
-        if len(node1.color_ramp.elements) != len(node2.color_ramp.elements):
-            return False
-        for i in range(len(node1.color_ramp.elements)):
-            if node1.color_ramp.elements[i].position != node2.color_ramp.elements[i].position:
-                return False
-            if tuple(node1.color_ramp.elements[i].color) != tuple(node2.color_ramp.elements[i].color):
-                return False
-    
-    # 递归检查所有上游连接的节点
-    upstream_nodes1 = {}
-    upstream_nodes2 = {}
-    
-    # 收集第一个节点的所有上游节点
-    for input_socket in node1.inputs:
-        for link in input_socket.links:
-            from_node = link.from_node
-            from_socket_name = link.from_socket.name
-            to_socket_name = link.to_socket.name
-            upstream_nodes1[(from_socket_name, to_socket_name)] = from_node
-    
-    # 收集第二个节点的所有上游节点
-    for input_socket in node2.inputs:
-        for link in input_socket.links:
-            from_node = link.from_node
-            from_socket_name = link.from_socket.name
-            to_socket_name = link.to_socket.name
-            upstream_nodes2[(from_socket_name, to_socket_name)] = from_node
-    
-    # 检查上游连接是否相同
-    if set(upstream_nodes1.keys()) != set(upstream_nodes2.keys()):
-        return False
-    
-    # 递归对比所有上游节点
-    for key in upstream_nodes1.keys():
-        if key not in upstream_nodes2:
-            return False
-        
-        upstream_node1 = upstream_nodes1[key]
-        upstream_node2 = upstream_nodes2[key]
-        
-        # 递归对比上游节点
-        if not same_nodes(upstream_node1, upstream_node2, visited_pairs):
-            return False
-    
-    return True
-
-def is_moving_same(info_tex, info_height):
-    moving_same = False
-    if info_height[0] == info_tex[0]:
-        if info_height[0]:
-            moving_same = same_nodes(info_tex[1], info_height[1])
-        else:
-            moving_same = True
-    return moving_same 
 
 def make_true_object_mode(context):
     if context.active_object:

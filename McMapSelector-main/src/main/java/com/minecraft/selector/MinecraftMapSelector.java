@@ -8,6 +8,7 @@ import com.minecraft.selector.core.SelectionSeed;
 import com.minecraft.selector.core.ImportLod;
 import com.minecraft.selector.gui.SelectionMath;
 import com.minecraft.selector.gui.MinecraftMapGUI;
+import com.minecraft.selector.i18n.I18n;
 import com.minecraft.selector.utils.WorldPathResolver;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -26,6 +27,9 @@ import java.util.stream.Collectors;
 public class MinecraftMapSelector {
     
     public static void main(String[] args) {
+        // --lang 必须最先解析并从参数里剥离：否则它会被当成 world path / 未知选项。
+        // 优先级：命令行 > 上次菜单选择 > 系统 Locale（见 I18n）。
+        args = I18n.init(args);
         // YbandLog 现在是缓冲写入：退出时把尾巴刷到 %TEMP%\crafter-yband.log。
         Runtime.getRuntime().addShutdownHook(new Thread(com.minecraft.selector.core.YbandLog::flush, "yband-log-flush"));
         for(String arg:args)if("--validate-selection".equals(arg)) {System.exit(com.minecraft.selector.core.SelectionValidator.run(args,System.out,System.err));return;}
@@ -652,31 +656,32 @@ public class MinecraftMapSelector {
      * 显示使用说明
      */
     private static void showUsage() {
-        System.out.println("用法:");
-        System.out.println("  java -jar minecraft-map-selector.jar                                    # 启动GUI");
-        System.out.println("  java -jar minecraft-map-selector.jar <mca文件路径> [选项...]              # 命令行模式");
+        System.out.println(I18n.t("Usage:"));
+        System.out.println(I18n.t("  java -jar minecraft-map-selector.jar                                    # start the GUI"));
+        System.out.println(I18n.t("  java -jar minecraft-map-selector.jar <mca file> [options...]            # command line mode"));
         System.out.println();
-        System.out.println("资源选项（CLI / GUI / Blender 通用，可重复；后面的资源包覆盖前面的）:");
+        System.out.println(I18n.t("Resource options (CLI / GUI / Blender; repeatable, later packs override earlier ones):"));
         System.out.println("  --jar-path <jar> --mods-dir <dir> --mod-jar <jar> --resource-pack <zip>");
-        System.out.println("  --render-y <Y> 以指定 Y 为顶层向下渲染；默认 AUTO");
-        System.out.println("  --no-auto-resources 禁用资源自动发现；每张图另存 .png.colors.json 命中统计");
+        System.out.println(I18n.t("  --render-y <Y> render downward from the given top Y; default AUTO"));
+        System.out.println(I18n.t("  --no-auto-resources disable resource auto-discovery; each map also writes .png.colors.json usage stats"));
         System.out.println("Blender GUI: --world-path <world> --output-file <coordinates.json> [--min-y Y --max-y Y]");
-        System.out.println("预设选区: --min-x X --max-x X --min-z Z --max-z Z (四项必须同时提供)");
-        System.out.println("--multi-box 附加 boxes 列表；--include-waypoints 显式附加 POI；根坐标始终是包围盒");
-        System.out.println("无界面 CI: --validate-selection coordinates.json --max-columns N (退出码 0/1)");
-        System.out.println("命令行选项:");
-        System.out.println("  <mca文件路径>        必需，.mca区域文件路径");
-        System.out.println("  [输出JSON文件路径]   可选，默认为<区域名>_map_<时间戳>.json");
-        System.out.println("  [输出图像文件路径]   可选，默认为<区域名>_map_<时间戳>.png");
-        System.out.println("  [线程数]            可选，默认为CPU核心数或8（取较小值）");
-        System.out.println("  [区域大小]          可选，以区块为单位，默认32（即32x32区块）");
-        System.out.println("  [表面模式]          最后可选参数 AUTO / TOP，默认 AUTO（所有维度均取顶部表面）");
-        System.out.println("  [采样间隔]          可选，每隔多少个方块采样一次，默认1（全采样）");
+        System.out.println(I18n.t("Preset selection: --min-x X --max-x X --min-z Z --max-z Z (all four required)"));
+        System.out.println(I18n.t("--multi-box append a boxes list; --include-waypoints append POIs; root coords are always the AABB"));
+        System.out.println(I18n.t("Headless CI: --validate-selection coordinates.json --max-columns N (exit code 0/1)"));
+        System.out.println(I18n.t("Language: --lang en|zh_CN (also saved from View > Language; restart the selector to apply)"));
+        System.out.println(I18n.t("Command line options:"));
+        System.out.println(I18n.t("  <mca file>            required, .mca region file path"));
+        System.out.println(I18n.t("  [output JSON file]    optional, defaults to <region>_map_<timestamp>.json"));
+        System.out.println(I18n.t("  [output image file]   optional, defaults to <region>_map_<timestamp>.png"));
+        System.out.println(I18n.t("  [thread count]        optional, defaults to min(CPU cores, 8)"));
+        System.out.println(I18n.t("  [region size]         optional, in chunks, default 32 (32x32 chunks)"));
+        System.out.println(I18n.t("  [surface mode]        last optional arg AUTO / TOP, default AUTO (top surface in every dimension)"));
+        System.out.println(I18n.t("  [sample interval]     optional, sample every N blocks, default 1 (full sampling)"));
         System.out.println();
-        System.out.println("示例:");
+        System.out.println(I18n.t("Examples:"));
         System.out.println("  java -jar minecraft-map-selector.jar /path/to/r.0.0.mca");
         System.out.println("  java -jar minecraft-map-selector.jar /path/to/r.0.0.mca blocks.json map.png 8 32 1");
         System.out.println();
-        System.out.println("注意: 输出文件将保存到当前工作目录");
+        System.out.println(I18n.t("Note: output files are written to the current working directory"));
     }
 }

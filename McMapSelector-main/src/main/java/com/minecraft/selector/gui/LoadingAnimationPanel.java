@@ -1,6 +1,7 @@
 package com.minecraft.selector.gui;
 
 import javax.swing.*;
+import com.minecraft.selector.i18n.I18n;
 import java.awt.*;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
@@ -15,7 +16,7 @@ public class LoadingAnimationPanel extends JPanel {
     private Timer animationTimer;
     private int animationFrame = 0;
     private boolean isAnimating = false;
-    private String loadingText = "Loading...";
+    private String loadingText = I18n.t("Loading...");
     private AnimationType animationType = AnimationType.SPINNING_CIRCLE;
     
     public enum AnimationType {
@@ -106,7 +107,7 @@ public class LoadingAnimationPanel extends JPanel {
         }
         
         // 绘制加载文本
-        g2d.setFont(g2d.getFont().deriveFont(Font.BOLD, 12f));
+        g2d.setFont(Fonts.ui(12f, Font.BOLD));
         g2d.setColor(UIThemeManager.ThemeColors.PRIMARY_BLUE);
         FontMetrics fm = g2d.getFontMetrics();
         int textWidth = fm.stringWidth(loadingText);
@@ -218,7 +219,7 @@ public class LoadingAnimationPanel extends JPanel {
      * 创建带加载动画的对话框
      */
     public static JDialog createLoadingDialog(Window parent, String message) {
-        JDialog dialog = new JDialog(parent, "Loading", Dialog.ModalityType.APPLICATION_MODAL);
+        JDialog dialog = new JDialog(parent, I18n.t("Loading"), Dialog.ModalityType.APPLICATION_MODAL);
         dialog.setDefaultCloseOperation(JDialog.DO_NOTHING_ON_CLOSE);
         dialog.setResizable(false);
         

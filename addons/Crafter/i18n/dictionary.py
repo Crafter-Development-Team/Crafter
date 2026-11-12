@@ -124,8 +124,6 @@ dictionary = {
         "default":"默认",
         "Open Classification Basis":"打开材质分类依据文件夹",
         "Reload Classification Basis":"刷新材质分类依据列表",
-        "Calculate Normal":"计算法向",
-        "Based on Parsed Normal":"基于已解析法向",
         "Use base color as height":"使用基础色作为高度",
         "Guess Height":"猜测高度",
         "Scale of Guess Height":"缩放",
@@ -150,6 +148,18 @@ dictionary = {
         "Starting coordinates":"起始坐标",
         "Ending coordinates":"结束坐标",
         "Automatically calculate chunk size and batch memory from the selected area and available RAM":"根据选中的区域和可用内存自动计算分块边长和批处理量",
+        # ==========多世界布局 / 对象拆分==========
+        "World Layout":"世界布局",
+        "Lay out imported worlds instead of leaving them at Minecraft absolute coordinates. The first import is centred on the world origin (X/Z) with its lowest point on the ground; later imports are placed side by side in a shelf grid. Toggling this only affects future imports":"导入时自动排布世界，而不是保留 Minecraft 绝对坐标。第一次导入在 X/Z 居中到世界原点，最低点落到地面；之后的导入按世界路径并排放在货架网格里。拨动开关只影响之后的导入",
+        "Distribute Later Imports":"后导入按相对路径分布",
+        "When World Layout is on, place later imports in the next free shelf slot based on their world path. Turn this off to keep later imports at their Minecraft absolute coordinates":"世界布局打开时，把后导入的世界按世界路径放进下一个空槽位。关闭后，后导入的世界保持 Minecraft 绝对坐标",
+        "Reset World Layout":"重置世界布局",
+        "Forget the saved world slots without moving any object. The next import becomes the first world again and is centred on the origin":"忘掉已保存的世界槽位，但不移动任何物体。下一次导入会重新成为第一个世界并居中到原点",
+        "Object Split":"对象拆分",
+        "Split by Material":"按材质拆分",
+        "Write one OBJ object per material, so the importer creates a separate Blender object for each material. This can produce a very large number of objects on big imports and slows down import and editing":"每个材质写成一个 OBJ 对象，导入后每个材质是独立的 Blender 物体。大范围导入可能产生大量物体，导入和编辑都会变慢",
+        "Split by Block":"按方块拆分",
+        "Write one OBJ object per block ID, so the importer creates a separate Blender object for each block type (a block keeps all of its materials in one object). Merge Mod Textures is disabled for this import so every block gets its own material. This can produce a very large number of objects":"每个方块 ID 写成一个 OBJ 对象，导入后每种方块是独立的 Blender 物体（同一个方块的所有材质留在同一个物体里）。本次导入会临时关闭模组贴图合并，保证每个方块都有自己的材质。可能产生大量物体",
             # ==========加载材质==========
         "Parsed Normal Strength":"解析法向强度",
         "How to parse PBR texture(and normal texture)":"如何解析PBR贴图(以及法线贴图)",
@@ -163,10 +173,11 @@ dictionary = {
         "Remove Parallax": "移除视差",
         "Set Parallax Depth": "设置视差深度",
         "Set PBR Parser": "设置PBR解析器",
-        "Parallax Setting": "视差设置",
+        "Parallax Settings": "视差设置",
         "Iterations": "迭代次数",
         "Depth": "深度",
         "Smooth": "平滑",
+        "Scale": "缩放",
         "POM Interpolation": "POM 插值",
         "Binary Steps": "二分次数",
         "POM interpolation is often underwhelming on Minecraft-style textures; binary refinement is disabled while this is on": "在我的世界风格贴图上，POM 插值效果一般；开启时不再进行二分",
@@ -179,9 +190,9 @@ dictionary = {
         "Add Time Driver on Import": "导入时添加时间驱动",
         "Automatically give imported objects a time driver: the object color alpha holds the current second (frame * fps_base / fps), and material nodes read it from the Object Info node's Alpha output. No geometry nodes are involved, so it costs nothing on heavy geometry": "导入时自动给物体加时间驱动器:物体颜色的alpha即当前秒数(frame * fps_base / fps),材质节点从Object Info节点的Alpha输出读取.不经过几何节点,几何再重也没有额外开销",
         "Time Driver Settings": "时间驱动设置",
-        "Settings for the time driver: add it on import, and keep it refreshing while Cycles is the render engine": "时间驱动的细项设置：导入时是否自动添加，以及在Cycles引擎下是否每帧刷新",
+        "Settings for the time driver: add it on import, and keep it refreshing while Cycles is the render engine": "时间驱动的细项设置：导入时是否自动添加，以及在Cycles引擎下是否给视口/播放补刷新（最终渲染期间会安全跳过，避免渲染线程写坏depsgraph）",
         "Refresh Time in Cycles": "Cycles下刷新时间",
-        "Cycles only re-reads an object's color when it is told that object changed, so a driven time value freezes until the render engine is switched. With this on, the objects that carry a time driver are marked on every frame change while Cycles is the render engine, which makes the time advance during playback and animation renders. EEVEE reads the object color every frame and is never touched": "Cycles只在被告知物体发生变化时才重读物体颜色,所以驱动器写的时间会停在旧值,切一次渲染引擎才会刷新.打开这项后,在Cycles引擎下每次换帧都会给带时间驱动器的物体补一次变化标记,播放和动画渲染时时间就能正常推进.EEVEE每帧直接读物体颜色,不受影响",
+        "Cycles only re-reads an object's color when it is told that object changed, so a driven time value freezes until the render engine is switched. With this on, the objects that carry a time driver are marked on every frame change while Cycles is the render engine, which makes the time advance during playback and in the Rendered viewport. Marking is skipped while a final render is running (Cycles re-evaluates the scene every frame there, and touching the depsgraph from the render thread can corrupt it) and re-applied when the render ends; EEVEE is never touched": "Cycles只在被告知物体发生变化时才重读物体颜色,所以驱动器写的时间会停在旧值,切一次渲染引擎才会刷新.打开这项后,在Cycles引擎下每次换帧都会给带时间驱动器的物体补一次变化标记,播放和Rendered视口里时间就能正常推进.最终渲染期间会跳过打标记(Cycles本来就会逐帧重新求值,而从渲染线程碰depsgraph可能把内存写坏),渲染结束后再补一次;EEVEE始终不受影响",
         "Show Material Panel": "显示材质面板",
         "Advanced Switch Mode": "高级开关模式",
         "Enable mix factor to blend On and Off": "开启后可用系数混合开与关",
@@ -236,3 +247,4 @@ dictionary = {
 dictionary = preprocess_dictionary(dictionary)
 
 dictionary["zh_HANS"] = dictionary["zh_CN"]
+dictionary["zh_HANT"] = dictionary["zh_CN"]

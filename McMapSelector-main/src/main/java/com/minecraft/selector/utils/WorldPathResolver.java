@@ -1,6 +1,7 @@
 package com.minecraft.selector.utils;
 
 import java.io.File;
+import com.minecraft.selector.i18n.I18n;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -54,7 +55,7 @@ public final class WorldPathResolver {
         public File getRegionDir() { return regionDir; }
 
         @Override
-        public String toString() { return displayName; }
+        public String toString() { return I18n.t(displayName); }
     }
 
     /**
