@@ -835,10 +835,9 @@ class VIEW3D_OT_CrafterLoadParallax(bpy.types.Operator):
 
         t = lambda cn, en: cn if is_chinese else en
         layout = self.layout
-        box = layout.box()
-        box.label(text=t("视差设置", "Parallax Settings"))
+        layout.label(text=t("视差设置", "Parallax Settings"))
 
-        col = box.column(align=True)
+        col = layout.column(align=True)
         col.prop(addon_prefs, "Parallax_Iterations", text=t("迭代", "Iterations"))
         col.prop(addon_prefs, "Parallax_Depth", text=t("深度", "Depth"))
         col.prop(addon_prefs, "Parallax_Smooth", text=t("平滑", "Smooth"))
@@ -848,12 +847,12 @@ class VIEW3D_OT_CrafterLoadParallax(bpy.types.Operator):
         if addon_prefs.Parallax_Guess_Height:
             row.prop(addon_prefs, "Parallax_Guess_Height_Scale", text=t("缩放", "Scale"))
 
-        box.separator()
-        box.prop(addon_prefs, "Parallax_Use_POM_Interpolation", text=t("POM 插值", "POM Interpolation"))
+        layout.prop(addon_prefs, "Parallax_Use_POM_Interpolation", text=t("POM 插值", "POM Interpolation"))
 
-        row = box.row()
+        row = layout.row()
         row.enabled = not addon_prefs.Parallax_Use_POM_Interpolation
         row.prop(addon_prefs, "Parallax_Refine_Steps", text=t("二分次数", "Binary Steps"))
+
     def execute(self, context: bpy.types.Context):
 
         info_log('加载视差', '加载视差')
@@ -871,7 +870,7 @@ class VIEW3D_OT_CrafterLoadParallax(bpy.types.Operator):
             bpy.ops.object.mode_set(mode='OBJECT')
         bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
         # 导入CP-节点组
-        add_node_group_if_not_exists(["CP-矢量变换","CP-Iterations","CP-Depth","CP-动态纹理","CP-步进采样","CP-二分求值","CP-POM插值","CP-视差转换","CP-视线投影"])
+        add_node_group_if_not_exists(["CP-矢量变换","CP-Iterations","CP-Depth","CP-动态纹理","CP-步进采样","CP-二分求值","CP-POM插值","CP-视线投影"])
         # 开始遍历
         for_collection = []
         for mcmt in context.scene.Crafter_mcmts:

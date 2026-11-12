@@ -169,7 +169,7 @@ dictionary = {
         "Smooth": "平滑",
         "POM Interpolation": "POM 插值",
         "Binary Steps": "二分次数",
-        "Use two-sample POM interpolation for the final UV; binary refinement is disabled while this is on": "使用两次采样的 POM 插值计算最终 UV；开启时不再进行二分",
+        "POM interpolation is often underwhelming on Minecraft-style textures; binary refinement is disabled while this is on": "在我的世界风格贴图上，POM 插值效果一般；开启时不再进行二分",
         "Binary refinement iterations after step sampling; 0 = pure step sampling": "步进后的二分细化次数；0 表示纯步进",
         "Previous Panel": "上一页",
         "Next Panel": "下一页",
