@@ -298,10 +298,13 @@ class CrafterAddonPreferences(AddonPreferences):
                                            description="Deprecated: the current normal-only parallax path always uses the manual chain",
                                            default=False)# type: ignore
     Parallax_Use_POM: BoolProperty(name="Use POM",
-                                   description="Run binary refinement after step sampling; Refine Steps controls its iteration count",
+                                   description="Deprecated: replaced by POM Interpolation",
                                    default=False)# type: ignore
-    Parallax_Refine_Steps: IntProperty(name="Refine Steps",
-                                       description="Binary refinement iterations after step sampling (0 = step only)",
+    Parallax_Use_POM_Interpolation: BoolProperty(name="POM Interpolation",
+                                                 description="Use two-sample POM interpolation for the final UV; binary refinement is disabled while this is on",
+                                                 default=False)# type: ignore
+    Parallax_Refine_Steps: IntProperty(name="Binary Steps",
+                                       description="Binary refinement iterations after step sampling; 0 = pure step sampling",
                                        default=5,
                                        min=0,
                                        max=16)# type: ignore

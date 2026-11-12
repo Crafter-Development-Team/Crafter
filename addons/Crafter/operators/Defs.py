@@ -2788,10 +2788,7 @@ def _parallax_uv_source(nodes, info_moving, parent, location):
 
 
 def _parallax_set_uv_scale(node, scale_y):
-    if "row_b / row_h" in node.inputs:
-        node.inputs["row_b / row_h"].default_value = float(scale_y)
-    elif "row" in node.inputs:
-        node.inputs["row"].default_value = int(round(scale_y))
+    node.inputs["row_b / row_h"].default_value = float(scale_y)
 
 
 def _parallax_dynamic_uv(nodes, links, uv_socket, frame_offset, scale_y, parent, location):
@@ -2878,7 +2875,7 @@ def _parallax_height_sampler(nodes, links, node_tex_height, uv_socket, height_ou
 
 def creat_normal_parallax_new(node_tex_height, iterations, refine_steps, smooth, info_moving,
                               nodes, links, height_output="Alpha", gusess_scale=1, depth=0.25,
-                              target_info=None, layout_info=None):
+                              target_info=None, layout_info=None, use_pom=False):
     '''
     无 Repeat 的法线视差：用 CP-步进采样 / CP-二分求值 手动展开。
     只返回最终 UV，基色 / PBR / Bump 暂不接。
@@ -2968,7 +2965,7 @@ def creat_normal_parallax_new(node_tex_height, iterations, refine_steps, smooth,
         _parallax_set_uv_scale(step, height_scale_y)
 
         if index < iterations - 1:
-            next_uv = step.outputs["UV动态纹理"]
+            next_uv = step.outputs["UV_动态纹理"]
             prev_height, _ = _parallax_height_sampler(
                 nodes, links, node_tex_height, next_uv, height_output,
                 gusess_scale, smooth, node_frame, local_location(image_slot))
@@ -2981,11 +2978,39 @@ def creat_normal_parallax_new(node_tex_height, iterations, refine_steps, smooth,
             last_step = step
 
     if last_step is None:
-        return None, node_frame
+        return None, node_frame, layout_row
 
     final_uv = last_step.outputs["命中UV"]
+    use_pom_group = (
+        use_pom
+        and "CP-POM插值" in bpy.data.node_groups
+        and "UV_上_动态纹理" in last_step.outputs
+        and "命中UV_动态纹理" in last_step.outputs
+    )
 
-    if refine_steps > 0:
+    if use_pom_group:
+        pom_height_upper, _ = _parallax_height_sampler(
+            nodes, links, node_tex_height, last_step.outputs["UV_上_动态纹理"],
+            height_output, gusess_scale, smooth, node_frame, local_location(image_slot))
+        pom_height_hit, _ = _parallax_height_sampler(
+            nodes, links, node_tex_height, last_step.outputs["命中UV_动态纹理"],
+            height_output, gusess_scale, smooth, node_frame, local_location(image_slot))
+
+        node_pom = nodes.new("ShaderNodeGroup")
+        node_pom.node_tree = bpy.data.node_groups["CP-POM插值"]
+        node_pom.label = "POM 插值"
+        node_pom.parent = node_frame
+        node_pom.location = local_location()
+
+        links.new(last_step.outputs["命中"], node_pom.inputs["命中"])
+        links.new(last_step.outputs["命中UV"], node_pom.inputs["命中UV"])
+        links.new(last_step.outputs["UV_上"], node_pom.inputs["UV_上"])
+        links.new(pom_height_upper, node_pom.inputs["高度_上"])
+        links.new(last_step.outputs["射线高度_上"], node_pom.inputs["射线高度_上"])
+        links.new(pom_height_hit, node_pom.inputs["Height"])
+        links.new(last_step.outputs["命中高度"], node_pom.inputs["射线高度"])
+        final_uv = node_pom.outputs["Result"]
+    elif refine_steps > 0:
         # CP-步进采样 现在会把首次命中的上界和中点冻结在 UV_上/射线高度_上/UV_中 里。
         b_uv_upper = last_step.outputs["UV_上"]
         b_uv_lower = last_step.outputs["命中UV"]
@@ -3028,14 +3053,41 @@ def creat_normal_parallax_new(node_tex_height, iterations, refine_steps, smooth,
                 b_uv_mid = binary.outputs["UV_中"]
                 b_uv_mid_dyn = binary.outputs["UV_中_动态纹理"]
 
-    # 从右往左排：最后一颗固定，前面依次往左
+    # 按连线拓扑排序后再从右往左排，避免依赖节点的创建顺序
     layout_nodes = [n for n in nodes if n.parent == node_frame]
     layout_nodes = [n for n in layout_nodes if n.bl_idname not in (
         "ShaderNodeMath", "ShaderNodeCombineXYZ", "ShaderNodeSeparateXYZ",
         "ShaderNodeValue", "NodeReroute")]
+
+    by_name = {n.name: n for n in layout_nodes}
+    creation_index = {n.name: index for index, n in enumerate(nodes)}
+    incoming = {name: 0 for name in by_name}
+    outgoing = {name: [] for name in by_name}
+    for link in links:
+        source = link.from_node.name
+        target = link.to_node.name
+        if source in by_name and target in by_name:
+            outgoing[source].append(target)
+            incoming[target] += 1
+
+    ready = [n for n in layout_nodes if incoming[n.name] == 0]
+    ordered = []
+    while ready:
+        ready.sort(key=lambda n: creation_index.get(n.name, 0))
+        node = ready.pop(0)
+        ordered.append(node)
+        for target in outgoing[node.name]:
+            incoming[target] -= 1
+            if incoming[target] == 0:
+                ready.append(by_name[target])
+
+    if len(ordered) < len(layout_nodes):
+        ordered_names = {n.name for n in ordered}
+        ordered.extend(n for n in layout_nodes if n.name not in ordered_names)
+
     cursor = node_tex_height.location.x - 1800.0
     gap = 12.0
-    for node in reversed(layout_nodes):
+    for node in reversed(ordered):
         width = max(float(getattr(node, "width", 200.0)), 1.0)
         node.location = (cursor - width, 0.0)
         cursor = node.location.x - gap

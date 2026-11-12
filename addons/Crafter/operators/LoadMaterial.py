@@ -833,28 +833,27 @@ class VIEW3D_OT_CrafterLoadParallax(bpy.types.Operator):
     def draw(self, context):
         addon_prefs = context.preferences.addons[__addon_name__].preferences
 
+        t = lambda cn, en: cn if is_chinese else en
         layout = self.layout
+        box = layout.box()
+        box.label(text=t("视差设置", "Parallax Settings"))
 
-        row1 = layout.row()
-        row1.prop(addon_prefs,"Parallax_Iterations",text="Iterations")
+        col = box.column(align=True)
+        col.prop(addon_prefs, "Parallax_Iterations", text=t("迭代", "Iterations"))
+        col.prop(addon_prefs, "Parallax_Depth", text=t("深度", "Depth"))
+        col.prop(addon_prefs, "Parallax_Smooth", text=t("平滑", "Smooth"))
 
-        row2 = layout.row()
-        row2.prop(addon_prefs,"Parallax_Depth",text="Depth")
-
-        row3 = layout.row()
-        row3.prop(addon_prefs,"Parallax_Smooth",text="Smooth")
-
-        row5 = layout.row()
-        row5.prop(addon_prefs,"Parallax_Guess_Height")
+        row = col.row(align=True)
+        row.prop(addon_prefs, "Parallax_Guess_Height", text=t("猜测高度", "Guess Height"))
         if addon_prefs.Parallax_Guess_Height:
-            row5.prop(addon_prefs,"Parallax_Guess_Height_Scale")
+            row.prop(addon_prefs, "Parallax_Guess_Height_Scale", text=t("缩放", "Scale"))
 
-        row6 = layout.row()
-        row6.prop(addon_prefs, "Parallax_Use_POM")
+        box.separator()
+        box.prop(addon_prefs, "Parallax_Use_POM_Interpolation", text=t("POM 插值", "POM Interpolation"))
 
-        row7 = layout.row()
-        row7.enabled = addon_prefs.Parallax_Use_POM
-        row7.prop(addon_prefs, "Parallax_Refine_Steps", text="Refine Steps")
+        row = box.row()
+        row.enabled = not addon_prefs.Parallax_Use_POM_Interpolation
+        row.prop(addon_prefs, "Parallax_Refine_Steps", text=t("二分次数", "Binary Steps"))
     def execute(self, context: bpy.types.Context):
 
         info_log('加载视差', '加载视差')
@@ -872,7 +871,7 @@ class VIEW3D_OT_CrafterLoadParallax(bpy.types.Operator):
             bpy.ops.object.mode_set(mode='OBJECT')
         bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
         # 导入CP-节点组
-        add_node_group_if_not_exists(["CP-矢量变换","CP-Iterations","CP-Depth","CP-动态纹理","CP-步进采样","CP-二分求值","CP-视差转换","CP-视线投影"])
+        add_node_group_if_not_exists(["CP-矢量变换","CP-Iterations","CP-Depth","CP-动态纹理","CP-步进采样","CP-二分求值","CP-POM插值","CP-视差转换","CP-视线投影"])
         # 开始遍历
         for_collection = []
         for mcmt in context.scene.Crafter_mcmts:
@@ -955,7 +954,8 @@ class VIEW3D_OT_CrafterLoadParallax(bpy.types.Operator):
                 height_info = info_base if base_as_height else info_normal
                 height_out = "Color" if base_as_height else "Alpha"
                 height_scale = addon_prefs.Parallax_Guess_Height_Scale if base_as_height else 1
-                refine_steps = addon_prefs.Parallax_Refine_Steps if addon_prefs.Parallax_Use_POM else 0
+                use_pom_interp = addon_prefs.Parallax_Use_POM_Interpolation
+                refine_steps = 0 if use_pom_interp else addon_prefs.Parallax_Refine_Steps
                 final_uv, node_frame, base_row = creat_normal_parallax_new(
                     node_tex_height=height_tex,
                     iterations=iterations,
@@ -969,6 +969,7 @@ class VIEW3D_OT_CrafterLoadParallax(bpy.types.Operator):
                     depth=addon_prefs.Parallax_Depth,
                     target_info=info_normal,
                     layout_info=info_base,
+                    use_pom=use_pom_interp,
                 )
                 if final_uv is not None:
                     targets = [
@@ -981,8 +982,8 @@ class VIEW3D_OT_CrafterLoadParallax(bpy.types.Operator):
                         remember_parallax_vector(material, target)
                         uv = parallax_map_uv(
                             nodes, links, final_uv, target_info, base_row, node_frame,
-                            (height_tex.location.x - 1700 + index * 180,
-                             height_tex.location.y - 220),
+                            (height_tex.location.x - 1700,
+                             height_tex.location.y - 220 - index * 160),
                         )
                         links.new(uv, target.inputs["Vector"])
                 continue
