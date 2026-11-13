@@ -2634,11 +2634,27 @@ def _parallax_frame_info(info_moving):
     return _parallax_frame_alpha(info_moving), row
 
 
-def _parallax_set_uv_scale(node, scale_y):
-    node.inputs["row_b / row_h"].default_value = float(scale_y)
+def _parallax_row_socket(node, name):
+    return next((s for s in node.inputs if s.name.strip() == name), None)
 
 
-def _parallax_dynamic_uv(nodes, links, uv_socket, frame_offset, scale_y, parent, location):
+def _parallax_set_uv_row(node, row_h):
+    socket = _parallax_row_socket(node, "row_h")
+    if socket is not None:
+        socket.default_value = int(max(1, int(row_h)))
+
+
+def _parallax_frame_uv(nodes, row_b, parent, location):
+    node = nodes.new("ShaderNodeGroup")
+    node.node_tree = bpy.data.node_groups["CP-UV初始化"]
+    node.label = "UV 初始化"
+    node.parent = parent
+    node.location = location
+    node.inputs["row_b"].default_value = int(max(1, int(row_b)))
+    return node.outputs["UV"]
+
+
+def _parallax_dynamic_uv(nodes, links, uv_socket, frame_offset, row_h, parent, location):
     node = nodes.new("ShaderNodeGroup")
     node.node_tree = bpy.data.node_groups["CP-动态纹理"]
     if parent is not None:
@@ -2649,22 +2665,18 @@ def _parallax_dynamic_uv(nodes, links, uv_socket, frame_offset, scale_y, parent,
         links.new(frame_offset, node.inputs["Frame Offset"])
     else:
         node.inputs["Frame Offset"].default_value = 0.0
-    _parallax_set_uv_scale(node, scale_y)
+    _parallax_set_uv_row(node, row_h)
     return node.outputs["UV"]
 
 
-def parallax_map_uv(nodes, links, uv_socket, info, base_row, parent, location):
-    '''把统一局部 UV 映射到目标贴图的 UV；不需要变换时直接返回原 socket。'''
+def parallax_map_uv(nodes, links, uv_socket, info, parent, location):
+    '''把帧内 UV 映射到目标贴图；静态目标直接返回原 socket。'''
     dynamic = bool(info and info[0])
-    frame_offset, row = _parallax_frame_info(info)
-    scale_y = float(base_row) / float(max(row if dynamic else 1, 1))
-    if not dynamic and base_row <= 1:
-        return uv_socket
-    if dynamic and frame_offset is None and abs(scale_y - 1.0) < 1e-6:
+    frame_offset, row_h = _parallax_frame_info(info)
+    if not dynamic:
         return uv_socket
     return _parallax_dynamic_uv(
-        nodes, links, uv_socket, frame_offset if dynamic else None,
-        scale_y, parent, location)
+        nodes, links, uv_socket, frame_offset, row_h, parent, location)
 
 
 def _parallax_height_sampler(nodes, links, node_tex_height, uv_socket, height_output, gusess_scale, smooth, parent, location):
@@ -2709,46 +2721,33 @@ def creat_normal_parallax_new(node_tex_height, iterations, refine_steps, smooth,
     node_frame.label = "Crafter-视差（法线 / 无 Repeat）"
     # 先按任意坐标创建，最后从右往左统一排版
     node_frame.location = (0.0, 0.0)
-    image_slot = cp_slot = misc_slot = 0.0
+    image_slot = cp_slot = 0.0
 
     def local_location(slot=0.0):
         return (0.0, 0.0)
 
     is_dynamic = bool(info_moving and info_moving[0])
     height_offset, height_row = _parallax_frame_info(info_moving)
-    target_dynamic = bool(target_info and target_info[0])
-    target_offset, target_row = _parallax_frame_info(target_info)
     base_dynamic = bool(layout_info and layout_info[0])
     _, base_row = _parallax_frame_info(layout_info)
-    layout_row = base_row if base_dynamic else max(height_row, target_row, 1)
+    layout_row = base_row if base_dynamic else (height_row if is_dynamic else 1)
     # 高度贴图如果是静态单帧（例如法向图 128x128），不能按基础色的 4 帧行数再乘一次，
     # 否则采样会平铺 4 次；静态高度图保持 0..1 原样采样。
-    height_scale_y = (float(layout_row) / float(max(height_row, 1))) if is_dynamic else 1.0
-    target_scale_y = float(layout_row) / float(max(target_row if target_dynamic else 1, 1))
+    height_row_h = max(1, int(height_row if is_dynamic else 1))
     height_frame = height_offset if is_dynamic else None
-    target_frame = target_offset if target_dynamic else None
 
-    node_uv = nodes.new("ShaderNodeTexCoord")
-    node_uv.label = "UV 初始化"
-    node_uv.parent = node_frame
-    node_uv.location = local_location(misc_slot)
-    uv_source = node_uv.outputs["UV"]
+    uv_source = _parallax_frame_uv(
+        nodes, layout_row, node_frame, local_location())
 
     node_view = nodes.new("ShaderNodeGroup")
     node_view.node_tree = bpy.data.node_groups["CP-视线投影"]
     node_view.parent = node_frame
     node_view.location = local_location(cp_slot)
 
-    node_view.inputs["Scale"].default_value = int(layout_row)
-    if layout_row > 1:
-        # 基础色精灵布局下 UV 是帧尺寸，使用组内已除以 row 的步进
-        step_vector = node_view.outputs["视线投影_动态纹理"]
-    else:
-        # 没有动态布局，直接用未缩放的输出，省掉一次缩放
-        step_vector = node_view.outputs["视线投影"]
+    step_vector = node_view.outputs["视线投影"]
 
     height_uv = _parallax_dynamic_uv(
-        nodes, links, uv_source, height_frame, height_scale_y, node_frame, local_location(cp_slot))
+        nodes, links, uv_source, height_frame, height_row_h, node_frame, local_location(cp_slot))
 
     prev_height, _ = _parallax_height_sampler(
         nodes, links, node_tex_height, height_uv, height_output, gusess_scale,
@@ -2782,7 +2781,7 @@ def creat_normal_parallax_new(node_tex_height, iterations, refine_steps, smooth,
             links.new(height_frame, step.inputs["Frame Offset"])
         else:
             step.inputs["Frame Offset"].default_value = 0.0
-        _parallax_set_uv_scale(step, height_scale_y)
+        _parallax_set_uv_row(step, height_row_h)
 
         if index < iterations - 1:
             next_uv = step.outputs["UV_动态纹理"]
@@ -2862,7 +2861,7 @@ def creat_normal_parallax_new(node_tex_height, iterations, refine_steps, smooth,
                 links.new(height_frame, binary.inputs["Frame Offset"])
             else:
                 binary.inputs["Frame Offset"].default_value = 0.0
-            _parallax_set_uv_scale(binary, height_scale_y)
+            _parallax_set_uv_row(binary, height_row_h)
 
             final_uv = binary.outputs["UV_下"]
             if index < refine_steps - 1:
@@ -2931,7 +2930,7 @@ def creat_normal_parallax_repeat(node_tex_height, iterations, refine_steps, smoo
         return None, None, 1
     required_groups = (
         "CPR-视差", "CPR-步进采样", "CPR-二分求值", "CPR-POM插值",
-        "CPR-动态纹理", "CPR-视线投影", "CPR-Iterations",
+        "CPR-UV初始化", "CPR-动态纹理", "CPR-视线投影", "CPR-Iterations",
         "CPR-Iterations_Binary", "CPR-Depth",
     )
     if any(name not in bpy.data.node_groups for name in required_groups):
@@ -2944,20 +2943,19 @@ def creat_normal_parallax_repeat(node_tex_height, iterations, refine_steps, smoo
     # 与手动展开路径一致：先把基础色/法向/高度各自的动态帧信息换算成统一行高
     is_dynamic = bool(info_moving and info_moving[0])
     height_offset, height_row = _parallax_frame_info(info_moving)
-    _, target_row = _parallax_frame_info(target_info)
     base_dynamic = bool(layout_info and layout_info[0])
     _, base_row = _parallax_frame_info(layout_info)
-    layout_row = base_row if base_dynamic else max(height_row, target_row, 1)
+    layout_row = base_row if base_dynamic else (height_row if is_dynamic else 1)
     # 高度贴图如果是静态单帧（例如法向图 128x128），不能按基础色的 4 帧行数再乘一次，
     # 否则采样会平铺 4 次；静态高度图保持 0..1 原样采样。
-    height_scale_y = (float(layout_row) / float(max(height_row, 1))) if is_dynamic else 1.0
+    height_row_h = max(1, int(height_row if is_dynamic else 1))
     height_frame = height_offset if is_dynamic else None
 
     node_frame = nodes.new("NodeFrame")
     node_frame.label = "Crafter-视差（Repeat）"
     # 和手动展开一样放在主节点左侧；不要 clamp 到 0，否则纹理在 0/负坐标时
     # 整个框会落到主节点右边
-    node_frame.location = (node_tex_height.location.x - 1800.0,
+    node_frame.location = (node_tex_height.location.x - 2200.0,
                            node_tex_height.location.y)
 
     def place(node, x, y=0.0):
@@ -2993,12 +2991,12 @@ def creat_normal_parallax_repeat(node_tex_height, iterations, refine_steps, smoo
 
     node_parallax = place(nodes.new("ShaderNodeGroup"), 820.0, 0.0)
     node_parallax.node_tree = bpy.data.node_groups["CPR-视差"]
-    node_parallax.inputs["Scale"].default_value = int(layout_row)
     if height_frame is not None:
         links.new(height_frame, node_parallax.inputs["Frame Offset"])
     else:
         node_parallax.inputs["Frame Offset"].default_value = 0.0
-    node_parallax.inputs["row_b / row_h"].default_value = height_scale_y
+    node_parallax.inputs["row_b"].default_value = int(layout_row)
+    node_parallax.inputs["row_h"].default_value = int(height_row_h)
     links.new(closure_out.outputs["Closure"], node_parallax.inputs["Closure"])
 
     use_pom_group = use_pom and "POM" in node_parallax.outputs

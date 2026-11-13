@@ -18,7 +18,7 @@ PARALLAX_VECTOR_PREFIX = "Crafter_parallax_vector_"
 # Blender 5.0+ Repeat Zone 视差组；旧版本不加载、不显示、不使用
 CPR_GROUP_NAMES = (
     "CPR-视差", "CPR-步进采样", "CPR-二分求值", "CPR-POM插值",
-    "CPR-动态纹理", "CPR-视线投影", "CPR-Iterations",
+    "CPR-UV初始化", "CPR-动态纹理", "CPR-视线投影", "CPR-Iterations",
     "CPR-Iterations_Binary", "CPR-Depth",
 )
 
@@ -876,7 +876,7 @@ class VIEW3D_OT_CrafterLoadParallax(bpy.types.Operator):
             bpy.ops.object.mode_set(mode='OBJECT')
         bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
         # 导入CP-节点组（手动展开路径；Repeat 失败时也靠它回退）
-        add_node_group_if_not_exists(["CP-矢量变换","CP-Iterations","CP-Depth","CP-动态纹理","CP-步进采样","CP-二分求值","CP-POM插值","CP-视线投影"])
+        add_node_group_if_not_exists(["CP-矢量变换","CP-Iterations","CP-Depth","CP-UV初始化","CP-动态纹理","CP-步进采样","CP-二分求值","CP-POM插值","CP-视线投影"])
         # Blender 5.0+ 才加载 Repeat Zone 组；旧版本连文件都不碰
         use_repeat_zone = (bpy.app.version >= (5, 0, 0)
                            and bool(getattr(addon_prefs, "Parallax_Use_Repeat_Zone", True)))
@@ -1025,7 +1025,7 @@ class VIEW3D_OT_CrafterLoadParallax(bpy.types.Operator):
                         map_location = (height_tex.location.x - 1700,
                                         height_tex.location.y - 220 - index * 160)
                     uv = parallax_map_uv(
-                        nodes, links, final_uv, target_info, base_row,
+                        nodes, links, final_uv, target_info,
                         map_parent, map_location,
                     )
                     links.new(uv, target.inputs["Vector"])
