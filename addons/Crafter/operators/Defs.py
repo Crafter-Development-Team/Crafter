@@ -2641,7 +2641,8 @@ def _parallax_set_uv_scale(node, scale_y):
 def _parallax_dynamic_uv(nodes, links, uv_socket, frame_offset, scale_y, parent, location):
     node = nodes.new("ShaderNodeGroup")
     node.node_tree = bpy.data.node_groups["CP-动态纹理"]
-    node.parent = parent
+    if parent is not None:
+        node.parent = parent
     node.location = location
     links.new(uv_socket, node.inputs["UV"])
     if frame_offset is not None:
@@ -2720,7 +2721,9 @@ def creat_normal_parallax_new(node_tex_height, iterations, refine_steps, smooth,
     base_dynamic = bool(layout_info and layout_info[0])
     _, base_row = _parallax_frame_info(layout_info)
     layout_row = base_row if base_dynamic else max(height_row, target_row, 1)
-    height_scale_y = float(layout_row) / float(max(height_row if is_dynamic else 1, 1))
+    # 高度贴图如果是静态单帧（例如法向图 128x128），不能按基础色的 4 帧行数再乘一次，
+    # 否则采样会平铺 4 次；静态高度图保持 0..1 原样采样。
+    height_scale_y = (float(layout_row) / float(max(height_row, 1))) if is_dynamic else 1.0
     target_scale_y = float(layout_row) / float(max(target_row if target_dynamic else 1, 1))
     height_frame = height_offset if is_dynamic else None
     target_frame = target_offset if target_dynamic else None
@@ -2945,12 +2948,16 @@ def creat_normal_parallax_repeat(node_tex_height, iterations, refine_steps, smoo
     base_dynamic = bool(layout_info and layout_info[0])
     _, base_row = _parallax_frame_info(layout_info)
     layout_row = base_row if base_dynamic else max(height_row, target_row, 1)
-    height_scale_y = float(layout_row) / float(max(height_row if is_dynamic else 1, 1))
+    # 高度贴图如果是静态单帧（例如法向图 128x128），不能按基础色的 4 帧行数再乘一次，
+    # 否则采样会平铺 4 次；静态高度图保持 0..1 原样采样。
+    height_scale_y = (float(layout_row) / float(max(height_row, 1))) if is_dynamic else 1.0
     height_frame = height_offset if is_dynamic else None
 
     node_frame = nodes.new("NodeFrame")
     node_frame.label = "Crafter-视差（Repeat）"
-    node_frame.location = (max(0.0, node_tex_height.location.x - 1200.0),
+    # 和手动展开一样放在主节点左侧；不要 clamp 到 0，否则纹理在 0/负坐标时
+    # 整个框会落到主节点右边
+    node_frame.location = (node_tex_height.location.x - 1800.0,
                            node_tex_height.location.y)
 
     def place(node, x, y=0.0):

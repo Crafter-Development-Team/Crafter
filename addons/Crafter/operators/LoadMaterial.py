@@ -967,6 +967,7 @@ class VIEW3D_OT_CrafterLoadParallax(bpy.types.Operator):
             final_uv = None
             node_frame = None
             base_row = 1
+            used_repeat = False
             if use_repeat_for_material:
                 try:
                     final_uv, node_frame, base_row = creat_normal_parallax_repeat(
@@ -984,6 +985,7 @@ class VIEW3D_OT_CrafterLoadParallax(bpy.types.Operator):
                         layout_info=info_base,
                         use_pom=use_pom_interp,
                     )
+                    used_repeat = final_uv is not None
                 except Exception as ex:
                     warn_log(f"Repeat Zone 视差失败，回退手动展开: {ex}")
                     final_uv = None
@@ -1012,10 +1014,19 @@ class VIEW3D_OT_CrafterLoadParallax(bpy.types.Operator):
                     targets.append((node_tex_PBR, info_PBR))
                 for index, (target, target_info) in enumerate(targets):
                     remember_parallax_vector(material, target)
+                    if used_repeat:
+                        # Repeat 框在左边；动态纹理映射节点不挂进框，放到贴图左侧，
+                        # 避免把框撑大后和已有动态纹理节点重叠，也避免被二次偏移到最左边
+                        map_parent = None
+                        map_location = (height_tex.location.x - 500,
+                                        height_tex.location.y - 220 - index * 160)
+                    else:
+                        map_parent = node_frame
+                        map_location = (height_tex.location.x - 1700,
+                                        height_tex.location.y - 220 - index * 160)
                     uv = parallax_map_uv(
-                        nodes, links, final_uv, target_info, base_row, node_frame,
-                        (height_tex.location.x - 1700,
-                         height_tex.location.y - 220 - index * 160),
+                        nodes, links, final_uv, target_info, base_row,
+                        map_parent, map_location,
                     )
                     links.new(uv, target.inputs["Vector"])
             continue
