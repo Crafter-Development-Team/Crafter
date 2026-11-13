@@ -291,7 +291,7 @@ class CrafterAddonPreferences(AddonPreferences):
                                         default=False)# type: ignore
     Parallax_Iterations: IntProperty(name="Parallax Iterations",
                                      min=8,
-                                     default=32)# type: ignore
+                                     default=30)# type: ignore
     Parallax_Smooth: BoolProperty(name="Parallax Smooth",
                                   default=False)# type: ignore
     Parallax_Depth: FloatProperty(name="Parallax Depth",
@@ -311,7 +311,7 @@ class CrafterAddonPreferences(AddonPreferences):
                                                  default=False)# type: ignore
     Parallax_Refine_Steps: IntProperty(name="Binary Steps",
                                        description="Binary refinement iterations after step sampling; 0 = pure step sampling",
-                                       default=5,
+                                       default=3,
                                        min=0,
                                        max=16)# type: ignore
     # Blender 5.0+ 才用 Repeat Zone；旧版本不显示也不使用
