@@ -27,6 +27,14 @@ import java.util.stream.Collectors;
 public class MinecraftMapSelector {
     
     public static void main(String[] args) {
+        try {
+            mainImpl(args);
+        } catch (Throwable error) {
+            reportStartupFailure(error);
+        }
+    }
+
+    private static void mainImpl(String[] args) {
         // --lang 必须最先解析并从参数里剥离：否则它会被当成 world path / 未知选项。
         // 优先级：命令行 > 上次菜单选择 > 系统 Locale（见 I18n）。
         args = I18n.init(args);
@@ -110,10 +118,8 @@ public class MinecraftMapSelector {
             javax.swing.SwingUtilities.invokeLater(() -> {
                 try {
                     MinecraftMapGUI gui=new MinecraftMapGUI();gui.setSelectionExportOptions(multiBox,includeWaypoints);gui.setInitialSelectionSeed(initialSelection);gui.setInitialImportLod(initialImportLod);gui.setVisible(true);
-                } catch (Exception e) {
-                    System.err.println("启动GUI失败: " + e.getMessage());
-                    e.printStackTrace();
-                    showUsage();
+                } catch (Throwable e) {
+                    reportStartupFailure(e);
                 }
             });
         } else if (worldPath != null) {
@@ -129,9 +135,8 @@ public class MinecraftMapSelector {
                 try {
                     MinecraftMapGUI gui = new MinecraftMapGUI(worldPath, outputFile, jarPath, minY, maxY);
                     gui.setSelectionExportOptions(multiBox,includeWaypoints);gui.setInitialSelectionSeed(initialSelection);gui.setInitialImportLod(initialImportLod);gui.setVisible(true);
-                } catch (Exception e) {
-                    System.err.println("启动Blender集成模式失败: " + e.getMessage());
-                    e.printStackTrace();
+                } catch (Throwable e) {
+                    reportStartupFailure(e);
                 }
             });
         } else if (args.length >= 1 && !args[0].startsWith("--")) {
@@ -143,6 +148,35 @@ public class MinecraftMapSelector {
         }
     }
     
+    private static void reportStartupFailure(Throwable error) {
+        java.io.StringWriter buffer = new java.io.StringWriter();
+        error.printStackTrace(new java.io.PrintWriter(buffer));
+        String detail = buffer.toString();
+        System.err.println("地图选择器启动失败: " + detail);
+
+        String logPath = "";
+        try {
+            java.io.File log = new java.io.File(System.getProperty("java.io.tmpdir"),
+                    "crafter_map_selector_error.log");
+            java.nio.file.Files.write(log.toPath(),
+                    detail.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            logPath = log.getAbsolutePath();
+        } catch (Throwable ignored) {
+            // 日志写不进去也不能让错误处理本身再抛异常
+        }
+
+        try {
+            javax.swing.JOptionPane.showMessageDialog(
+                    null,
+                    "地图选择器启动失败：\n" + error
+                            + (logPath.isEmpty() ? "" : "\n\n详细日志：\n" + logPath),
+                    "Minecraft Map Selector",
+                    javax.swing.JOptionPane.ERROR_MESSAGE);
+        } catch (Throwable ignored) {
+            // 无图形环境时只留 stderr / 日志
+        }
+    }
+
     private static MapRenderer.SurfaceMode parseSurfaceMode(String[] args, int index) {
         return args.length > index ? MapRenderer.SurfaceMode.valueOf(args[index].toUpperCase(Locale.ROOT)) : MapRenderer.SurfaceMode.AUTO;
     }
