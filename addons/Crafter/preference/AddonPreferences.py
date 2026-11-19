@@ -121,6 +121,16 @@ class CrafterAddonPreferences(AddonPreferences):
                                     min=0.0002,
                                     max=0.05,
                                     precision=4)# type: ignore
+    # 导入对话框的可折叠分区状态；只影响布局，不影响导出
+    Show_Surface_Section: BoolProperty(name="Surface Section", default=True)# type: ignore
+    Show_Material_Section: BoolProperty(name="Material Section", default=False)# type: ignore
+    Show_Output_Section: BoolProperty(name="Output Section", default=False)# type: ignore
+    Show_Layout_Section: BoolProperty(name="Layout Section", default=False)# type: ignore
+    Show_Split_Section: BoolProperty(name="Split Section", default=False)# type: ignore
+    Show_Values_Section: BoolProperty(name="Values Section", default=False)# type: ignore
+    Show_Chunk_Section: BoolProperty(name="Chunk Section", default=False)# type: ignore
+    Show_LOD_Section: BoolProperty(name="LOD Section", default=False)# type: ignore
+    Show_Resources_Section: BoolProperty(name="Resources Section", default=True)# type: ignore
     mergeModTextures: BoolProperty(name="Merge Mod Textures",
                                    description="Let mod blocks reuse the material already created for the same texture instead of creating one material per block (vanilla blocks are never merged with each other). Materials with tint or overlay are excluded. This greatly reduces the material count and speeds up material processing; turn it off to get one material per block again",
                                    default=True)# type: ignore

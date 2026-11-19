@@ -42,6 +42,17 @@ def select_obj_files(filenames, use_entities):
 
 # ==================== 导入世界 ====================
 
+def _draw_collapsible_section(layout, addon_prefs, toggle_name, label, icon):
+    """Operator 对话框没有原生子面板，用一个 bool 属性做可折叠标题。"""
+    box = layout.box()
+    row = box.row(align=True)
+    opened = bool(getattr(addon_prefs, toggle_name, False))
+    row.prop(addon_prefs, toggle_name, text="", emboss=False,
+             icon="TRIA_DOWN" if opened else "TRIA_RIGHT")
+    row.label(text=i18n(label), icon=icon)
+    return box if opened else None
+
+
 class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世界
     bl_label = "Import World"
     bl_idname = "crafter.import_surface_world"
@@ -83,152 +94,162 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
                 elif not os.path.isdir(addon_prefs.Custom_mods_Path):
                     col_custom.label(icon="ERROR",text="It's not a folder!")
 
-        box_surface = layout.box()
-        box_surface.label(text=i18n("Surface Pruning"), icon="MESH_DATA")
-        row_surface = box_surface.row()
-        col_surface_1 = row_surface.column(align=True)
-        col_surface_1.prop(addon_prefs, "strictDeduplication")
-        col_surface_1.prop(addon_prefs, "allowDoubleFace")
-        col_surface_1.prop(addon_prefs, "keepBoundary")
-        col_surface_2 = row_surface.column(align=True)
-        # 几何双面恒开，不再提供开关；这里只留两个合并档位（旧版 prefs 热更新后可能还没有）
-        if hasattr(addon_prefs, "mergeSameDoubleSided"):
-            col_surface_2.prop(addon_prefs, "mergeSameDoubleSided")
-        if hasattr(addon_prefs, "mergeMirrorDoubleSided"):
-            col_surface_2.prop(addon_prefs, "mergeMirrorDoubleSided")
-        col_surface_2.prop(addon_prefs, "cullCave")
+        box_surface = _draw_collapsible_section(
+            layout, addon_prefs, "Show_Surface_Section", "Surface Pruning", "MESH_DATA")
+        if box_surface:
+            row_surface = box_surface.row()
+            col_surface_1 = row_surface.column(align=True)
+            col_surface_1.prop(addon_prefs, "strictDeduplication")
+            col_surface_1.prop(addon_prefs, "allowDoubleFace")
+            col_surface_1.prop(addon_prefs, "keepBoundary")
+            col_surface_2 = row_surface.column(align=True)
+            # 几何双面恒开，不再提供开关；这里只留两个合并档位（旧版 prefs 热更新后可能还没有）
+            if hasattr(addon_prefs, "mergeSameDoubleSided"):
+                col_surface_2.prop(addon_prefs, "mergeSameDoubleSided")
+            if hasattr(addon_prefs, "mergeMirrorDoubleSided"):
+                col_surface_2.prop(addon_prefs, "mergeMirrorDoubleSided")
+            col_surface_2.prop(addon_prefs, "cullCave")
 
-        box_material = layout.box()
-        box_material.label(text=i18n("Material and Texture"), icon="TEXTURE")
-        row_material = box_material.row()
-        col_material_1 = row_material.column(align=True)
-        col_material_1.prop(addon_prefs, "Auto_Load_Material")
-        row_parser_always = col_material_1.row()
-        row_parser_always.enabled = addon_prefs.Auto_Load_Material
-        row_parser_always.prop(addon_prefs, "Always_Add_PBR_Parser")
-        # 按方块拆分时导出器会临时关闭模组贴图合并，这里跟着置灰，避免界面与行为不一致
-        row_merge_mod = col_material_1.row()
-        row_merge_mod.enabled = not addon_prefs.splitImportByBlock
-        row_merge_mod.prop(addon_prefs, "mergeModTextures")
-        col_material_2 = row_material.column(align=True)
-        # 背面剔除是加载材质时做的事，依赖自动加载材质（几何双面已恒开）
-        row_ds_cull = col_material_2.row()
-        row_ds_cull.enabled = addon_prefs.Auto_Load_Material
-        row_ds_cull.prop(addon_prefs, "doubleSidedBackfaceCull")
-        col_material_2.prop(addon_prefs, "Always_Add_Biome_Tex")
+        box_material = _draw_collapsible_section(
+            layout, addon_prefs, "Show_Material_Section", "Material and Texture", "TEXTURE")
+        if box_material:
+            row_material = box_material.row()
+            col_material_1 = row_material.column(align=True)
+            col_material_1.prop(addon_prefs, "Auto_Load_Material")
+            row_parser_always = col_material_1.row()
+            row_parser_always.enabled = addon_prefs.Auto_Load_Material
+            row_parser_always.prop(addon_prefs, "Always_Add_PBR_Parser")
+            # 按方块拆分时导出器会临时关闭模组贴图合并，这里跟着置灰，避免界面与行为不一致
+            row_merge_mod = col_material_1.row()
+            row_merge_mod.enabled = not addon_prefs.splitImportByBlock
+            row_merge_mod.prop(addon_prefs, "mergeModTextures")
+            col_material_2 = row_material.column(align=True)
+            # 背面剔除是加载材质时做的事，依赖自动加载材质（几何双面已恒开）
+            row_ds_cull = col_material_2.row()
+            row_ds_cull.enabled = addon_prefs.Auto_Load_Material
+            row_ds_cull.prop(addon_prefs, "doubleSidedBackfaceCull")
+            col_material_2.prop(addon_prefs, "Always_Add_Biome_Tex")
 
-        box_output = layout.box()
-        box_output.label(text=i18n("Output"), icon="EXPORT")
-        row_output = box_output.row()
-        col_output_1 = row_output.column(align=True)
-        col_output_1.prop(addon_prefs, "useGreedyMesh")
-        col_output_1.prop(addon_prefs, "plantOffset")
-        # 生物与面合并同列，保持行距一致
-        col_output_1.prop(addon_prefs, "useEntityModels")
-        # 光源方块的三项全部归到右列，导出关掉时两个细项置灰（常驻显示，避免布局跳动）
-        col_output_2 = row_output.column(align=True)
-        col_output_2.prop(addon_prefs, "exportLightBlock")
-        row_Light_Block = col_output_2.row()
-        row_Light_Block.enabled = addon_prefs.exportLightBlock
-        row_Light_Block.prop(addon_prefs, "exportLightBlockOnly")
-        row_Light_Block_size = col_output_2.row()
-        row_Light_Block_size.enabled = addon_prefs.exportLightBlock
-        row_Light_Block_size.prop(addon_prefs, "lightBlockSize")
+        box_output = _draw_collapsible_section(
+            layout, addon_prefs, "Show_Output_Section", "Output", "EXPORT")
+        if box_output:
+            row_output = box_output.row()
+            col_output_1 = row_output.column(align=True)
+            col_output_1.prop(addon_prefs, "useGreedyMesh")
+            col_output_1.prop(addon_prefs, "plantOffset")
+            # 生物与面合并同列，保持行距一致
+            col_output_1.prop(addon_prefs, "useEntityModels")
+            # 光源方块的三项全部归到右列，导出关掉时两个细项置灰（常驻显示，避免布局跳动）
+            col_output_2 = row_output.column(align=True)
+            col_output_2.prop(addon_prefs, "exportLightBlock")
+            row_Light_Block = col_output_2.row()
+            row_Light_Block.enabled = addon_prefs.exportLightBlock
+            row_Light_Block.prop(addon_prefs, "exportLightBlockOnly")
+            row_Light_Block_size = col_output_2.row()
+            row_Light_Block_size.enabled = addon_prefs.exportLightBlock
+            row_Light_Block_size.prop(addon_prefs, "lightBlockSize")
 
         # 多世界排布：第一次导入居中，之后的按世界路径分配槽位；只影响之后的导入
-        box_layout = layout.box()
-        box_layout.label(text=i18n("World Layout"), icon="WORLD")
-        # align=True + 不用 row：让两个开关紧贴，避免中间多出一行空白
-        col_layout = box_layout.column(align=True)
-        col_layout.use_property_split = False
-        col_layout.prop(addon_prefs, "World_Layout")
-        if addon_prefs.World_Layout:
-            # 正常开启时直接用 prop，保持两行紧贴；只有关闭时才需要一个禁用的 row
-            col_layout.prop(addon_prefs, "World_Layout_Distribute_Later")
-        else:
-            row_layout_later = col_layout.row()
-            row_layout_later.enabled = False
-            row_layout_later.prop(addon_prefs, "World_Layout_Distribute_Later")
-        box_layout.operator("crafter.reset_world_layout", icon="LOOP_BACK")
+        box_layout = _draw_collapsible_section(
+            layout, addon_prefs, "Show_Layout_Section", "World Layout", "WORLD")
+        if box_layout:
+            # align=True + 不用 row：让两个开关紧贴，避免中间多出一行空白
+            col_layout = box_layout.column(align=True)
+            col_layout.use_property_split = False
+            col_layout.prop(addon_prefs, "World_Layout")
+            if addon_prefs.World_Layout:
+                # 正常开启时直接用 prop，保持两行紧贴；只有关闭时才需要一个禁用的 row
+                col_layout.prop(addon_prefs, "World_Layout_Distribute_Later")
+            else:
+                row_layout_later = col_layout.row()
+                row_layout_later.enabled = False
+                row_layout_later.prop(addon_prefs, "World_Layout_Distribute_Later")
+            box_layout.operator("crafter.reset_world_layout", icon="LOOP_BACK")
 
         # 按材质/方块拆对象：交给导出器写多个 o 段，Blender 导入时自动拆成多个物体
-        box_split = layout.box()
-        box_split.label(text=i18n("Object Split"), icon="MESH_DATA")
-        col_split = box_split.column(align=True)
-        col_split.use_property_split = False
-        col_split.prop(addon_prefs, "splitImportByMaterial")
-        col_split.prop(addon_prefs, "splitImportByBlock")
+        box_split = _draw_collapsible_section(
+            layout, addon_prefs, "Show_Split_Section", "Object Split", "MESH_DATA")
+        if box_split:
+            col_split = box_split.column(align=True)
+            col_split.use_property_split = False
+            col_split.prop(addon_prefs, "splitImportByMaterial")
+            col_split.prop(addon_prefs, "splitImportByBlock")
 
         # 详细参数：枚举/数值型，各占整行，避免标签被省略
-        box_values = layout.box()
-        box_values.label(text=i18n("Detailed Parameters"), icon="OPTIONS")
-        box_values.prop(addon_prefs, "useChunkPrecision")
-        box_values.prop(addon_prefs, "variantSeedMode")
-        box_values.prop(addon_prefs, "doubleSidedFaceOffset")
-        box_values.prop(addon_prefs, "overlayLayerStep")
+        box_values = _draw_collapsible_section(
+            layout, addon_prefs, "Show_Values_Section", "Detailed Parameters", "OPTIONS")
+        if box_values:
+            box_values.prop(addon_prefs, "useChunkPrecision")
+            box_values.prop(addon_prefs, "variantSeedMode")
+            box_values.prop(addon_prefs, "doubleSidedFaceOffset")
+            box_values.prop(addon_prefs, "overlayLayerStep")
 
-        box_aschunk = layout.box()
-        row_aschunk = box_aschunk.row()
-        
-        col_1_aschunk = row_aschunk.column()
-        col_2_aschunk = row_aschunk.column()
+        box_aschunk = _draw_collapsible_section(
+            layout, addon_prefs, "Show_Chunk_Section", "Chunk Settings", "MOD_BUILD")
+        if box_aschunk:
+            row_aschunk = box_aschunk.row()
 
-        col_1_aschunk.prop(addon_prefs, "autoPartitionSettings")
+            col_1_aschunk = row_aschunk.column()
+            col_2_aschunk = row_aschunk.column()
 
-        # 自动模式下默认分块输出；勾选"不分块"时合并导出单个完整模型。
-        if addon_prefs.autoPartitionSettings:
-            col_1_aschunk.prop(addon_prefs, "forceFullModel")
-        else:
-            col_1_aschunk.prop(addon_prefs, "notexportFullModel", text="As Chunk")
-        if addon_prefs.autoPartitionSettings:
-            try:
-                auto_info = calculate_auto_chunk_settings()
-                mem_gb = str(auto_info["availableMemoryBytes"] / (1024 ** 3))[:5]
-                col_2_aschunk.label(text=str(auto_info["partitionSize"]) + "x" + str(auto_info["partitionSize"]) + " " + i18n("chunks"))
-                col_2_aschunk.label(text=i18n("batch") + " " + str(auto_info["maxTasksPerBatch"]))
-                col_2_aschunk.label(text=i18n("threads") + " " + str(auto_info["modelThreads"]))
-                col_2_aschunk.label(text=i18n("RAM") + " " + mem_gb + " GB")
-            except Exception:
-                col_2_aschunk.label(text="Auto chunk calculation unavailable", icon="ERROR")
-        else:
-            col_2_aschunk.prop(addon_prefs, "maxTasksPerBatch")
-            # 与光源方块同理：分块边长常驻显示，只在"不分块"时置灰，避免忽隐忽现
-            row_partition_size = col_2_aschunk.row()
-            row_partition_size.enabled = addon_prefs.notexportFullModel
-            row_partition_size.prop(addon_prefs, "partitionSize")
-            try:
-                manual_info = calculate_auto_chunk_settings()
-                col_2_aschunk.label(text=i18n("threads") + " " + str(manual_info["modelThreads"]))
-            except Exception:
-                col_2_aschunk.label(text="Auto chunk calculation unavailable", icon="ERROR")
+            col_1_aschunk.prop(addon_prefs, "autoPartitionSettings")
 
-        box_lod = layout.box()
-        box_lod.prop(addon_prefs, "Max_LOD_Level")
-        if int(addon_prefs.Max_LOD_Level) > 0:
-            # 与主设置同样用"一行 + 两列"，避免 split() 造成的行间空档
-            row_lod = box_lod.row()
-            col_1_lod = row_lod.column(align=True)
-            col_1_lod.prop(addon_prefs, "LOD0renderDistance")
-            if int(addon_prefs.Max_LOD_Level) > 1:
-                col_1_lod.prop(addon_prefs, "LOD1renderDistance")
-                if int(addon_prefs.Max_LOD_Level) > 2:
-                    col_1_lod.prop(addon_prefs, "LOD2renderDistance")
-                    if int(addon_prefs.Max_LOD_Level) > 3:
-                        col_1_lod.prop(addon_prefs, "LOD3renderDistance")
-            # ===================================================
-            col_2_lod = row_lod.column(align=True)
-            col_2_lod.prop(addon_prefs, "useBiomeColors")
-            col_2_lod.prop(addon_prefs, "useUnderwaterLOD")
-            col_2_lod.prop(addon_prefs, "isLODAutoCenter")
-            # 中心坐标常驻显示，自动中心时置灰，避免忽隐忽现
-            row_lodcenter = col_2_lod.row()
-            row_lodcenter.enabled = not addon_prefs.isLODAutoCenter
-            row_lodcenter.prop(addon_prefs, "LODCenterX")
-            row_lodcenter.prop(addon_prefs, "LODCenterZ")
+            # 自动模式下默认分块输出；勾选"不分块"时合并导出单个完整模型。
+            if addon_prefs.autoPartitionSettings:
+                col_1_aschunk.prop(addon_prefs, "forceFullModel")
+            else:
+                col_1_aschunk.prop(addon_prefs, "notexportFullModel", text="As Chunk")
+            if addon_prefs.autoPartitionSettings:
+                try:
+                    auto_info = calculate_auto_chunk_settings()
+                    mem_gb = str(auto_info["availableMemoryBytes"] / (1024 ** 3))[:5]
+                    col_2_aschunk.label(text=str(auto_info["partitionSize"]) + "x" + str(auto_info["partitionSize"]) + " " + i18n("chunks"))
+                    col_2_aschunk.label(text=i18n("batch") + " " + str(auto_info["maxTasksPerBatch"]))
+                    col_2_aschunk.label(text=i18n("threads") + " " + str(auto_info["modelThreads"]))
+                    col_2_aschunk.label(text=i18n("RAM") + " " + mem_gb + " GB")
+                except Exception:
+                    col_2_aschunk.label(text="Auto chunk calculation unavailable", icon="ERROR")
+            else:
+                col_2_aschunk.prop(addon_prefs, "maxTasksPerBatch")
+                # 与光源方块同理：分块边长常驻显示，只在"不分块"时置灰，避免忽隐忽现
+                row_partition_size = col_2_aschunk.row()
+                row_partition_size.enabled = addon_prefs.notexportFullModel
+                row_partition_size.prop(addon_prefs, "partitionSize")
+                try:
+                    manual_info = calculate_auto_chunk_settings()
+                    col_2_aschunk.label(text=i18n("threads") + " " + str(manual_info["modelThreads"]))
+                except Exception:
+                    col_2_aschunk.label(text="Auto chunk calculation unavailable", icon="ERROR")
 
-            col_2_lod.prop(addon_prefs, "no_lod_blocks")
-            if addon_prefs.no_lod_blocks:
-                col_2_lod.operator("crafter.open_no_lod_blocks_folder",icon="FILE_FOLDER")
+        box_lod = _draw_collapsible_section(
+            layout, addon_prefs, "Show_LOD_Section", "LOD", "RENDERLAYERS")
+        if box_lod:
+            box_lod.prop(addon_prefs, "Max_LOD_Level")
+            if int(addon_prefs.Max_LOD_Level) > 0:
+                # 与主设置同样用"一行 + 两列"，避免 split() 造成的行间空档
+                row_lod = box_lod.row()
+                col_1_lod = row_lod.column(align=True)
+                col_1_lod.prop(addon_prefs, "LOD0renderDistance")
+                if int(addon_prefs.Max_LOD_Level) > 1:
+                    col_1_lod.prop(addon_prefs, "LOD1renderDistance")
+                    if int(addon_prefs.Max_LOD_Level) > 2:
+                        col_1_lod.prop(addon_prefs, "LOD2renderDistance")
+                        if int(addon_prefs.Max_LOD_Level) > 3:
+                            col_1_lod.prop(addon_prefs, "LOD3renderDistance")
+                # ===================================================
+                col_2_lod = row_lod.column(align=True)
+                col_2_lod.prop(addon_prefs, "useBiomeColors")
+                col_2_lod.prop(addon_prefs, "useUnderwaterLOD")
+                col_2_lod.prop(addon_prefs, "isLODAutoCenter")
+                # 中心坐标常驻显示，自动中心时置灰，避免忽隐忽现
+                row_lodcenter = col_2_lod.row()
+                row_lodcenter.enabled = not addon_prefs.isLODAutoCenter
+                row_lodcenter.prop(addon_prefs, "LODCenterX")
+                row_lodcenter.prop(addon_prefs, "LODCenterZ")
+
+                col_2_lod.prop(addon_prefs, "no_lod_blocks")
+                if addon_prefs.no_lod_blocks:
+                    col_2_lod.operator("crafter.open_no_lod_blocks_folder",icon="FILE_FOLDER")
 
         #无版本隔离选择
         if self.version == "":
@@ -238,46 +259,48 @@ class VIEW3D_OT_CrafterImportSurfaceWorld(bpy.types.Operator):#导入表层世�
             row_undivided.template_list("VIEW3D_UL_CrafterUndividedVersions","",addon_prefs,"Undivided_Vsersions_List",addon_prefs,"Undivided_Vsersions_List_index",rows=1,)
 
         #资源包列表
-        box_resources_main = layout.box()
-        box_resources_main.prop(addon_prefs, "Game_Resources")
-        box_resources = box_resources_main.box()
-        if addon_prefs.Game_Resources:
-            if len(addon_prefs.Game_Resources_List) + len(addon_prefs.Game_unuse_Resources_List) > 0:
-                box_resources.label(text="Resources List",icon="NODE_COMPOSITING")
-                row_resources_use = box_resources.row()
-                col_use_list = row_resources_use.column()
-                col_use_list.template_list("VIEW3D_UL_CrafterGameResources", "", addon_prefs, "Game_Resources_List", addon_prefs, "Game_Resources_List_index", rows=1)
-                col_use_ops = row_resources_use.column(align=True)
-                if len (addon_prefs.Game_Resources_List) > 0:
-                    col_use_ops.operator("crafter.ban_game_resource", text="", icon="REMOVE")
-                if len (addon_prefs.Game_Resources_List) > 1:
-                    col_use_ops.separator()
-                    col_use_ops.operator("crafter.up_game_resource", text="", icon="TRIA_UP")
-                    col_use_ops.operator("crafter.down_game_resource", text="", icon="TRIA_DOWN")
+        box_resources_main = _draw_collapsible_section(
+            layout, addon_prefs, "Show_Resources_Section", "Resources", "PACKAGE")
+        if box_resources_main:
+            box_resources_main.prop(addon_prefs, "Game_Resources")
+            box_resources = box_resources_main.box()
+            if addon_prefs.Game_Resources:
+                if len(addon_prefs.Game_Resources_List) + len(addon_prefs.Game_unuse_Resources_List) > 0:
+                    box_resources.label(text="Resources List",icon="NODE_COMPOSITING")
+                    row_resources_use = box_resources.row()
+                    col_use_list = row_resources_use.column()
+                    col_use_list.template_list("VIEW3D_UL_CrafterGameResources", "", addon_prefs, "Game_Resources_List", addon_prefs, "Game_Resources_List_index", rows=1)
+                    col_use_ops = row_resources_use.column(align=True)
+                    if len (addon_prefs.Game_Resources_List) > 0:
+                        col_use_ops.operator("crafter.ban_game_resource", text="", icon="REMOVE")
+                    if len (addon_prefs.Game_Resources_List) > 1:
+                        col_use_ops.separator()
+                        col_use_ops.operator("crafter.up_game_resource", text="", icon="TRIA_UP")
+                        col_use_ops.operator("crafter.down_game_resource", text="", icon="TRIA_DOWN")
 
-                if len (addon_prefs.Game_unuse_Resources_List) > 0:
-                    row_resources_unuse = box_resources.row()
-                    col_unuse_list = row_resources_unuse.column()
-                    col_unuse_list.template_list("VIEW3D_UL_CrafterGameUnuseResources", "", addon_prefs, "Game_unuse_Resources_List", addon_prefs, "Game_unuse_Resources_List_index", rows=1)
-                    col_unuse_ops = row_resources_unuse.column()
-                    col_unuse_ops.operator("crafter.use_game_resource", text="", icon="ADD")
-        else:
-            box_resources.label(text="Resources List",icon="PACKAGE")
-            row_Plans_List = box_resources.row()
-            row_Plans_List.template_list("VIEW3D_UL_CrafterResources", "", addon_prefs, "Resources_Plans_List", addon_prefs, "Resources_Plans_List_index", rows=1)
-            col_Plans_List_ops = row_Plans_List.column()
-            col_Plans_List_ops.operator("crafter.open_resources_plans",icon="FILE_FOLDER",text="")
-            col_Plans_List_ops.operator("crafter.reload_all",icon="FILE_REFRESH",text="")
+                    if len (addon_prefs.Game_unuse_Resources_List) > 0:
+                        row_resources_unuse = box_resources.row()
+                        col_unuse_list = row_resources_unuse.column()
+                        col_unuse_list.template_list("VIEW3D_UL_CrafterGameUnuseResources", "", addon_prefs, "Game_unuse_Resources_List", addon_prefs, "Game_unuse_Resources_List_index", rows=1)
+                        col_unuse_ops = row_resources_unuse.column()
+                        col_unuse_ops.operator("crafter.use_game_resource", text="", icon="ADD")
+            else:
+                box_resources.label(text="Resources List",icon="PACKAGE")
+                row_Plans_List = box_resources.row()
+                row_Plans_List.template_list("VIEW3D_UL_CrafterResources", "", addon_prefs, "Resources_Plans_List", addon_prefs, "Resources_Plans_List_index", rows=1)
+                col_Plans_List_ops = row_Plans_List.column()
+                col_Plans_List_ops.operator("crafter.open_resources_plans",icon="FILE_FOLDER",text="")
+                col_Plans_List_ops.operator("crafter.reload_all",icon="FILE_REFRESH",text="")
 
-            if len(addon_prefs.Resources_List) > 0:
-                box_resource = box_resources_main.box()
-                box_resource.label(text="Resource",icon="NODE_COMPOSITING")
-                row_Resources_List = box_resource.row()
-                row_Resources_List.template_list("VIEW3D_UL_CrafterResourcesInfo", "", addon_prefs, "Resources_List", addon_prefs, "Resources_List_index", rows=1)
-                if len(addon_prefs.Resources_List) > 1:
-                    col_Resources_List_ops = row_Resources_List.column(align=True)
-                    col_Resources_List_ops.operator("crafter.up_resource",icon="TRIA_UP",text="")
-                    col_Resources_List_ops.operator("crafter.down_resource",icon="TRIA_DOWN",text="")
+                if len(addon_prefs.Resources_List) > 0:
+                    box_resource = box_resources_main.box()
+                    box_resource.label(text="Resource",icon="NODE_COMPOSITING")
+                    row_Resources_List = box_resource.row()
+                    row_Resources_List.template_list("VIEW3D_UL_CrafterResourcesInfo", "", addon_prefs, "Resources_List", addon_prefs, "Resources_List_index", rows=1)
+                    if len(addon_prefs.Resources_List) > 1:
+                        col_Resources_List_ops = row_Resources_List.column(align=True)
+                        col_Resources_List_ops.operator("crafter.up_resource",icon="TRIA_UP",text="")
+                        col_Resources_List_ops.operator("crafter.down_resource",icon="TRIA_DOWN",text="")
 
 
     def invoke(self, context, event):
