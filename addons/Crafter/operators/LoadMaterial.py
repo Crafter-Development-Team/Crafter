@@ -516,6 +516,15 @@ def process_single_material(material, context, classification_list, imported_by_
     except Exception as ex:
         warn_log(f"overlay 处理失败 [{material.name}]: {ex}")
 
+    # 材质加载完成后按 Principled Alpha 的真实来源决定透明阴影：
+    # Crafter 默认把 Alpha 接到不透明贴图上，EEVEE 仍会因此走透明阴影，
+    # 在 shadow pass 里把 POM 也求值一遍。只有证明 Alpha 全 1 才关闭。
+    try:
+        if material.use_transparent_shadow and material_alpha_is_all_one(material):
+            material.use_transparent_shadow = False
+    except Exception:
+        pass
+
     # 最后一步：CI- 组与 overlay 帧里的 CI 节点都已就位，再按双面几何清单应用剔除
     _apply_ds_cull()
 
@@ -855,12 +864,11 @@ class VIEW3D_OT_CrafterLoadParallax(bpy.types.Operator):
         if addon_prefs.Parallax_Guess_Height:
             row.prop(addon_prefs, "Parallax_Guess_Height_Scale", text=i18n("Scale"))
 
-        layout.prop(addon_prefs, "Parallax_Use_POM_Interpolation", text=i18n("POM Interpolation"))
+        col.prop(addon_prefs, "Parallax_Use_POM_Interpolation", text=i18n("POM Interpolation"))
 
-        row = layout.row()
+        row = col.row()
         row.enabled = not addon_prefs.Parallax_Use_POM_Interpolation
         row.prop(addon_prefs, "Parallax_Refine_Steps", text=i18n("Binary Steps"))
-
         if bpy.app.version >= (5, 0, 0):
             layout.prop(addon_prefs, "Parallax_Use_Repeat_Zone", text=i18n("Use Repeat Zone"))
 

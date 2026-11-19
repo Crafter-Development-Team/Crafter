@@ -3052,9 +3052,117 @@ def is_alpha_channel_all_one(image_node):
         _alpha_all_one_cache[cache_key] = result
         return result
     # 回退原逻辑：pixels[:] 会触发贴图加载；此路径不缓存，避免缓存未加载完的中间状态
-    pixels = image.pixels[:]
+    try:
+        pixels = image.pixels[:]
+    except Exception:
+        return False
+    if not pixels:
+        # 空/未解码图像不能当作“alpha 全 1”，否则会错误地把法线图当无高度
+        return False
     for i in range(0, len(pixels), 4):
         if pixels[i + 3] < 1.0 - 1e-6:
+            return False
+    return True
+
+
+def _alpha_socket_all_one(socket, seen=None, group_node=None):
+    """Trace a shader Alpha socket back to its image/constant source.
+
+    group_node is the Group node instance whose internal tree is being
+    inspected, so a Group Input can be resolved back to the outer link.
+    """
+    if socket is None:
+        return None
+    if not socket.is_linked:
+        try:
+            return float(socket.default_value) >= 1.0 - 1e-6
+        except (AttributeError, TypeError, ValueError):
+            return None
+
+    if seen is None:
+        seen = set()
+
+    for link in socket.links:
+        node = link.from_node
+        key = (node.as_pointer(), link.from_socket.name)
+        if key in seen:
+            return None
+        seen.add(key)
+
+        if node.type == 'GROUP_INPUT' and group_node is not None:
+            # CI- 组的 Alpha 常常只是把 Group Input 原样接到 Group Output；
+            # 这种情况下必须回到外层 Group 节点的输入继续追。
+            outer = group_node.inputs.get(link.from_socket.name)
+            return _alpha_socket_all_one(outer, seen)
+
+        if node.type == 'TEX_IMAGE':
+            # Alpha 输出直接来自贴图 alpha；Color 输出转 float 是颜色亮度，
+            # 不能拿来判断材质 alpha。
+            if link.from_socket.name == 'Alpha':
+                return is_alpha_channel_all_one(node)
+            return None
+
+        if node.type in {'SEPARATE_COLOR', 'SEPRGB'}:
+            if link.from_socket.name == 'Alpha':
+                return _alpha_socket_all_one(node.inputs.get('Color'), seen)
+            return None
+
+        if node.type == 'VALUE':
+            try:
+                return float(node.outputs[0].default_value) >= 1.0 - 1e-6
+            except (AttributeError, TypeError, ValueError):
+                return None
+
+        if node.type in {'MIX', 'MIX_RGB'}:
+            # factor 为常量 0/1 时只看实际选中的那一支
+            fac = node.inputs.get('Factor') or node.inputs.get('Fac')
+            if node.type == 'MIX_RGB':
+                in_a, in_b = node.inputs.get('Color1'), node.inputs.get('Color2')
+            else:
+                in_a = node.inputs.get('A_Float') or node.inputs.get('A_Color')
+                in_b = node.inputs.get('B_Float') or node.inputs.get('B_Color')
+            if in_a is None or in_b is None:
+                return None
+            if fac is not None and not fac.is_linked:
+                try:
+                    f = float(fac.default_value)
+                except (AttributeError, TypeError, ValueError):
+                    f = None
+                if f is not None and (f <= 1e-6 or f >= 1.0 - 1e-6):
+                    return _alpha_socket_all_one(in_a if f <= 1e-6 else in_b, seen)
+            # 两支都证明是全 1 才能确认
+            a = _alpha_socket_all_one(in_a, seen)
+            b = _alpha_socket_all_one(in_b, seen)
+            if a is True and b is True:
+                return True
+            if a is False or b is False:
+                return False
+            return None
+
+        if node.type == 'GROUP' and node.node_tree is not None:
+            group_output = next(
+                (n for n in node.node_tree.nodes if n.type == 'GROUP_OUTPUT'), None)
+            if group_output is None:
+                return None
+            inner = group_output.inputs.get(link.from_socket.name)
+            return _alpha_socket_all_one(inner, seen, node)
+
+        # 程序纹理、顶点色、Object Info Alpha、Math 等：无法静态证明
+        return None
+
+    return None
+
+
+def material_alpha_is_all_one(material):
+    """True only if every Principled Alpha source is provably opaque (alpha 1)."""
+    if material is None or not material.use_nodes or material.node_tree is None:
+        return False
+    principled = [n for n in material.node_tree.nodes if n.type == 'BSDF_PRINCIPLED']
+    if not principled:
+        return False
+    for node in principled:
+        alpha = node.inputs.get('Alpha')
+        if _alpha_socket_all_one(alpha) is not True:
             return False
     return True
 
