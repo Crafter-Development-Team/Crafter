@@ -42,6 +42,19 @@ def select_obj_files(filenames, use_entities):
 
 # ==================== 导入世界 ====================
 
+def _load_world_icon(world_index, icon_path):
+    """Load a world icon, tolerating a stale key left by an older reload."""
+    name = "world_icon_" + str(world_index)
+    try:
+        icons_world.load(name, icon_path, 'IMAGE')
+    except KeyError:
+        try:
+            icons_world.remove(name)
+        except Exception:
+            pass
+        icons_world.load(name, icon_path, 'IMAGE')
+
+
 def _draw_collapsible_section(layout, addon_prefs, toggle_name, label, icon):
     """Operator 对话框没有原生子面板，用一个 bool 属性做可折叠标题。"""
     box = layout.box()
@@ -1884,17 +1897,11 @@ class VIEW3D_OT_CrafterReloadGameResources(bpy.types.Operator):#刷新 游戏资
             return {'FINISHED'}
         index_game = 0
         index_game_unuse = 0
-        try:
-            bpy.utils.previews.remove(icons_game_resource)
-        except:
-            pass
-        try:
-            bpy.utils.previews.remove(icons_game_unuse_resource)
-        except:
-            pass
+        # 只清空，不要把 preview 集合从 bpy.utils.previews 里 remove 掉：
+        # Blender 5.3 下 remove 后对象仍保留旧 key，clear() 清不掉，下一次 load
+        # 同一个 world_icon_0 就会抛 KeyError already exists。
         icons_game_resource.clear()
         icons_game_unuse_resource.clear()
-
         worldPath = os.path.normpath(addon_prefs.World_Path)
         from ..replay.game_dirs import resourcepacks_json_key
         dir_saves = resourcepacks_json_key(worldPath)
@@ -1996,10 +2003,8 @@ class VIEW3D_OT_CrafterReloadHistoryWorldsList(bpy.types.Operator):#刷新 历�
         with open(dir_json_history_worlds, 'r', encoding='utf-8') as file:
             json_history_worlds = json.load(file)
 
-        try:
-            bpy.utils.previews.remove(icons_world)
-        except:
-            pass
+        # 只 clear，不要 remove preview 集合。remove 之后对象仍可能保留旧 key，
+        # 第二次 reload（reload_latest 会多次调用本函数）就会重复 load world_icon_0。
         icons_world.clear()
         world_index = 0
 
@@ -2020,7 +2025,7 @@ class VIEW3D_OT_CrafterReloadHistoryWorldsList(bpy.types.Operator):#刷新 历�
                     history_world_save = addon_prefs.History_World_Saves_List.add()
                     history_world_save.name = save
                     dir_icon = os.path.join(get_dir_saves(context), save, "icon.png")
-                    icons_world.load("world_icon_" + str(world_index), dir_icon, 'IMAGE')
+                    _load_world_icon(world_index, dir_icon)
                     world_index += 1
                     if len(addon_prefs.History_World_Saves_List) > 0:
                         if addon_prefs.History_World_Saves_List_index < 0 or addon_prefs.History_World_Saves_List_index >= len(addon_prefs.History_World_Saves_List):
@@ -2047,7 +2052,7 @@ class VIEW3D_OT_CrafterReloadHistoryWorldsList(bpy.types.Operator):#刷新 历�
                         history_world_save = addon_prefs.History_World_Saves_List.add()
                         history_world_save.name = save
                         dir_icon = os.path.join(get_dir_saves(context), save, "icon.png")
-                        icons_world.load("world_icon_" + str(world_index), dir_icon, 'IMAGE')
+                        _load_world_icon(world_index, dir_icon)
                         world_index += 1
                     if len(addon_prefs.History_World_Saves_List) > 0:
                         if addon_prefs.History_World_Saves_List_index < 0 or addon_prefs.History_World_Saves_List_index >= len(addon_prefs.History_World_Saves_List):

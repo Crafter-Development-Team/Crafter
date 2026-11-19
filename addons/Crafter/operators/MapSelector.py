@@ -206,10 +206,15 @@ class VIEW3D_OT_CrafterMapSelector(bpy.types.Operator):
             gui_java = resolve_gui_java(java_path)
             self.report({'INFO'}, f"使用Java: {gui_java}")
 
-            # 获取Y坐标范围
+            # 获取XYZ坐标范围：选择器打开时直接带入 N 面板当前框选范围
             xyz1 = getattr(addon_prefs, 'XYZ_1', (0, 0, 0))
             xyz2 = getattr(addon_prefs, 'XYZ_2', (0, 255, 0))
-            
+
+            min_x = min(xyz1[0], xyz2[0])
+            max_x = max(xyz1[0], xyz2[0])
+            min_z = min(xyz1[2], xyz2[2])
+            max_z = max(xyz1[2], xyz2[2])
+
             # 计算Y坐标范围
             min_y = min(xyz1[1], xyz2[1])
             max_y = max(xyz1[1], xyz2[1])
@@ -227,7 +232,12 @@ class VIEW3D_OT_CrafterMapSelector(bpy.types.Operator):
                 "--world-path", worldPath,
                 "--output-file", coord_file,
                 "--min-y", str(min_y),
-                "--max-y", str(max_y)
+                "--max-y", str(max_y),
+                # SelectionSeed 要求四个 X/Z 参数同时存在；打开时直接选中 N 面板范围
+                "--min-x", str(min_x),
+                "--max-x", str(max_x),
+                "--min-z", str(min_z),
+                "--max-z", str(max_z)
             ]
 
             cmd.extend(import_lod_seed_args(addon_prefs))
