@@ -68,6 +68,81 @@ material_library_prop = "Crafter_loaded_material_library"
 node_groups_use_fake_user = ["C-PBR_Parser", "C-lab_PBR_1.3", "C-old_PBR"]
 name_material_settings = "材质设置/Material Settings"
 
+MATERIAL_GROUP_PREFIXES = ("CO-", "CI-", "C-")
+
+
+def _is_material_group(node_group):
+    return bool(node_group and node_group.name.startswith(MATERIAL_GROUP_PREFIXES))
+
+
+def iter_group_nodes(node_tree):
+    """Yield every ShaderNodeGroup in a node tree (not recursive by itself)."""
+    if node_tree is None:
+        return
+    for node in node_tree.nodes:
+        if node.type == 'GROUP':
+            yield node
+
+
+def find_broken_group_materials():
+    """Return materials that still have a Group node pointing at a deleted group.
+
+    This is the corrupted state left by older reloads. It must be detected
+    before any full material-library swap: deleting more groups in this state
+    makes Blender's depsgraph read freed node trees and crash.
+    """
+    broken = []
+    for material in bpy.data.materials:
+        if material.node_tree is None:
+            continue
+        try:
+            for node in iter_group_nodes(material.node_tree):
+                if node.node_tree is None:
+                    broken.append(material.name)
+                    break
+        except Exception:
+            continue
+    return sorted(set(broken))
+
+
+def _rebind_group_nodes(node_tree, mapping):
+    """Point surviving Group nodes at the replacement node groups."""
+    if node_tree is None:
+        return 0
+    count = 0
+    for node in iter_group_nodes(node_tree):
+        if node.node_tree in mapping:
+            replacement = mapping[node.node_tree]
+            if replacement is not None:
+                node.node_tree = replacement
+                count += 1
+    return count
+
+
+def _rebind_all_material_groups(mapping):
+    """Rebind every material and every node group, including other scenes' data."""
+    count = 0
+    for material in bpy.data.materials:
+        count += _rebind_group_nodes(material.node_tree, mapping)
+    for group in bpy.data.node_groups:
+        count += _rebind_group_nodes(group, mapping)
+    return count
+
+
+def _validate_material_groups():
+    """Return broken material names after a swap; empty means all references are valid."""
+    return find_broken_group_materials()
+
+
+def _update_all_scene_depsgraphs():
+    """Force every scene's view layer to see the new node-group pointers."""
+    for scene in bpy.data.scenes:
+        for view_layer in scene.view_layers:
+            try:
+                view_layer.update()
+            except Exception:
+                pass
+
 
 def get_material_library_name(context):
     '''
@@ -198,23 +273,37 @@ def reload_material_setup(context, library_name, include_settings=False):
     include_settings: 面板需要的设置物体必须与 CI/CO 在同一次 load 中加载，避免重名组。
     library_name: 材质库名（dir_materials 下去掉 .blend 的文件名）
     '''
-    # 删除startswith(CO-)、startswith(CI-)节点组、startswith(C-)节点组
-    node_delete = []
-    for node_group in bpy.data.node_groups:
-        if node_group.name.startswith("CO-") or node_group.name.startswith("CI-") or node_group.name.startswith("C-"):
-            node_delete.append(node_group)
-    for node_group in node_delete:
-        bpy.data.node_groups.remove(node_group)
-    # 删除材质设置/Material Settings物体、材质
+    # 已经损坏的文件不能再走“先删后补”：空 Group 节点会让 Blender 5.3
+    # 在 build_materials 里读已释放的 node tree。先拒绝，交由调用方报告。
+    broken = find_broken_group_materials()
+    if broken:
+        raise RuntimeError(
+            "材质文件里已有 Group 节点丢失节点组（%d 个材质）：%s"
+            % (len(broken), ", ".join(broken[:8]))
+        )
+
+    # 两阶段替换：
+    # 1) 旧组先改临时名，不删；
+    # 2) 加载新组，保持原文件名；
+    # 3) 所有材质/节点组重绑到新组；
+    # 4) 验证没有空 Group，最后才删旧组。
+    old_groups = [g for g in bpy.data.node_groups if _is_material_group(g)]
+    old_names = {g: g.name for g in old_groups}
+    for index, node_group in enumerate(old_groups):
+        node_group.name = "__Crafter_old_%d_%s" % (index, old_names[node_group])
+
+    # 设置物体/材质也必须先让出原名，否则 append 会生成 .001。
+    # 它只用于材质面板，先移除不会影响已经导入的物体。
     try:
         bpy.data.objects.remove(bpy.data.objects[name_material_settings])
-    except:
+    except Exception:
         pass
     try:
         bpy.data.materials.remove(bpy.data.materials[name_material_settings], do_unlink=True)
-    except:
+    except Exception:
         pass
-    # 导入C-节点组（已存在的跳过）
+
+    # 导入 C- 节点组；旧组已改名，原来的名字现在都是空的。
     node_groups_missing = [name for name in node_groups_use_fake_user if name not in bpy.data.node_groups]
     if node_groups_missing:
         with bpy.data.libraries.load(dir_blend_append, link=False) as (data_from, data_to):
@@ -222,12 +311,9 @@ def reload_material_setup(context, library_name, include_settings=False):
     for name in node_groups_use_fake_user:
         if name in bpy.data.node_groups:
             bpy.data.node_groups[name].use_fake_user = True
-    # 导入Crafter-Moving_texture节点组
     add_node_group_if_not_exists(names_Crafter_Moving_texture)
-    # Cycles 剔除组（CI 的 Cycles 输出与最终输出之间那层，默认静音）
     add_node_group_if_not_exists([CULL_GROUP_NAME])
-    # Import only the shader groups on the automatic path; Blender loads their
-    # nested helpers. Panel loads request the settings object in this same pass.
+
     blend_material_dir = os.path.join(dir_materials, library_name + ".blend")
     with bpy.data.libraries.load(blend_material_dir, link=False) as (data_from, data_to):
         data_to.node_groups = [name for name in data_from.node_groups
@@ -235,12 +321,46 @@ def reload_material_setup(context, library_name, include_settings=False):
         if include_settings:
             data_to.objects = [name for name in data_from.objects if name == name_material_settings]
     if not include_settings:
-        # The settings material normally keeps unused classifications alive.
-        # CI-only loads need their own users so save/reopen preserves the library.
         for group in data_to.node_groups:
             if group is not None:
                 group.use_fake_user = True
+
+    # 按原始名字建立 旧组→新组 映射。新库没提供的组保留旧组，避免制造空引用。
+    new_by_name = {
+        g.name: g for g in bpy.data.node_groups
+        if _is_material_group(g) and not g.name.startswith("__Crafter_old_")
+    }
+    mapping = {}
+    unresolved = []
+    for old_group in old_groups:
+        original = old_names[old_group]
+        new_group = new_by_name.get(original)
+        if new_group is not None and new_group != old_group:
+            mapping[old_group] = new_group
+        else:
+            unresolved.append(original)
+
+    rebound = _rebind_all_material_groups(mapping)
+    info_log("材质库替换", "重绑节点组", rebound=rebound, unresolved=len(unresolved))
+
+    # 任何材质仍有空 Group 就不能删旧组；旧组留在临时名下，至少文件不会变成空引用。
+    still_broken = _validate_material_groups()
+    if still_broken:
+        raise RuntimeError(
+            "材质库替换后仍有 Group 节点为空（%d 个材质），已保留旧节点组：%s"
+            % (len(still_broken), ", ".join(still_broken[:8]))
+        )
+
+    # 重绑完成，旧组没有用户后再删除；有遗留用户就保留临时组，避免再次破坏文件。
+    _update_all_scene_depsgraphs()
+    for old_group in old_groups:
+        old_group.use_fake_user = False
+        if old_group.users == 0:
+            bpy.data.node_groups.remove(old_group)
     ensure_material_settings_object(context)
+
+    # 让所有 scene 的 depsgraph 都看到新引用，减少 5.3 跨场景 stale 指针。
+    _update_all_scene_depsgraphs()
 
 # ==================== 加载材质 ====================
 
@@ -755,6 +875,17 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):
         addon_prefs = context.preferences.addons[__addon_name__].preferences
         reset_CI_cull_stats()
 
+        # 旧版本 reload 留下的空 Group 节点在 5.3 的 build_materials 里会直接崩溃。
+        # 这种文件不能继续删组/重载，先中止并把坏材质报出来。
+        broken_materials = find_broken_group_materials()
+        if broken_materials:
+            message = "材质里有丢失的 Group 节点组（%d 个材质）：%s" % (
+                len(broken_materials), ", ".join(broken_materials[:8]))
+            warn_log("材质加载中止", "材质损坏", count=len(broken_materials),
+                     materials=broken_materials[:20])
+            self.report({'WARNING'}, message)
+            return {"CANCELLED"}
+
         bpy.ops.crafter.reload_all()
         if not (-1 < addon_prefs.Materials_List_index and addon_prefs.Materials_List_index < len(addon_prefs.Materials_List)):
             warn_log("取消加载：未选择有效材质库", "加载材质", library_index=addon_prefs.Materials_List_index)
@@ -778,8 +909,14 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):
             elif needs_settings and reusable:
                 reason = f"补载材质设置物体（{library_name}）"
             info_log(f'重加载材质节点组：{reason}', '加载材质', library=library_name, action='reload')
+            # 两阶段替换：旧组先改名保留，新组加载并重绑所有材质后才删旧组。
             # include_settings 恒为 True：设置物体必须和 CI/CO 同一次 load，避免生成 CI-*.001
-            reload_material_setup(context, library_name, include_settings=True)
+            try:
+                reload_material_setup(context, library_name, include_settings=True)
+            except RuntimeError as ex:
+                warn_log("材质库重载中止", "材质损坏", error=str(ex))
+                self.report({'WARNING'}, str(ex))
+                return {"CANCELLED"}
             set_loaded_material_library(context, library_name)
         else:
             info_log(reason, '加载材质', library=library_name, action='reuse')
@@ -790,8 +927,22 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):
         bpy.ops.crafter.set_parsed_normal_strength()
 
         for_collection = []
-        for mcmt in context.scene.Crafter_mcmts:
-            for_collection.append(mcmt.name)
+        crafted_material_names = set()
+        # 多 scene 时 context.scene 只覆盖当前场景；旧版只处理当前场景，
+        # 其他 FULL_COPY 场景的材质会留着旧组引用，最终变成空 Group 节点。
+        for scene in bpy.data.scenes:
+            for mcmt in getattr(scene, "Crafter_mcmts", []):
+                if mcmt is not None and mcmt.name not in for_collection:
+                    for_collection.append(mcmt.name)
+            for mcmt in getattr(scene, "Crafter_crafter_mcmts", []):
+                if mcmt is not None:
+                    crafted_material_names.add(mcmt.name)
+            for obj in scene.objects:
+                if obj.type != "MESH":
+                    continue
+                for mat in obj.data.materials:
+                    if mat is not None and mat.name not in for_collection:
+                        for_collection.append(mat.name)
         # 添加选中物体的材质到遍历合集
         for obj in context.selected_objects:
             if obj.type == "MESH":
@@ -803,10 +954,10 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):
         info_log("材质处理计划", "加载材质", count=len(for_collection), library=library_name, folder_search=folder_search)
         # 遍历材质合集
         for name_material in for_collection:
-            imported_by_crafter = False
-            if name_material in context.scene.Crafter_crafter_mcmts:
-                imported_by_crafter = True
-            material = bpy.data.materials[name_material]
+            imported_by_crafter = name_material in crafted_material_names
+            material = bpy.data.materials.get(name_material)
+            if material is None:
+                continue
             process_single_material(material, context, classification_list, imported_by_crafter, folder_search,
                                     addon_prefs=addon_prefs)
         # 添加选中物体的材质到合集
