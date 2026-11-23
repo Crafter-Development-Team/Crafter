@@ -1,10 +1,12 @@
 """Pure helpers for the map selector; never touch Blender objects here."""
 import json
 import os
+import re
 import subprocess
 import time
 
 _java_cache = {}
+_DIMENSION_RE = re.compile(r"[a-z0-9_.-]+:[a-z0-9_./-]+")
 
 
 def probe_java(exe_path, runner=None):
@@ -34,13 +36,21 @@ def probe_java(exe_path, runner=None):
     return valid
 
 
-def read_coordinates(path):
-    """Return (first XYZ, second XYZ, optional importLod); validate before applying any prefs."""
+def read_coordinates_payload(path):
+    """Return (first XYZ, second XYZ, importLod, dimensionId).
+
+    dimensionId is optional in legacy payloads but the selector writes it, so
+    the addon can switch the N-panel dimension together with the coordinates.
+    """
     with open(path, "r", encoding="utf-8-sig") as stream:
         data = json.load(stream)
     if not isinstance(data, dict):
         raise ValueError("Coordinates must be an object")
     lod = parse_import_lod(data["importLod"]) if "importLod" in data else None
+    dimension = data.get("dimensionId")
+    if dimension is not None:
+        if not isinstance(dimension, str) or not _DIMENSION_RE.fullmatch(dimension):
+            raise ValueError("Invalid dimensionId")
     keys = ("minX", "minY", "minZ", "maxX", "maxY", "maxZ")
     for key in keys:
         value = data.get(key)
@@ -49,7 +59,14 @@ def read_coordinates(path):
         if not -(2 ** 31) <= value < 2 ** 31:
             raise ValueError("Coordinate out of range: " + key)
     return ((min(data["minX"], data["maxX"]), min(data["minY"], data["maxY"]), min(data["minZ"], data["maxZ"])),
-            (max(data["minX"], data["maxX"]), max(data["minY"], data["maxY"]), max(data["minZ"], data["maxZ"])), lod)
+            (max(data["minX"], data["maxX"]), max(data["minY"], data["maxY"]), max(data["minZ"], data["maxZ"])),
+            lod, dimension)
+
+
+def read_coordinates(path):
+    """Backward-compatible three-tuple reader."""
+    first, second, lod, _dimension = read_coordinates_payload(path)
+    return first, second, lod
 
 
 _LOD_PREFS = {

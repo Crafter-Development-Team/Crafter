@@ -61,6 +61,11 @@ def fuq_bl_dot_number(name: str):
     return name
 
 
+def is_donot_name(name):
+    '''是否是材质设置载体或其多场景 FULL_COPY 副本（如 材质设置/Material Settings.001）'''
+    return bool(name) and (name in donot or fuq_bl_dot_number(str(name)) in donot)
+
+
 def texture_image_name(node):
     '''
     取贴图节点所用图像在节点体系里用的名字（去掉 Blender 的重名 .xxx 后缀）。
@@ -2053,7 +2058,7 @@ def add_Crafter_time(obj):
     给物体的颜色 alpha 挂时间驱动器（幂等：重复调用只是刷新一下场景变量）。
     材质侧用 Object Info 节点的 Alpha 输出取当前秒数，不再需要几何节点。
     '''
-    if obj is None or obj.library is not None:  # 库链接的物体改不了驱动器
+    if obj is None or obj.library is not None or is_donot_name(obj.name):  # 库链接物体与材质设置载体不挂驱动器
         return
     scene = crafter_time_scene(obj)
     if scene is None:

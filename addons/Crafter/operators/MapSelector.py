@@ -6,7 +6,7 @@ import tempfile
 import threading
 import time
 import shutil
-from .map_selector_runtime import probe_java, read_coordinates, import_lod_seed_args, apply_import_lod
+from .map_selector_runtime import probe_java, read_coordinates_payload, import_lod_seed_args, apply_import_lod
 
 from ..config import __addon_name__
 from bpy.props import *
@@ -132,6 +132,20 @@ def resolve_gui_java(java_path):
         if os.path.isfile(javaw):
             return javaw
     return java_path
+
+def apply_dimension_id(addon_prefs, dimension_id):
+    """Select the dimension returned by the map selector, adding it if needed."""
+    if not dimension_id:
+        return False
+    for index, dimension in enumerate(addon_prefs.Dimensions_List):
+        if dimension.name == dimension_id:
+            addon_prefs.Dimensions_List_index = index
+            return True
+    dimension = addon_prefs.Dimensions_List.add()
+    dimension.name = dimension_id
+    addon_prefs.Dimensions_List_index = len(addon_prefs.Dimensions_List) - 1
+    return True
+
 
 # 地图选择器操作符
 class VIEW3D_OT_CrafterMapSelector(bpy.types.Operator):
@@ -306,18 +320,20 @@ class VIEW3D_OT_CrafterMapSelector(bpy.types.Operator):
                 process_finished(started, process.pid, process.returncode)
                 try:
                     if process.returncode == 0 and os.path.isfile(coord_file):
-                        first, second, import_lod = read_coordinates(coord_file)
+                        first, second, import_lod, dimension_id = read_coordinates_payload(coord_file)
                         # bpy timers run on Blender's main thread. The old background
                         # thread wrote RNA preferences and refreshed UI unsafely.
                         addon_prefs.XYZ_1 = first
                         addon_prefs.XYZ_2 = second
+                        apply_dimension_id(addon_prefs, dimension_id)
                         apply_import_lod(addon_prefs, import_lod)
                         # Preference updates only need a queued redraw, not a costly DRAW_WIN_SWAP.
                         for window in bpy.context.window_manager.windows:
                             for area in window.screen.areas:
                                 if area.type in {'PREFERENCES', 'VIEW_3D'}:
                                     area.tag_redraw()
-                        info_log("地图选择坐标已更新", "地图选择器", first=first, second=second, import_lod=import_lod)
+                        info_log("地图选择坐标已更新", "地图选择器", first=first, second=second,
+                                 dimension=dimension_id, import_lod=import_lod)
                     elif process.returncode != 0:
                         detail = ""
                         try:

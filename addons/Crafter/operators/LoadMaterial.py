@@ -216,17 +216,115 @@ def can_reuse_material_setup(context):
     return (True, f"复用工程内已有的材质节点组（{library_name}）")
 
 
+def _build_local_material_settings_object(mat):
+    '''用工程内新建的空网格承载材质设置材质，避免直接 append 库里的载体物体带入 Scene.001。'''
+    mesh = bpy.data.meshes.get(name_material_settings)
+    if mesh is None:
+        mesh = bpy.data.meshes.new(name_material_settings)
+    mesh.materials.clear()
+    if mat is not None:
+        mesh.materials.append(mat)
+    obj = bpy.data.objects.get(name_material_settings)
+    if obj is None:
+        obj = bpy.data.objects.new(name_material_settings, mesh)
+    else:
+        obj.data = mesh
+    obj.active_material_index = 0
+    return obj
+
+
+def _remove_material_settings_carrier():
+    '''移除旧的材质设置载体物体、孤立网格与材质，腾出原名避免重载生成 .001。'''
+    old_obj = bpy.data.objects.get(name_material_settings)
+    if old_obj is not None:
+        old_mesh = old_obj.data if old_obj.type == 'MESH' else None
+        try:
+            bpy.data.objects.remove(old_obj, do_unlink=True)
+        except Exception:
+            pass
+        if old_mesh is not None and old_mesh.users == 0:
+            try:
+                bpy.data.meshes.remove(old_mesh)
+            except Exception:
+                pass
+    old_mat = bpy.data.materials.get(name_material_settings)
+    if old_mat is not None:
+        try:
+            bpy.data.materials.remove(old_mat, do_unlink=True)
+        except Exception:
+            pass
+
+
+def _snapshot_non_shader_datablocks():
+    return {
+        "scenes": set(bpy.data.scenes),
+        "collections": set(bpy.data.collections),
+        "worlds": set(bpy.data.worlds),
+        "palettes": set(bpy.data.palettes),
+        "linestyles": set(bpy.data.linestyles),
+    }
+
+
+def _cleanup_pulled_scene_datablocks(before_state):
+    '''兜底：若第三方材质库只提供同名物体且物体上挂着跨场景驱动器，清掉被顺带拉进来的 Scene.001 等数据块。'''
+    extra_scenes = [s for s in bpy.data.scenes if s not in before_state["scenes"]]
+    extra_collections = [c for c in bpy.data.collections if c not in before_state["collections"]]
+    settings_obj = bpy.data.objects.get(name_material_settings)
+    if settings_obj is not None:
+        remove_Crafter_time(settings_obj)
+        anim_data = settings_obj.animation_data
+        if anim_data is not None and extra_scenes:
+            extra_scene_set = set(extra_scenes)
+            for fcurve in list(anim_data.drivers):
+                drv = getattr(fcurve, "driver", None)
+                if drv is None:
+                    continue
+                if any(
+                    t.id in extra_scene_set
+                    for var in drv.variables
+                    for t in var.targets
+                ):
+                    anim_data.drivers.remove(fcurve)
+        for coll in extra_collections:
+            if settings_obj.name in coll.objects:
+                coll.objects.unlink(settings_obj)
+    for sc in extra_scenes:
+        if len(bpy.data.scenes) > 1:
+            try:
+                bpy.data.scenes.remove(sc, do_unlink=True)
+            except Exception:
+                pass
+    for coll in extra_collections:
+        if coll.users == 0:
+            try:
+                bpy.data.collections.remove(coll)
+            except Exception:
+                pass
+    for key in ("worlds", "palettes", "linestyles"):
+        data_coll = getattr(bpy.data, key, None)
+        if data_coll is None:
+            continue
+        for block in [b for b in data_coll if b not in before_state[key]]:
+            if block.users == 0:
+                try:
+                    data_coll.remove(block)
+                except Exception:
+                    pass
+
+
 def ensure_material_settings_object(context):
     '''
-    把材质设置物体挂进它自己的集合（已在集合里时只刷新隐藏状态）
+    把材质设置物体挂进它自己的集合（已在集合里时只刷新隐藏状态，并确保不挂时间驱动器）
     '''
     obj = bpy.data.objects.get(name_material_settings)
     if obj is None:
         return
+    remove_Crafter_time(obj)
     if name_material_settings in bpy.data.collections:
         collection = bpy.data.collections[name_material_settings]
     else:
         collection = bpy.data.collections.new(name=name_material_settings)
+    if context.scene is not None and collection.name not in context.scene.collection.children:
         context.scene.collection.children.link(collection)
     if collection not in obj.users_collection:
         collection.objects.link(obj)
@@ -243,13 +341,29 @@ def ensure_material_library_settings_object(context, library_name):
     '''
     obj = bpy.data.objects.get(name_material_settings)
     if obj is None:
-        if library_name is None or any(
-                group.name.startswith(("CI-", "CO-", "C-")) for group in bpy.data.node_groups):
-            return None
-        with bpy.data.libraries.load(os.path.join(dir_materials, library_name + ".blend"),
-                                     link=False) as (data_from, data_to):
-            data_to.objects = [name for name in data_from.objects if name == name_material_settings]
-        obj = bpy.data.objects.get(name_material_settings)
+        existing_mat = bpy.data.materials.get(name_material_settings)
+        if existing_mat is not None:
+            obj = _build_local_material_settings_object(existing_mat)
+        else:
+            if library_name is None or any(
+                    group.name.startswith(("CI-", "CO-", "C-")) for group in bpy.data.node_groups):
+                return None
+            blend_material_dir = os.path.join(dir_materials, library_name + ".blend")
+            before_state = _snapshot_non_shader_datablocks()
+            loaded_from_material = False
+            with bpy.data.libraries.load(blend_material_dir, link=False) as (data_from, data_to):
+                if name_material_settings in data_from.materials:
+                    data_to.materials = [name_material_settings]
+                    loaded_from_material = True
+                elif name_material_settings in data_from.objects:
+                    data_to.objects = [name_material_settings]
+            if loaded_from_material:
+                settings_mat = bpy.data.materials.get(name_material_settings)
+                if settings_mat is not None:
+                    obj = _build_local_material_settings_object(settings_mat)
+            else:
+                _cleanup_pulled_scene_datablocks(before_state)
+                obj = bpy.data.objects.get(name_material_settings)
     ensure_material_settings_object(context)
     return obj
 
@@ -294,14 +408,7 @@ def reload_material_setup(context, library_name, include_settings=False):
 
     # 设置物体/材质也必须先让出原名，否则 append 会生成 .001。
     # 它只用于材质面板，先移除不会影响已经导入的物体。
-    try:
-        bpy.data.objects.remove(bpy.data.objects[name_material_settings])
-    except Exception:
-        pass
-    try:
-        bpy.data.materials.remove(bpy.data.materials[name_material_settings], do_unlink=True)
-    except Exception:
-        pass
+    _remove_material_settings_carrier()
 
     # 导入 C- 节点组；旧组已改名，原来的名字现在都是空的。
     node_groups_missing = [name for name in node_groups_use_fake_user if name not in bpy.data.node_groups]
@@ -315,12 +422,27 @@ def reload_material_setup(context, library_name, include_settings=False):
     add_node_group_if_not_exists([CULL_GROUP_NAME])
 
     blend_material_dir = os.path.join(dir_materials, library_name + ".blend")
+    before_state = _snapshot_non_shader_datablocks() if include_settings else None
+    loaded_settings_from_material = False
     with bpy.data.libraries.load(blend_material_dir, link=False) as (data_from, data_to):
         data_to.node_groups = [name for name in data_from.node_groups
                                if name.startswith(("CI-", "CO-"))]
         if include_settings:
-            data_to.objects = [name for name in data_from.objects if name == name_material_settings]
-    if not include_settings:
+            # 优先只加载材质设置材质并在本地建载体物体：库里的载体物体可能挂着指向库内 Scene
+            # 的时间驱动器，直接 append 物体会把库里的 Scene 作为 Scene.001 一并拉进当前工程。
+            if name_material_settings in data_from.materials:
+                data_to.materials = [name_material_settings]
+                loaded_settings_from_material = True
+            elif name_material_settings in data_from.objects:
+                data_to.objects = [name_material_settings]
+    if include_settings:
+        if loaded_settings_from_material:
+            settings_mat = bpy.data.materials.get(name_material_settings)
+            if settings_mat is not None:
+                _build_local_material_settings_object(settings_mat)
+        else:
+            _cleanup_pulled_scene_datablocks(before_state)
+    else:
         for group in data_to.node_groups:
             if group is not None:
                 group.use_fake_user = True
@@ -421,6 +543,8 @@ def process_single_material(material, context, classification_list, imported_by_
                          True/False = 面板路径，材质里已有的法向/PBR 节点一律保留不动，
                                  只在这个值为 True 时去文件夹补上缺的那张。
     '''
+    if material is None or is_donot_name(material.name):
+        return
     node_tree_material = material.node_tree
     if node_tree_material is None:
         return
@@ -932,22 +1056,22 @@ class VIEW3D_OT_CrafterLoadMaterial(bpy.types.Operator):
         # 其他 FULL_COPY 场景的材质会留着旧组引用，最终变成空 Group 节点。
         for scene in bpy.data.scenes:
             for mcmt in getattr(scene, "Crafter_mcmts", []):
-                if mcmt is not None and mcmt.name not in for_collection:
+                if mcmt is not None and not is_donot_name(mcmt.name) and mcmt.name not in for_collection:
                     for_collection.append(mcmt.name)
             for mcmt in getattr(scene, "Crafter_crafter_mcmts", []):
-                if mcmt is not None:
+                if mcmt is not None and not is_donot_name(mcmt.name):
                     crafted_material_names.add(mcmt.name)
             for obj in scene.objects:
-                if obj.type != "MESH":
+                if obj.type != "MESH" or is_donot_name(obj.name):
                     continue
                 for mat in obj.data.materials:
-                    if mat is not None and mat.name not in for_collection:
+                    if mat is not None and not is_donot_name(mat.name) and mat.name not in for_collection:
                         for_collection.append(mat.name)
         # 添加选中物体的材质到遍历合集
         for obj in context.selected_objects:
-            if obj.type == "MESH":
+            if obj.type == "MESH" and not is_donot_name(obj.name):
                 for mat in obj.data.materials:
-                    if mat is not None and mat.name not in for_collection:
+                    if mat is not None and not is_donot_name(mat.name) and mat.name not in for_collection:
                         for_collection.append(mat.name)
         # 面板按钮路径按"查找PBR贴图"开关决定要不要去文件夹补缺；导入路径的判据保持不变
         folder_search = None if self.from_import else bool(addon_prefs.Search_PBR_On_Load)
