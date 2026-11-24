@@ -45,15 +45,53 @@ public final class ImportLod {
         return new ImportLod(maxLevel, true, center.x, center.y, distances[0], distances[1], distances[2], distances[3]);
     }
 
-    /** Logical LOD 0..4; mesh sample sizes are 0, 1, 2, 4, 8. Boundaries are inclusive. */
+    /**
+     * Logical LOD 0..4; mesh sample sizes are 0, 1, 2, 4, 8. Boundaries are inclusive.
+     * Matches ChunkLoader.cpp + RegionModelExporter.cpp (when LOD0 distance is 0, LOD0 is
+     * disabled and the center chunk is exported as LOD1).
+     */
     public int levelAtChunk(int cx, int cz) {
+        if (maxLevel == 0) return 0;
         double dx = (long)cx - Math.floorDiv(centerX,16), dz = (long)cz - Math.floorDiv(centerZ,16);
         double dist2 = dx*dx + dz*dz;
         for (int level = 0; level < maxLevel; level++) {
             double radius = radiusChunks(level);
-            if (dist2 <= radius*radius) return level;
+            if (dist2 <= radius*radius) {
+                return (level == 0 && distances[0] == 0) ? 1 : level;
+            }
         }
         return maxLevel;
+    }
+
+    /**
+     * Whether {@code level} (0..maxLevel) actually contains any chunk under WorldImporter's rules:
+     * <ul>
+     *   <li>{@code level == 0}: disabled when {@code distances[0] == 0} (center chunk becomes LOD1).</li>
+     *   <li>{@code 1 <= level < maxLevel}: active when {@code distances[level] > 0}, or when
+     *       {@code level == 1 && distances[0] == 0} (center chunk promoted from LOD0 to LOD1).</li>
+     *   <li>{@code level == maxLevel}: outer unbounded region, always active.</li>
+     * </ul>
+     */
+    public boolean hasChunksAtLevel(int level) {
+        if (maxLevel == 0) return level == 0;
+        if (level < 0 || level > maxLevel) return false;
+        if (level == maxLevel) return true;
+        if (level == 0) return distances[0] > 0;
+        if (level == 1 && distances[0] == 0) return true;
+        return distances[level] > 0;
+    }
+
+    /**
+     * Whether {@code level} (0..maxLevel-1) has an outer ring boundary separating it from a higher LOD.
+     * Prevents zero-width disabled rings from drawing over the inner ring's colour or drawing a
+     * phantom 1×1 LOD0 square when LOD0 distance is 0.
+     */
+    public boolean hasRingBoundary(int level) {
+        if (level < 0 || level >= maxLevel) return false;
+        if (!hasChunksAtLevel(level)) return false;
+        // If a later inner level has zero width, its radius equals ours, so our boundary still
+        // separates us from the next active outer level (at least maxLevel > level).
+        return true;
     }
 
     /**

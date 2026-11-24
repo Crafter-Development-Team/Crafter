@@ -23,7 +23,12 @@ class ImportLodTest {
     }
     @Test void negativeManualBlocksAreFlooredToChunksAndZeroWidthsCollapse() {
         ImportLod lod=new ImportLod(4,false,-1,-17,0,0,0,0);
-        assertEquals(0,lod.levelAtChunk(-1,-2));
+        // RegionModelExporter.cpp promotes task.lodLevel==0 to LOD1 when LOD0renderDistance==0
+        assertEquals(1,lod.levelAtChunk(-1,-2));
+        assertFalse(lod.hasChunksAtLevel(0));
+        assertTrue(lod.hasChunksAtLevel(1));
+        assertFalse(lod.hasChunksAtLevel(2));
+        assertFalse(lod.hasChunksAtLevel(3));
         assertEquals(4,lod.levelAtChunk(0,-2));
         assertEquals(4,lod.levelAtChunk(-1,-1));
     }

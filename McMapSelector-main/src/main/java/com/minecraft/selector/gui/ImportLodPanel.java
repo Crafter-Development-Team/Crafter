@@ -18,12 +18,14 @@ public final class ImportLodPanel extends JPanel {
 
     public ImportLodPanel(Consumer<ImportLod> listener) {
         this.listener=listener;
-        // Horizontal wrapping strip for the Map Preview top bar (not a tall left sidebar).
-        setLayout(new FlowLayout(FlowLayout.LEFT, 8, 4));
+        // Horizontal wrapping strip for the Map Preview top bar: WrapLayout reports real multi-row height.
+        setLayout(new WrapLayout(FlowLayout.LEFT, 8, 4));
         setOpaque(false);
         setAlignmentX(Component.LEFT_ALIGNMENT);
-        // Stretch to CollapsiblePanel width so FlowLayout can wrap instead of a single tall column.
+        // Stretch to CollapsiblePanel width so WrapLayout can wrap cleanly without clipping rows.
         setMaximumSize(new Dimension(Integer.MAX_VALUE, Integer.MAX_VALUE));
+        autoCenter.setBorder(BorderFactory.createEmptyBorder(0, 2, 0, 5));
+        effectiveCenter.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 8));
         add(labeled(I18n.t("Max LOD"), maxLevel));
         for (int i=0;i<4;i++) {
             distances[i]=integer(8,0);
@@ -44,6 +46,8 @@ public final class ImportLodPanel extends JPanel {
         JPanel row=new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
         row.setOpaque(false);
         JLabel label=new JLabel(text);
+        // Unifont 中英混排时 FontMetrics 宽度会比末尾字形略窄 1~2px，留 3px 右内边距避免裁掉末尾字符
+        label.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 3));
         row.add(label);
         row.add(control);
         return row;
@@ -74,7 +78,15 @@ public final class ImportLodPanel extends JPanel {
         changed();
     }
 
-    public void showResolvedCenter(ImportLod resolved) { effectiveCenter.setText((Math.floorDiv(resolved.centerX,16)*16)+", "+(Math.floorDiv(resolved.centerZ,16)*16)); }
+    public void showResolvedCenter(ImportLod resolved) {
+        String text=(Math.floorDiv(resolved.centerX,16)*16)+", "+(Math.floorDiv(resolved.centerZ,16)*16);
+        if (!text.equals(effectiveCenter.getText())) {
+            effectiveCenter.setText(text);
+            effectiveCenter.revalidate();
+            revalidate();
+            repaint();
+        }
+    }
 
     /**
      * 画布中键拖动驱动：同步 spinner/checkbox 但**不回调 listener**（避免把事件打回 GUI 形成回环）。

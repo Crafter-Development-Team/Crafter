@@ -106,4 +106,16 @@ class ImportLodOverlayTest {
         assertTrue(ink(image,350+160,350,3),"center moved 2 chunks, boundary follows");
         assertFalse(ink(image,350-64,350,3),"outside the ring stays clear");
     }
+
+    @Test void zeroWidthLod0AndOuterRingsMatchWorldImporterWithoutOverwritingActiveRingColour() {
+        Function<Point,Point> screen=p->new Point(350+p.x,350+p.y);
+        // d0=0, d1=3, d2=0, d3=3: LOD0 disabled (no 1x1 box at +16), LOD2 disabled (r=3 stays LOD1 blue, not LOD2 yellow)
+        ViewOverlays overlays=overlays(new ImportLod(4,false,0,0,0,3,0,3));
+        BufferedImage image=paint(overlays,1,screen,null);
+        assertFalse(ink(image,350+16,350+8,1),"disabled LOD0 must not draw a phantom 1x1 center chunk ring");
+        // At r=3 (x = 350 + 64, y = 350 + 8), pixel colour must be LOD1 blue (85, 190, 255), not LOD2 yellow
+        int rgb=image.getRGB(350+64,350+8);
+        int r=(rgb>>16)&0xFF, b=rgb&0xFF;
+        assertTrue(b>r,"r=3 boundary must keep LOD1 blue rather than being overwritten by zero-width LOD2");
+    }
 }

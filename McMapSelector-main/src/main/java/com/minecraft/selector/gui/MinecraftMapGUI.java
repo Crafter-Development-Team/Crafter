@@ -1234,8 +1234,10 @@ public class MinecraftMapGUI extends JFrame {
         add(new LoadingOverlayPane(mapPanel,loadingPanel), BorderLayout.CENTER);
 
         // 底部状态栏
-        JPanel statusPanel = new JPanel(new BorderLayout());
+        JPanel statusPanel = new JPanel(new BorderLayout(12, 0));
         JPanel leftStatusPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
+        progressLabel.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 4));
+        ybandLabel.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 6));
         leftStatusPanel.add(statusIndicator);
         leftStatusPanel.add(progressLabel);
         leftStatusPanel.add(ybandLabel);
@@ -1373,7 +1375,7 @@ public class MinecraftMapGUI extends JFrame {
     }
 
     private JPanel createToolbar() {
-        JPanel bar = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 2));
+        JPanel bar = new JPanel(new WrapLayout(FlowLayout.LEFT, 6, 3));
         bar.setBorder(BorderFactory.createCompoundBorder(
             BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(200, 200, 200)),
             BorderFactory.createEmptyBorder(2, 6, 2, 6)
@@ -1381,9 +1383,9 @@ public class MinecraftMapGUI extends JFrame {
         bar.setBackground(new Color(245, 245, 245));
 
         // ── Dimension ──
-        bar.add(new JLabel(I18n.t("Dimension:")));
+        bar.add(paddedToolbarLabel(I18n.t("Dimension:")));
         bar.add(dimensionDropdown);
-        bar.add(new JLabel(I18n.t("Preview quality:")));
+        bar.add(paddedToolbarLabel(I18n.t("Preview quality:")));
         bar.add(lodDropdown);
         bar.add(new JSeparator(SwingConstants.VERTICAL));
 
@@ -1393,9 +1395,9 @@ public class MinecraftMapGUI extends JFrame {
         bar.add(new JSeparator(SwingConstants.VERTICAL));
 
         // ── 坐标跳转 ──
-        bar.add(new JLabel(I18n.t("X:")));
+        bar.add(paddedToolbarLabel(I18n.t("X:")));
         bar.add(xCoordEntry);
-        bar.add(new JLabel(I18n.t("Z:")));
+        bar.add(paddedToolbarLabel(I18n.t("Z:")));
         bar.add(zCoordEntry);
         JButton gotoBtn = new JButton(I18n.t("Jump"));
         gotoBtn.addActionListener(e -> gotoCoords());
@@ -1404,11 +1406,20 @@ public class MinecraftMapGUI extends JFrame {
         bar.add(new JSeparator(SwingConstants.VERTICAL));
 
         // ── 信息 ──
+        saveInfoLabel.setBorder(BorderFactory.createEmptyBorder(0, 2, 0, 8));
+        playerPosLabel.setBorder(BorderFactory.createEmptyBorder(0, 2, 0, 8));
+        regionLabel.setBorder(BorderFactory.createEmptyBorder(0, 2, 0, 4));
         bar.add(saveInfoLabel);
         bar.add(playerPosLabel);
         bar.add(regionLabel);
 
         return bar;
+    }
+
+    private static JLabel paddedToolbarLabel(String text) {
+        JLabel label = new JLabel(text);
+        label.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 3));
+        return label;
     }
 
     private JPanel createControlPanel() {

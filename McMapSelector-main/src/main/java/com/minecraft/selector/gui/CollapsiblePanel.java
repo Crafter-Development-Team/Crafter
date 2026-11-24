@@ -39,19 +39,21 @@ public class CollapsiblePanel extends JPanel {
         setLayout(new BorderLayout());
         setOpaque(false);
         
-        // 创建头部面板
-        headerPanel = new JPanel(new BorderLayout());
-        headerPanel.setBackground(new Color(borderColor.getRed(), borderColor.getGreen(), borderColor.getBlue(), 30));
+        // 创建头部面板（使用不透明混色，避免半透明 opaque JPanel 在局部重绘时叠字残影）
+        headerPanel = new JPanel(new BorderLayout(6, 0));
+        headerPanel.setOpaque(true);
+        headerPanel.setBackground(solidTint(borderColor, 30));
         headerPanel.setBorder(BorderFactory.createCompoundBorder(
             BorderFactory.createLineBorder(borderColor, 1, true),
             new EmptyBorder(6, 10, 6, 10)
         ));
         headerPanel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         
-        // 标题标签
+        // 标题标签（右侧留 4px 余量，避免 Unifont 合成粗体裁掉末尾字母右缘）
         titleLabel = new JLabel(title);
         titleLabel.setFont(Fonts.ui(12f, Font.BOLD));
         titleLabel.setForeground(borderColor.darker());
+        titleLabel.setBorder(new EmptyBorder(0, 0, 0, 4));
         
         // 箭头标签
         arrowLabel = new JLabel(collapsed ? "▶" : "▼");
@@ -70,12 +72,12 @@ public class CollapsiblePanel extends JPanel {
             
             @Override
             public void mouseEntered(MouseEvent e) {
-                headerPanel.setBackground(new Color(borderColor.getRed(), borderColor.getGreen(), borderColor.getBlue(), 50));
+                headerPanel.setBackground(solidTint(borderColor, 50));
             }
             
             @Override
             public void mouseExited(MouseEvent e) {
-                headerPanel.setBackground(new Color(borderColor.getRed(), borderColor.getGreen(), borderColor.getBlue(), 30));
+                headerPanel.setBackground(solidTint(borderColor, 30));
             }
         };
         
@@ -83,14 +85,15 @@ public class CollapsiblePanel extends JPanel {
         titleLabel.addMouseListener(clickListener);
         arrowLabel.addMouseListener(clickListener);
         
-        // 创建内容面板
+        // 创建内容面板（同样使用实色混合背景，防止内部标签动态改字时旧像素透出重叠）
         contentPanel = new JPanel();
+        contentPanel.setOpaque(true);
         contentPanel.setLayout(new BoxLayout(contentPanel, BoxLayout.Y_AXIS));
         contentPanel.setBorder(BorderFactory.createCompoundBorder(
             BorderFactory.createMatteBorder(0, 1, 1, 1, borderColor),
             new EmptyBorder(8, 10, 8, 10)
         ));
-        contentPanel.setBackground(new Color(borderColor.getRed(), borderColor.getGreen(), borderColor.getBlue(), 10));
+        contentPanel.setBackground(solidTint(borderColor, 12));
         
         // 添加组件
         add(headerPanel, BorderLayout.NORTH);
@@ -100,6 +103,19 @@ public class CollapsiblePanel extends JPanel {
         contentPanel.setVisible(!collapsed);
     }
     
+    @Override
+    public Dimension getPreferredSize() {
+        if (!collapsed && contentPanel != null) {
+            // BoxLayout caches child heights until invalidated; clear it so width-dependent
+            // children (such as WrapLayout) always report height for the parent's current width.
+            for (Component child : contentPanel.getComponents()) {
+                child.invalidate();
+            }
+            contentPanel.invalidate();
+        }
+        return super.getPreferredSize();
+    }
+
     /**
      * 切换折叠状态
      */
@@ -158,5 +174,21 @@ public class CollapsiblePanel extends JPanel {
         if (spacing > 0) {
             contentPanel.add(Box.createVerticalStrut(spacing));
         }
+    }
+
+    /**
+     * 将色调按给定 alpha 与当前主题面板底色做实色混合（返回 alpha=255 的不透明颜色）。
+     * Swing 中 isOpaque()=true 的面板若直接设置半透明背景色，局部重绘时不会擦除旧像素，导致文字重叠残影。
+     */
+    private static Color solidTint(Color tint, int alpha) {
+        Color base = UIManager.getColor("Panel.background");
+        if (base == null) {
+            base = Color.WHITE;
+        }
+        int a = Math.max(0, Math.min(255, alpha));
+        int r = (tint.getRed() * a + base.getRed() * (255 - a)) / 255;
+        int g = (tint.getGreen() * a + base.getGreen() * (255 - a)) / 255;
+        int b = (tint.getBlue() * a + base.getBlue() * (255 - a)) / 255;
+        return new Color(r, g, b);
     }
 }

@@ -38,7 +38,9 @@ public final class ViewOverlays {
         if(hud&&width>250&&height>140)badge(g,hudText,8,height-12);
         if(selection!=null) {
             Point a=screen.apply(new Point(selection.minX,selection.minZ)),b=screen.apply(new Point(selection.maxX,selection.maxZ));
-            int x=Math.max(4,Math.min(width-150,a.x+5)),y=Math.max(20,Math.min(height-65,a.y-6));
+            int x=Math.max(8,Math.min(width-165,a.x+6));
+            int preferredAbove=a.y-14;
+            int y=preferredAbove>=38?preferredAbove:Math.min(height-45,Math.max(38,a.y+24));
             String label=I18n.t("Import Y: %d … %d", minY, maxY);badge(g,label,x,y);
             g.setColor(new Color(255,220,85));for(int i=0;i<4;i++) {int tx=a.x+(int)(((long)b.x-a.x)*i/3);g.drawLine(tx,a.y,tx,a.y-7);}
             if(posMode) {corner(g,corner1==null?a:screen.apply(corner1),new Color(255,100,120),"1");corner(g,corner2==null?b:screen.apply(corner2),new Color(100,170,255),"2");}
@@ -73,6 +75,7 @@ public final class ViewOverlays {
             g.setRenderingHint(RenderingHints.KEY_ANTIALIASING,RenderingHints.VALUE_ANTIALIAS_ON);
             g.setStroke(new BasicStroke(2f));
             for(int level=0;level<lod.maxLevel;level++) {
+                if(!lod.hasRingBoundary(level)) continue;
                 long radius=lod.radiusChunks(level);
                 // 荒谬的半径（整屏都在圆内）画不出有意义的边界，跳过。
                 if(radius>4_000_000L) continue;
@@ -88,55 +91,75 @@ public final class ViewOverlays {
             g.fillRect(center.x-1,center.y-6,2,13);
             if(width>240&&height>180) {
                 String title=I18n.t("Import LOD · center chunk %d, %d", Math.floorDiv(lod.centerX,16), Math.floorDiv(lod.centerZ,16));
-                int legendWidth=g.getFontMetrics().stringWidth(title)+12;
+                int legendWidth=g.getFontMetrics().stringWidth(title)+14;
                 for(int level=0;level<=lod.maxLevel;level++) {
-                    String range=level==lod.maxLevel?I18n.t("> %d", lod.radiusChunks(level-1)):I18n.t("≤ %d", lod.radiusChunks(level));
-                    legendWidth=Math.max(legendWidth,g.getFontMetrics().stringWidth(I18n.t("LOD%d %s chunks", level, range))+28);
+                    String line=legendLine(lod,level);
+                    legendWidth=Math.max(legendWidth,g.getFontMetrics().stringWidth(line)+30);
                 }
-                // DynamicMapCanvas already paints tile status in the upper left.
+                // DynamicMapCanvas paints tile status in the upper left; MinimapInset occupies
+                // (width-190, 12, 178, 130) in the upper right when minimap is enabled.
                 int legendX=Math.max(12,width-legendWidth-12);
-                badge(g,title,legendX,22);
-                for(int level=0;level<=lod.maxLevel;level++) {
-                    String range=level==lod.maxLevel?I18n.t("> %d", lod.radiusChunks(level-1)):I18n.t("≤ %d", lod.radiusChunks(level));
-                    int y=44+level*22;
-                    badge(g,I18n.t("LOD%d %s chunks", level, range),legendX+14,y);
-                    g.setColor(LOD_COLORS[level]);g.fillRect(legendX,y-10,9,9);
+                int titleY=(minimap && width>=250 && height>=180) ? 166 : 22;
+                if(titleY + (lod.maxLevel+1)*23 < height-8) {
+                    badge(g,title,legendX,titleY);
+                    for(int level=0;level<=lod.maxLevel;level++) {
+                        boolean active=lod.hasChunksAtLevel(level);
+                        String line=legendLine(lod,level);
+                        int y=titleY+23+level*23;
+                        badge(g,line,legendX+14,y,active?Color.WHITE:new Color(165,170,180));
+                        Color swatch=LOD_COLORS[level];
+                        g.setColor(active?swatch:new Color(swatch.getRed(),swatch.getGreen(),swatch.getBlue(),90));
+                        g.fillRect(legendX,y-10,9,9);
+                    }
                 }
             }
         } finally {g.dispose();}
     }
-    private static void badge(Graphics2D g,String text,int x,int y) {g.setColor(new Color(0,0,0,190));g.fillRoundRect(x-3,y-15,g.getFontMetrics().stringWidth(text)+9,21,5,5);g.setColor(Color.WHITE);g.drawString(text,x,y);}
+    private static String legendLine(ImportLod lod,int level) {
+        if(!lod.hasChunksAtLevel(level)) {
+            return I18n.t("LOD%d (%s)", level, I18n.t("Off"));
+        }
+        String range=level==lod.maxLevel?I18n.t("> %d", lod.radiusChunks(level-1)):I18n.t("≤ %d", lod.radiusChunks(level));
+        return I18n.t("LOD%d %s chunks", level, range);
+    }
+    private static void badge(Graphics2D g,String text,int x,int y) {badge(g,text,x,y,Color.WHITE);}
+    private static void badge(Graphics2D g,String text,int x,int y,Color textColor) {g.setColor(new Color(0,0,0,190));g.fillRoundRect(x-3,y-15,g.getFontMetrics().stringWidth(text)+11,21,5,5);g.setColor(textColor);g.drawString(text,x,y);}
 
     /**
      * 半径为 r 个区块的 LOD 边界的"阶梯圆"路径 —— 与 WorldImporter 的判定完全一致的形状。
      *
      * <p>C++ 判定 {@code dx*dx + dz*dz <= r*r}（dx/dz 为区块索引差），所以包含的是<b>整块区块</b>：
      * 第 dz 行包含区块 |dx| &lt;= half(dz)，外边界因此落在 {@code (centerChunkX+half+1)*16} 方块的阶梯上，
-     * 而不是光滑圆弧。
-     *
-     * <p>路径顺序：右侧自上而下 → 底部横线 → 左侧自下而上 → 顶部横线（closePath 补上）。
-     * 相邻两行 x 不同时，下一行首个 lineTo 会自然补出水平台阶。
+     * 而不是光滑圆弧。合并相邻相同 half 的行，避免逐区块截断造成的锯齿抖动。
      */
     private static java.awt.geom.Path2D.Double chunkRingPath(Function<Point,Point> screen,
             int centerChunkX,int centerChunkZ,int r,int fromZ,int toZ) {
         java.awt.geom.Path2D.Double path=new java.awt.geom.Path2D.Double();
-        // 右侧：自上而下，每行画一条竖边（到下一行的 lineTo 自动形成台阶）
-        for(int cz=fromZ;cz<=toZ;cz++) {
+        // 右侧：自上而下，把连续相同 half 的行合并为一条竖直边
+        int cz=fromZ;
+        while(cz<=toZ) {
             int half=ImportLod.chunkRingHalfWidth(r,cz-centerChunkZ);
-            if(half<0) continue;
+            if(half<0) { cz++; continue; }
+            int endCz=cz;
+            while(endCz+1<=toZ && ImportLod.chunkRingHalfWidth(r,(endCz+1)-centerChunkZ)==half) endCz++;
             int x=(centerChunkX+half+1)*16;
-            Point top=screen.apply(new Point(x,cz*16)), bottom=screen.apply(new Point(x,(cz+1)*16));
+            Point top=screen.apply(new Point(x,cz*16)), bottom=screen.apply(new Point(x,(endCz+1)*16));
             if(path.getCurrentPoint()==null) path.moveTo(top.x,top.y); else path.lineTo(top.x,top.y);
             path.lineTo(bottom.x,bottom.y);
+            cz=endCz+1;
         }
-        // 左侧：自下而上，镜像
-        for(int cz=toZ;cz>=fromZ;cz--) {
+        // 左侧：自下而上，镜像合并连续相同 half 的行
+        cz=toZ;
+        while(cz>=fromZ) {
             int half=ImportLod.chunkRingHalfWidth(r,cz-centerChunkZ);
-            if(half<0) continue;
+            if(half<0) { cz--; continue; }
+            int startCz=cz;
+            while(startCz-1>=fromZ && ImportLod.chunkRingHalfWidth(r,(startCz-1)-centerChunkZ)==half) startCz--;
             int x=(centerChunkX-half)*16;
-            Point bottom=screen.apply(new Point(x,(cz+1)*16)), top=screen.apply(new Point(x,cz*16));
+            Point bottom=screen.apply(new Point(x,(cz+1)*16)), top=screen.apply(new Point(x,startCz*16));
             path.lineTo(bottom.x,bottom.y);
             path.lineTo(top.x,top.y);
+            cz=startCz-1;
         }
         path.closePath();
         return path;
