@@ -198,6 +198,8 @@ public class DynamicRegionManager {
         /** Settled includes failures; failed files must not leave the progress UI hanging. */
         default void onViewportProgress(int settled,int total,int failed) {}
         default void onViewportProgress(long revision,int settled,int total,int failed) {onViewportProgress(settled,total,failed);}
+        /** 区域全高度列缓存就绪后通知真实方块高度极值，供 GUI 自动扩展破限高世界的 Y 轴范围。 */
+        default void onRegionHeightBounds(int minBlockY, int maxBlockY) {}
     }
     
     public DynamicRegionManager(String savePath) {
@@ -408,6 +410,7 @@ public class DynamicRegionManager {
                 }
                 if (cache == null) return;   // 洞穴视图：不缓存
                 synchronized (bandCaches) { bandCaches.put(key, new CacheEntry(cache, palette)); }
+                if (cache.hasBlocks()) notifyRegionHeightBounds(cache.minBlockY(), cache.maxBlockY());
                 logManager.info("Y 带缓存就绪: " + file.getName() + "（换带可实时）", "DynamicRegionManager");
                 // 这块瓦片原本可能是读盘渲染的（没有兴趣带掩码）：立刻用缓存重渲一次
                 Point coord = regionCoordOf(file);
@@ -700,6 +703,25 @@ public class DynamicRegionManager {
      */
     public RegionTile peekLoadedRegion(Point regionCoord) {
         return loadedRegions.get(regionCoord);
+    }
+
+    /** 获取该区域当前调色板匹配的未裁剪列缓存（若尚未构建完成则返回 null）。 */
+    public ColumnCache getCachedColumns(Point regionCoord) {
+        if (regionCoord == null) return null;
+        final String key = regionFile(regionCoord).getAbsolutePath();
+        CacheEntry entry;
+        synchronized (bandCaches) { entry = bandCaches.get(key); }
+        return entry != null && entry.palette == BlockColors.snapshot() ? entry.cache : null;
+    }
+
+    private void notifyRegionHeightBounds(int minBlockY, int maxBlockY) {
+        for (RegionLoadListener listener : listeners) {
+            try {
+                listener.onRegionHeightBounds(minBlockY, maxBlockY);
+            } catch (Exception e) {
+                logManager.error("区域高度边界监听器出错", "DynamicRegionManager", e);
+            }
+        }
     }
 
     /**

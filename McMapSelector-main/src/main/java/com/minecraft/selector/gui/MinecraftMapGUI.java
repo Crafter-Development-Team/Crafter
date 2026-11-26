@@ -91,6 +91,50 @@ public class MinecraftMapGUI extends JFrame {
 
 
     private StyledComponents.VerticalRangeSlider heightRangeSlider;
+    private JTextField maxYEntry;
+    private JTextField minYEntry;
+    private boolean syncingYFields;
+
+    private void expandImportYAxis(int minBlockY, int maxBlockY) {
+        if (heightRangeSlider == null || minBlockY > maxBlockY) return;
+        int paddedMin = (int) Math.max((long) Integer.MIN_VALUE, (long) minBlockY - 64L);
+        int paddedMax = (int) Math.min((long) Integer.MAX_VALUE, (long) maxBlockY + 64L);
+        heightRangeSlider.expandRange(paddedMin, paddedMax);
+    }
+
+    private void syncImportYFields() {
+        if (syncingYFields || heightRangeSlider == null) return;
+        syncingYFields = true;
+        try {
+            if (maxYEntry != null) {
+                String upper = Integer.toString(heightRangeSlider.getUpperValue());
+                if (!upper.equals(maxYEntry.getText())) maxYEntry.setText(upper);
+            }
+            if (minYEntry != null) {
+                String lower = Integer.toString(heightRangeSlider.getLowerValue());
+                if (!lower.equals(minYEntry.getText())) minYEntry.setText(lower);
+            }
+        } finally {
+            syncingYFields = false;
+        }
+    }
+
+    private void commitImportYFields() {
+        if (syncingYFields || heightRangeSlider == null || minYEntry == null || maxYEntry == null) return;
+        final int lower, upper;
+        try {
+            int a = Integer.parseInt(minYEntry.getText().trim());
+            int b = Integer.parseInt(maxYEntry.getText().trim());
+            lower = Math.min(a, b);
+            upper = Math.max(a, b);
+        } catch (NumberFormatException ex) {
+            syncImportYFields();
+            return;
+        }
+        expandImportYAxis(lower, upper);
+        heightRangeSlider.setSelectedRange(lower, upper);
+        syncImportYFields();
+    }
     private JComboBox<String> lodDropdown;
     private ImportLodPanel importLodPanel;
     private JCheckBoxMenuItem importLodOverlayItem;
@@ -446,6 +490,7 @@ public class MinecraftMapGUI extends JFrame {
                         synchronized (columnCaches) {
                             columnCaches.put(path, new ColumnCacheEntry(cache, buildPalette));
                         }
+                        if (cache.hasBlocks()) expandImportYAxis(cache.minBlockY(), cache.maxBlockY());
                     });
                 }
                 long millis = System.currentTimeMillis() - start;
@@ -510,6 +555,7 @@ public class MinecraftMapGUI extends JFrame {
         synchronized (columnCaches) {
             columnCaches.put(path, new ColumnCacheEntry(cache, palette));
         }
+        if (cache != null && cache.hasBlocks()) onEdt(() -> expandImportYAxis(cache.minBlockY(), cache.maxBlockY()));
     }
 
     /**
@@ -701,7 +747,7 @@ public class MinecraftMapGUI extends JFrame {
     private String jarFilePath = null;
     private boolean isBlenderMode = false;
     private int blenderMinY = -64;
-    private int blenderMaxY = 365;
+    private int blenderMaxY = 319;
 
     // 多线程渲染优化
     private ExecutorService renderingExecutor;
@@ -716,11 +762,11 @@ public class MinecraftMapGUI extends JFrame {
     private LoadingAnimationPanel.StatusIndicator statusIndicator;
     
     public MinecraftMapGUI() {
-        this(null, null, null, -64, 365);
+        this(null, null, null, -64, 319);
     }
 
     public MinecraftMapGUI(String worldPath, String outputFile) {
-        this(worldPath, outputFile, null, -64, 365);
+        this(worldPath, outputFile, null, -64, 319);
     }
 
     public MinecraftMapGUI(String worldPath, String outputFile, int minY, int maxY) {
@@ -885,6 +931,19 @@ public class MinecraftMapGUI extends JFrame {
         int axisMin = Math.min(blenderMinY, -64) - 64;
         int axisMax = Math.max(blenderMaxY, 320) + 64;
         heightRangeSlider = new StyledComponents.VerticalRangeSlider(axisMin, axisMax, blenderMinY, blenderMaxY);
+        maxYEntry = new JTextField(Integer.toString(heightRangeSlider.getUpperValue()), 5);
+        minYEntry = new JTextField(Integer.toString(heightRangeSlider.getLowerValue()), 5);
+        maxYEntry.setFont(Fonts.ui(12f, Font.PLAIN));
+        minYEntry.setFont(Fonts.ui(12f, Font.PLAIN));
+        maxYEntry.setHorizontalAlignment(JTextField.RIGHT);
+        minYEntry.setHorizontalAlignment(JTextField.RIGHT);
+        java.awt.event.FocusAdapter yFocusCommit = new java.awt.event.FocusAdapter() {
+            @Override public void focusLost(java.awt.event.FocusEvent e) { commitImportYFields(); }
+        };
+        maxYEntry.addActionListener(e -> commitImportYFields());
+        minYEntry.addActionListener(e -> commitImportYFields());
+        maxYEntry.addFocusListener(yFocusCommit);
+        minYEntry.addFocusListener(yFocusCommit);
         // 拖动中：动态视口模式换带 = 已加载瓦片就地重合成；静态画布走层缓存/临时裁剪
         heightRangeSlider.addLiveListener(e -> {
             updateSelectionStats();
@@ -1128,6 +1187,7 @@ public class MinecraftMapGUI extends JFrame {
         showMapLoadingDelayed(request,I18n.t("Loading visible map regions..."));
         manager.addRegionLoadListener(new DynamicRegionManager.RegionLoadListener() {
             public void onRegionLoaded(Point point,DynamicRegionManager.RegionTile tile) {onEdt(()->{if(request==viewGeneration&&manager==dynamicRegionManager) updateSelectionStats();});}
+            public void onRegionHeightBounds(int minBlockY,int maxBlockY) {onEdt(()->{if(request==viewGeneration&&manager==dynamicRegionManager) expandImportYAxis(minBlockY,maxBlockY);});}
             public void onRegionUnloaded(Point point) {}
             public void onLoadingStarted(Point point) {}
             public void onLoadingFailed(Point point,Exception error) {
@@ -1209,11 +1269,26 @@ public class MinecraftMapGUI extends JFrame {
             if (isDynamicMode) dynamicBandUpdate();
             else if (!resurfaceFromCache(false)) heightDebounce.restart();
         });
+        JPanel topYRow = new JPanel(new BorderLayout(4, 0));
+        JLabel topYLabel = new JLabel(I18n.t("Top Y:"));
+        topYLabel.setFont(Fonts.ui(12f, Font.PLAIN));
+        topYRow.add(topYLabel, BorderLayout.WEST);
+        topYRow.add(maxYEntry, BorderLayout.CENTER);
+
+        JPanel bottomYRow = new JPanel(new BorderLayout(4, 0));
+        bottomYRow.setBorder(BorderFactory.createEmptyBorder(2, 0, 0, 0));
+        JLabel bottomYLabel = new JLabel(I18n.t("Bottom Y:"));
+        bottomYLabel.setFont(Fonts.ui(12f, Font.PLAIN));
+        bottomYRow.add(bottomYLabel, BorderLayout.WEST);
+        bottomYRow.add(minYEntry, BorderLayout.CENTER);
+
         JPanel importYHead = new JPanel(new java.awt.GridLayout(0, 1, 2, 2));
         importYHead.add(highlightCheckbox);
         importYHead.add(importYHint);
+        importYHead.add(topYRow);
         importYPanel.add(importYHead, BorderLayout.NORTH);
         importYPanel.add(heightRangeSlider, BorderLayout.CENTER);
+        importYPanel.add(bottomYRow, BorderLayout.SOUTH);
         mapPanel.add(importYPanel, BorderLayout.EAST);
         importLodPanel=new ImportLodPanel(this::importLodChanged);
         importLodPanel.showResolvedCenter(resolvedImportLod(null));
@@ -2413,6 +2488,7 @@ displayedTop=null;displayedBottom=null;sourceTop=null;sourceBottom=null;previewC
     }
     private void updateSelectionStats() {
         if(mapCanvas==null||heightRangeSlider==null) return;
+        syncImportYFields();
         overlays.minY=heightRangeSlider.getLowerValue();overlays.maxY=heightRangeSlider.getUpperValue();repaintCanvases();
         SelectionMath.Bounds b=activeCanvas().getSelectionBounds();
         if(importLodPanel!=null) importLodPanel.showResolvedCenter(resolvedImportLod(b));
@@ -2434,6 +2510,43 @@ displayedTop=null;displayedBottom=null;sourceTop=null;sourceBottom=null;previewC
         if (importLodPanel != null) importLodPanel.applyDraggedCenter(next.centerX, next.centerZ);
         repaintCanvases();
     }
+    private SelectionYFit.Result fitUnclippedSelectionY(SelectionCanvas canvas, SelectionMath.Bounds b, boolean opaque) {
+        if (isDynamicMode && dynamicRegionManager != null) {
+            SelectionYFit.Result result = new SelectionYFit.Result();
+            for (Map.Entry<Point, DynamicRegionManager.RegionTile> e : dynamicRegionManager.getAllLoadedRegions().entrySet()) {
+                Point coord = e.getKey();
+                int originX = SelectionMath.clamp((long) coord.x * 512L);
+                int originZ = SelectionMath.clamp((long) coord.y * 512L);
+                ColumnCache cache = dynamicRegionManager.getCachedColumns(coord);
+                if (cache != null) result.merge(cache.scanUnclipped(originX, originZ, b));
+                else result.merge(SelectionYFit.scan(e.getValue().getImage(), originX, originZ, 1, b, opaque));
+            }
+            return result;
+        }
+        ViewRecipe recipe = lastView;
+        if (!isDynamicMode && recipe != null && recipe.sampleInterval == 1) {
+            BlockColors.Palette current = BlockColors.snapshot();
+            ColumnCache[] caches = new ColumnCache[recipe.paths.length];
+            boolean allReady = true;
+            synchronized (columnCaches) {
+                for (int i = 0; i < recipe.paths.length; i++) {
+                    ColumnCacheEntry entry = columnCaches.get(recipe.paths[i]);
+                    if (entry == null || entry.palette != current) { allReady = false; break; }
+                    caches[i] = entry.cache;
+                }
+            }
+            if (allReady) {
+                SelectionYFit.Result result = new SelectionYFit.Result();
+                for (int i = 0; i < caches.length; i++) {
+                    int originX = SelectionMath.clamp((long) recipe.regionX[i] * 512L);
+                    int originZ = SelectionMath.clamp((long) recipe.regionZ[i] * 512L);
+                    result.merge(caches[i].scanUnclipped(originX, originZ, b));
+                }
+                return result;
+            }
+        }
+        return canvas.fitSelectionY(b, opaque);
+    }
     private void autoFitImportY() {autoFitImportY(false);}
     private void autoFitImportY(boolean opaque) {
         final SelectionCanvas canvas=activeCanvas();final SelectionMath.Bounds b=canvas.getSelectionBounds();
@@ -2441,13 +2554,14 @@ displayedTop=null;displayedBottom=null;sourceTop=null;sourceBottom=null;previewC
         final long generation=viewGeneration;
         progressLabel.setText(I18n.t("Fitting Import Y from cached selection heights…"));
         new SwingWorker<SelectionYFit.Result,Void>() {
-            @Override protected SelectionYFit.Result doInBackground() {return canvas.fitSelectionY(b,opaque);}
+            @Override protected SelectionYFit.Result doInBackground() {return fitUnclippedSelectionY(canvas,b,opaque);}
             @Override protected void done() {
                 if(generation!=viewGeneration||canvas!=activeCanvas()||!b.equals(canvas.getSelectionBounds())) return;
                 try {
                     SelectionYFit.Result r=get();
                     if(r.count==0) {progressLabel.setText(I18n.t("No cached heights in selection; Import Y unchanged"));return;}
                     // Apply both fitted ends atomically; do not truncate extended-world heights.
+                    expandImportYAxis(r.min,r.max);
                     heightRangeSlider.setSelectedRange(r.min,r.max);
                     progressLabel.setText(I18n.t("Import Y fit: %d…%d (%d cached samples; %d empty, %d missing samples; unloaded columns ignored)",
                         heightRangeSlider.getLowerValue(), heightRangeSlider.getUpperValue(), r.count, r.empty, r.missing));
@@ -2459,12 +2573,18 @@ displayedTop=null;displayedBottom=null;sourceTop=null;sourceBottom=null;previewC
         }.execute();
     }
     private void editSelectionBounds() {
+        commitImportYFields();
         final SelectionCanvas canvas=activeCanvas();final long generation=viewGeneration;
         JDialog dialog=new JDialog(this,I18n.t("Selection bounds (inclusive)"),false);
-        dialog.setContentPane(new SelectionBoundsPanel(canvas.getSelectionBounds(),b->{
-            if(canvas!=activeCanvas()||generation!=viewGeneration) {dialog.dispose();return;}
-            canvas.setSelectionBounds(b);progressLabel.setText(I18n.t("Selection updated: %s", canvas.getSelectionBounds()));
-        }));
+        dialog.setContentPane(new SelectionBoundsPanel(canvas.getSelectionBounds(),
+            heightRangeSlider.getLowerValue(),heightRangeSlider.getUpperValue(),(b,yRange)->{
+                if(canvas!=activeCanvas()||generation!=viewGeneration) {dialog.dispose();return;}
+                expandImportYAxis(yRange[0],yRange[1]);
+                heightRangeSlider.setSelectedRange(yRange[0],yRange[1]);
+                syncImportYFields();
+                canvas.setSelectionBounds(b);
+                progressLabel.setText(I18n.t("Selection updated: %s", ClipboardCoords.selection(canvas.getSelectionBounds(),yRange[0],yRange[1])));
+            }));
         dialog.pack();dialog.setLocationRelativeTo(this);dialog.setVisible(true);
     }
     private void copyCoordinates() {
@@ -2496,6 +2616,7 @@ displayedTop=null;displayedBottom=null;sourceTop=null;sourceBottom=null;previewC
         } else jumpTo(anchor.xz);
     }
     private void handleSelectionConfirmation(SelectionMath.Bounds b) {
+        commitImportYFields();
         if(confirmationOpen) return;
         confirmationOpen=true;
         try {
@@ -2519,7 +2640,7 @@ displayedTop=null;displayedBottom=null;sourceTop=null;sourceBottom=null;previewC
         } finally {confirmationOpen=false;updateSelectionStats();}
     }
 
-    private void confirmSelection() {activeCanvas().confirmCurrentSelection();}
+    private void confirmSelection() {commitImportYFields();activeCanvas().confirmCurrentSelection();}
 
     /**
      * 切换自动加载模式

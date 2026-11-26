@@ -703,6 +703,8 @@ public class StyledComponents {
         }
 
         // ── 取值 ──
+        public int getMinValue() { return minValue; }
+        public int getMaxValue() { return maxValue; }
         public int getLowerValue() { return lowerValue; }
         public int getUpperValue() { return upperValue; }
         public int getHighlightValue() { return highlightValue; }
@@ -760,6 +762,17 @@ public class StyledComponents {
             if(changed) fireChangeEvent();
         }
 
+        /** 只扩大坐标轴模型范围，不收缩、也不改变当前选中的上下限取值（发现破限高区块时用）。 */
+        public void expandRange(int min, int max) {
+            int nextMin = Math.min(minValue, min);
+            int nextMax = Math.max(maxValue, max);
+            if (nextMax <= nextMin) return;
+            if (nextMin == minValue && nextMax == maxValue) return;
+            minValue = nextMin;
+            maxValue = nextMax;
+            repaint();
+        }
+
         /** 扩大/移动坐标轴模型范围（不是取值）。 */
         public void setRange(int min, int max) {
             if (max <= min) return;
@@ -802,10 +815,15 @@ public class StyledComponents {
                                   Math.max(1, upperY - highlightY), TRACK_WIDTH, TRACK_WIDTH);
             }
 
-            // 每 64 一格刻度
+            // 自适应刻度步长（基础 64 格，超大高度轴自动倍增步长，避免密集绘制或溢出）
+            long rangeSpan = Math.max(1L, (long) maxValue - minValue);
+            long tickStep = 64L;
+            while (rangeSpan / tickStep > 48L) tickStep *= 2L;
+            long firstTick = ((long) minValue / tickStep) * tickStep;
+            if (firstTick < minValue) firstTick += tickStep;
             g2d.setColor(new Color(255, 255, 255, 140));
-            for (int value = minValue; value <= maxValue; value += 64) {
-                int tickY = valueToY(value);
+            for (long value = firstTick; value <= maxValue; value += tickStep) {
+                int tickY = valueToY((int) value);
                 g2d.drawLine(x, tickY, x + TRACK_WIDTH, tickY);
             }
 

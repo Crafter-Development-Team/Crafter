@@ -250,4 +250,32 @@ class ColumnCacheTest {
             }
         }
     }
+
+    @Test void unclippedScanFinds900PlusTallStructureEvenWhenInitialBandIs319() throws Exception {
+        HeightmapTest h = new HeightmapTest(); h.directory = directory;
+        NBTCompound ground = h.section(4, true, PALETTE, i -> (i / 256 == 0) ? 1 : 0); // Y = 64
+        NBTCompound towerTop = h.section(58, true, PALETTE, i -> (i % 16 == 2 && (i / 16) % 16 == 3 && i / 256 == 4) ? 1 : 0); // Y = 932
+        Path mca = h.mca("region/r.0.0.mca", ground, towerTop);
+
+        MapRenderer renderer = new MapRenderer(1, null, MapRenderer.SurfaceMode.TOP, 319, -64);
+        MapRenderer.RegionScan scan;
+        try {
+            scan = renderer.scanRegionBlocks(mca.toString(), 1, 319, -64, true);
+        } finally {
+            renderer.shutdown();
+        }
+        assertNotNull(scan.cache);
+        assertTrue(scan.cache.hasBlocks());
+        assertEquals(64, scan.cache.minBlockY());
+        assertEquals(932, scan.cache.maxBlockY());
+
+        // Clipped tile image at bandTop=319 only sees Y=64, whereas unclipped ColumnCache sees Y=932.
+        com.minecraft.selector.gui.SelectionMath.Bounds bounds = new com.minecraft.selector.gui.SelectionMath.Bounds(0, 0, 15, 15);
+        SelectionYFit.Result clipped = SelectionYFit.scan(scan.image(), 0, 0, 1, bounds, true);
+        assertEquals(64, clipped.max);
+        SelectionYFit.Result unclipped = scan.cache.scanUnclipped(0, 0, bounds);
+        assertEquals(64, unclipped.min);
+        assertEquals(932, unclipped.max);
+        assertEquals(256, unclipped.count);
+    }
 }

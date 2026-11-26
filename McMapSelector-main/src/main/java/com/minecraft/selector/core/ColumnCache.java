@@ -22,6 +22,8 @@ public final class ColumnCache {
     private final java.util.BitSet loaded;
     private final PreviewOptions preview;
     private final String renderKey;
+    private final int minBlockY;
+    private final int maxBlockY;
 
     ColumnCache(int size, int[] offsets, int[] runTopY, int[] runBottomY, int[] runArgb, String[] runId, java.util.BitSet loaded, PreviewOptions preview, String renderKey) {
         this.size = size;
@@ -32,10 +34,55 @@ public final class ColumnCache {
         this.runId = runId;
         this.loaded=loaded;
         this.preview=preview;this.renderKey=renderKey;
+        int minY = Integer.MAX_VALUE, maxY = Integer.MIN_VALUE;
+        for (int i = 0; i < runTopY.length; i++) {
+            if (runTopY[i] > maxY) maxY = runTopY[i];
+            if (runBottomY[i] < minY) minY = runBottomY[i];
+        }
+        this.minBlockY = minY;
+        this.maxBlockY = maxY;
     }
 
     public PreviewOptions getPreviewOptions() {return preview;}
     public int getSize() { return size; }
+    public boolean hasBlocks() { return runTopY.length > 0; }
+    public int minBlockY() { return minBlockY; }
+    public int maxBlockY() { return maxBlockY; }
+
+    /**
+     * 在完整未裁剪列栈上扫描选区的地表顶高，使 Auto-fit Import Y 不受当前 Top Y 预览裁剪上限限制。
+     */
+    public SelectionYFit.Result scanUnclipped(int originX, int originZ, com.minecraft.selector.gui.SelectionMath.Bounds b) {
+        SelectionYFit.Result r = new SelectionYFit.Result();
+        if (b == null || (long) b.maxX < originX || (long) b.minX >= (long) originX + size
+            || (long) b.maxZ < originZ || (long) b.minZ >= (long) originZ + size) {
+            return r;
+        }
+        int x1 = (int) Math.max(0L, (long) b.minX - originX);
+        int z1 = (int) Math.max(0L, (long) b.minZ - originZ);
+        int x2 = (int) Math.min(size - 1L, (long) b.maxX - originX);
+        int z2 = (int) Math.min(size - 1L, (long) b.maxZ - originZ);
+        for (int z = z1; z <= z2; z++) {
+            if (Thread.currentThread().isInterrupted()) return r;
+            for (int x = x1; x <= x2; x++) {
+                int column = z * size + x;
+                if (!loaded.get(column)) {
+                    r.missing++;
+                    continue;
+                }
+                int from = offsets[column], to = offsets[column + 1];
+                int topY = RenderedMap.NO_HEIGHT;
+                for (int run = from; run < to; run++) {
+                    if (preview.transparentWater && PreviewOptions.water(runId[run])) continue;
+                    topY = runTopY[run];
+                    break;
+                }
+                if (topY == RenderedMap.NO_HEIGHT) r.empty++;
+                else r.add(topY);
+            }
+        }
+        return r;
+    }
 
     /**
      * 单个 region 层缓存的估计占用。512x512 列 × 约 5 段/列 ≈ 130 万段，
